@@ -1,0 +1,27 @@
+# Node
+node_modules/
+build/
+dist/
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.pid
+docker-compose.override.yml
+
+# Misc
+.idea/
+.vscode/ 
