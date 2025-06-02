@@ -1,0 +1,1449 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.gitignore
+ai_module/.gitkeep
+ai_module/app.py
+ai_module/README.md
+ai_module/requirements.txt
+backend/.gitkeep
+backend/config/config.cjs
+backend/migrations/20250602020816-create-user.js
+backend/migrations/20250602041707-create-room.js
+backend/mock_ai.py
+backend/models/index.js
+backend/models/room.js
+backend/models/user.js
+backend/package.json
+backend/README.md
+backend/src/config/db.js
+backend/src/controllers/roomController.js
+backend/src/controllers/userController.js
+backend/src/index.js
+backend/src/middleware/auth.js
+backend/src/models/room.js
+backend/src/models/user.js
+backend/src/routes/execute.js
+backend/src/routes/index.js
+backend/src/routes/room.js
+backend/src/routes/user.js
+backend/src/services/aiService.js
+backend/src/services/judge0Service.js
+backend/src/sockets/index.js
+backend/test_ai_integration.js
+database/.gitkeep
+database/README.md
+development_plan.md
+execution_guide.md
+frontend/.gitkeep
+frontend/README.md
+issues.md
+judge0/.gitkeep
+judge0/README.md
+package.json
+README.md
+techstack.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path=".gitignore">
+# Node
+node_modules/
+build/
+dist/
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+venv/
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.pid
+docker-compose.override.yml
+
+# Misc
+.idea/
+.vscode/
+</file>
+
+<file path="ai_module/.gitkeep">
+# placeholder
+</file>
+
+<file path="ai_module/app.py">
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import Optional
+
+app = FastAPI()
+
+class AnalyzeRequest(BaseModel):
+    code: str
+    language: Optional[str] = None
+    userId: Optional[int] = None
+    roomName: Optional[str] = None
+
+@app.post("/analyze")
+async def analyze(request: AnalyzeRequest):
+    # TODO: Replace this with real AI logic (e.g., call to LLM, code analysis, etc.)
+    # For now, return a dummy question if 'def' is in the code
+    if "def" in request.code:
+        return {
+            "question": "What is the time complexity of your function?",
+            "type": "complexity",
+            "context": "function"
+        }
+    return {}
+</file>
+
+<file path="ai_module/README.md">
+# AI Module
+
+Python-based service for real-time code analysis and question generation using LLMs.
+
+## Setup
+ 
+See ../../execution_guide.md for instructions.
+</file>
+
+<file path="ai_module/requirements.txt">
+fastapi
+uvicorn
+pydantic
+</file>
+
+<file path="backend/.gitkeep">
+# placeholder
+</file>
+
+<file path="backend/config/config.cjs">
+require('dotenv').config();
+
+module.exports = {
+  development: {
+    username: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    host: process.env.DB_HOST,
+    port: parseInt(process.env.DB_PORT, 10),
+    dialect: "postgres"
+  },
+  test: {
+    username: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    host: process.env.DB_HOST,
+    port: parseInt(process.env.DB_PORT, 10),
+    dialect: "postgres"
+  },
+  production: {
+    username: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
+    host: process.env.DB_HOST,
+    port: parseInt(process.env.DB_PORT, 10),
+    dialect: "postgres",
+    dialectOptions: {
+      ssl: {
+        require: true,
+        rejectUnauthorized: false 
+      }
+    }
+  }
+};
+</file>
+
+<file path="backend/migrations/20250602020816-create-user.js">
+'use strict';
+/** @type {import('sequelize-cli').Migration} */
+module.exports = {
+  async up(queryInterface, Sequelize) {
+    await queryInterface.createTable('Users', {
+      id: {
+        allowNull: false,
+        autoIncrement: true,
+        primaryKey: true,
+        type: Sequelize.INTEGER
+      },
+      username: {
+        type: Sequelize.STRING,
+        allowNull: false,
+        unique: true
+      },
+      email: {
+        type: Sequelize.STRING,
+        allowNull: false,
+        unique: true
+      },
+      password: {
+        type: Sequelize.STRING,
+        allowNull: false
+      },
+      firstName: {
+        type: Sequelize.STRING,
+        allowNull: true
+      },
+      lastName: {
+        type: Sequelize.STRING,
+        allowNull: true
+      },
+      createdAt: {
+        allowNull: false,
+        type: Sequelize.DATE
+      },
+      updatedAt: {
+        allowNull: false,
+        type: Sequelize.DATE
+      }
+    });
+  },
+  async down(queryInterface, Sequelize) {
+    await queryInterface.dropTable('Users');
+  }
+};
+</file>
+
+<file path="backend/migrations/20250602041707-create-room.js">
+'use strict';
+/** @type {import('sequelize-cli').Migration} */
+module.exports = {
+  async up(queryInterface, Sequelize) {
+    await queryInterface.createTable('Rooms', {
+      id: {
+        allowNull: false,
+        autoIncrement: true,
+        primaryKey: true,
+        type: Sequelize.INTEGER
+      },
+      name: {
+        type: Sequelize.STRING,
+        allowNull: false,
+        unique: true
+      },
+      createdBy: {
+        type: Sequelize.INTEGER,
+        allowNull: false,
+        references: {
+          model: 'Users',
+          key: 'id'
+        },
+        onUpdate: 'CASCADE',
+        onDelete: 'CASCADE'
+      },
+      isActive: {
+        type: Sequelize.BOOLEAN,
+        defaultValue: true
+      },
+      createdAt: {
+        allowNull: false,
+        type: Sequelize.DATE
+      },
+      updatedAt: {
+        allowNull: false,
+        type: Sequelize.DATE
+      }
+    });
+  },
+  async down(queryInterface, Sequelize) {
+    await queryInterface.dropTable('Rooms');
+  }
+};
+</file>
+
+<file path="backend/mock_ai.py">
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
+
+@app.route('/analyze', methods=['POST'])
+def analyze():
+    data = request.json
+    # Always return a sample question for testing
+    return jsonify({
+        "question": "What is the time complexity of your solution?",
+        "type": "complexity",
+        "context": data.get("code", "")
+    })
+
+if __name__ == '__main__':
+    app.run(port=8000)
+</file>
+
+<file path="backend/models/index.js">
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const Sequelize = require('sequelize');
+const process = require('process');
+const basename = path.basename(__filename);
+const env = process.env.NODE_ENV || 'development';
+const config = require(__dirname + '/../config/config.cjs')[env];
+const db = {};
+
+let sequelize;
+if (config.use_env_variable) {
+  sequelize = new Sequelize(process.env[config.use_env_variable], config);
+} else {
+  sequelize = new Sequelize(config.database, config.username, config.password, config);
+}
+
+fs
+  .readdirSync(__dirname)
+  .filter(file => {
+    return (
+      file.indexOf('.') !== 0 &&
+      file !== basename &&
+      file.slice(-3) === '.js' &&
+      file.indexOf('.test.js') === -1
+    );
+  })
+  .forEach(file => {
+    const model = require(path.join(__dirname, file))(sequelize, Sequelize.DataTypes);
+    db[model.name] = model;
+  });
+
+Object.keys(db).forEach(modelName => {
+  if (db[modelName].associate) {
+    db[modelName].associate(db);
+  }
+});
+
+db.sequelize = sequelize;
+db.Sequelize = Sequelize;
+
+module.exports = db;
+</file>
+
+<file path="backend/models/room.js">
+'use strict';
+const {
+  Model
+} = require('sequelize');
+module.exports = (sequelize, DataTypes) => {
+  class Room extends Model {
+    /**
+     * Helper method for defining associations.
+     * This method is not a part of Sequelize lifecycle.
+     * The `models/index` file will call this method automatically.
+     */
+    static associate(models) {
+      // define association here
+    }
+  }
+  Room.init({
+    name: DataTypes.STRING,
+    createdBy: DataTypes.INTEGER,
+    isActive: DataTypes.BOOLEAN
+  }, {
+    sequelize,
+    modelName: 'Room',
+  });
+  return Room;
+};
+</file>
+
+<file path="backend/models/user.js">
+'use strict';
+const {
+  Model
+} = require('sequelize');
+module.exports = (sequelize, DataTypes) => {
+  class User extends Model {
+    /**
+     * Helper method for defining associations.
+     * This method is not a part of Sequelize lifecycle.
+     * The `models/index` file will call this method automatically.
+     */
+    static associate(models) {
+      // define association here
+    }
+  }
+  User.init({
+    username: DataTypes.STRING,
+    email: DataTypes.STRING,
+    password: DataTypes.STRING
+  }, {
+    sequelize,
+    modelName: 'User',
+  });
+  return User;
+};
+</file>
+
+<file path="backend/package.json">
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "sequelize": "sequelize"
+  },
+  "dependencies": {
+    "axios": "^1.9.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.11.3",
+    "sequelize": "^6.35.1",
+    "socket.io": "^4.7.5",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3",
+    "sequelize-cli": "^6.6.1"
+  }
+}
+</file>
+
+<file path="backend/README.md">
+# Backend
+
+Node.js/Express server for managing rooms, users, real-time collaboration, and integration with code execution and AI modules.
+
+## Structure
+
+- `src/index.js` — Main entry point
+- `src/routes/` — API route handlers
+- `src/controllers/` — Business logic
+- `src/models/` — DB models/schemas
+- `src/config/` — Config files (DB, etc.)
+- `src/middleware/` — Middleware (auth, error handling)
+- `src/sockets/` — Socket.io logic
+
+## Setup
+
+See ../../execution_guide.md for instructions.
+</file>
+
+<file path="backend/src/config/db.js">
+import dotenv from 'dotenv';
+dotenv.config();
+
+export const dbConfig = {
+  host: process.env.DB_HOST,
+  port: process.env.DB_PORT,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+};
+
+// Add DB client/ORM initialization here
+</file>
+
+<file path="backend/src/controllers/roomController.js">
+const { Room, User } = require('../../models');
+
+// Create a new room
+exports.createRoom = async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) {
+      return res.status(400).json({ message: 'Room name is required.' });
+    }
+    // Check if room name exists
+    const existingRoom = await Room.findOne({ where: { name } });
+    if (existingRoom) {
+      return res.status(409).json({ message: 'Room name already exists.' });
+    }
+    const room = await Room.create({
+      name,
+      createdBy: req.user.id,
+      isActive: true
+    });
+    res.status(201).json({ room });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Join a room by name
+exports.joinRoom = async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) {
+      return res.status(400).json({ message: 'Room name is required.' });
+    }
+    const room = await Room.findOne({ where: { name, isActive: true } });
+    if (!room) {
+      return res.status(404).json({ message: 'Room not found or inactive.' });
+    }
+    // Optionally: Add user to participants (future many-to-many)
+    res.json({ room });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// List all active rooms
+exports.listRooms = async (req, res) => {
+  try {
+    const rooms = await Room.findAll({ where: { isActive: true }, order: [['createdAt', 'DESC']] });
+    res.json({ rooms });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+</file>
+
+<file path="backend/src/controllers/userController.js">
+const { User } = require('../../models');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'changeme';
+
+// Signup controller
+exports.signup = async (req, res) => {
+  try {
+    const { username, email, password, firstName, lastName } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ message: 'Username, email, and password are required.' });
+    }
+    // Check if user exists
+    const existingUser = await User.findOne({ where: { [User.sequelize.Op.or]: [{ username }, { email }] } });
+    if (existingUser) {
+      return res.status(409).json({ message: 'Username or email already in use.' });
+    }
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+    // Create user
+    const user = await User.create({
+      username,
+      email,
+      password: hashedPassword,
+      firstName,
+      lastName
+    });
+    // Generate JWT
+    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+    res.status(201).json({ token, user: { id: user.id, username: user.username, email: user.email, firstName: user.firstName, lastName: user.lastName } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Login controller
+exports.login = async (req, res) => {
+  try {
+    const { usernameOrEmail, password } = req.body;
+    if (!usernameOrEmail || !password) {
+      return res.status(400).json({ message: 'Username/email and password are required.' });
+    }
+    // Find user by username or email
+    const user = await User.findOne({
+      where: {
+        [User.sequelize.Op.or]: [
+          { username: usernameOrEmail },
+          { email: usernameOrEmail }
+        ]
+      }
+    });
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid credentials.' });
+    }
+    // Compare password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: 'Invalid credentials.' });
+    }
+    // Generate JWT
+    const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+    res.json({ token, user: { id: user.id, username: user.username, email: user.email, firstName: user.firstName, lastName: user.lastName } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// User controller placeholder
+// Implement signup, login, and user logic here
+</file>
+
+<file path="backend/src/index.js">
+const express = require('express');
+const http = require('http');
+const { Server: SocketIOServer } = require('socket.io');
+const cors = require('cors');
+const dotenv = require('dotenv');
+const routes = require('./routes');
+const { setupSockets } = require('./sockets');
+
+dotenv.config();
+
+const app = express();
+const server = http.createServer(app);
+const io = new SocketIOServer(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
+
+app.use(cors());
+app.use(express.json());
+
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+app.use('/api', routes);
+
+setupSockets(io);
+
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+  console.log(`Backend server running on port ${PORT}`);
+});
+</file>
+
+<file path="backend/src/middleware/auth.js">
+const jwt = require('jsonwebtoken');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'changeme';
+
+module.exports = function (req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) {
+    return res.status(401).json({ message: 'No token provided' });
+  }
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ message: 'Invalid or expired token' });
+    }
+    req.user = user;
+    next();
+  });
+};
+</file>
+
+<file path="backend/src/models/room.js">
+// Room model/schema placeholder
+// Define with ORM (e.g., Sequelize, Knex, TypeORM) later
+</file>
+
+<file path="backend/src/models/user.js">
+// User model/schema placeholder
+// Define with ORM (e.g., Sequelize, Knex, TypeORM) later
+</file>
+
+<file path="backend/src/routes/execute.js">
+const express = require('express');
+const router = express.Router();
+const auth = require('../middleware/auth');
+const { executeCode } = require('../services/judge0Service');
+
+// POST /api/execute
+router.post('/', auth, async (req, res) => {
+  try {
+    const { source_code, language_id, stdin } = req.body;
+    if (!source_code || !language_id) {
+      return res.status(400).json({ message: 'source_code and language_id are required.' });
+    }
+    const result = await executeCode({ source_code, language_id, stdin });
+    res.json({ result });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Code execution failed.' });
+  }
+});
+
+module.exports = router;
+</file>
+
+<file path="backend/src/routes/index.js">
+const express = require('express');
+const userRoutes = require('./user');
+const roomRoutes = require('./room');
+const executeRoutes = require('./execute');
+
+const router = express.Router();
+
+router.use('/users', userRoutes);
+router.use('/rooms', roomRoutes);
+router.use('/execute', executeRoutes);
+
+module.exports = router;
+</file>
+
+<file path="backend/src/routes/room.js">
+const express = require('express');
+const router = express.Router();
+const roomController = require('../controllers/roomController');
+const auth = require('../middleware/auth');
+
+// Create a new room (protected)
+router.post('/', auth, roomController.createRoom);
+// Join a room (protected)
+router.post('/join', auth, roomController.joinRoom);
+// List all active rooms (public)
+router.get('/', roomController.listRooms);
+
+module.exports = router;
+</file>
+
+<file path="backend/src/routes/user.js">
+const express = require('express');
+const router = express.Router();
+const userController = require('../controllers/userController');
+const auth = require('../middleware/auth');
+
+router.post('/signup', userController.signup);
+router.post('/login', userController.login);
+
+// Example protected route
+router.get('/me', auth, (req, res) => {
+  res.json({ user: req.user });
+});
+
+module.exports = router;
+</file>
+
+<file path="backend/src/services/aiService.js">
+const axios = require('axios');
+
+const AI_MODULE_URL = process.env.AI_MODULE_URL || 'http://localhost:8000';
+
+exports.analyzeCode = async ({ code, language, userId, roomName }) => {
+  try {
+    const res = await axios.post(`${AI_MODULE_URL}/analyze`, {
+      code,
+      language,
+      userId,
+      roomName
+    });
+    return res.data; // { question, type, context }
+  } catch (err) {
+    console.error('AI module error:', err.message);
+    return null;
+  }
+};
+</file>
+
+<file path="backend/src/services/judge0Service.js">
+const axios = require('axios');
+
+const JUDGE0_API_URL = process.env.JUDGE0_API_URL || 'http://localhost:2358';
+
+// Submit code to Judge0 and poll for result
+exports.executeCode = async ({ source_code, language_id, stdin }) => {
+  // Submit code
+  const submission = await axios.post(`${JUDGE0_API_URL}/submissions/?base64_encoded=false&wait=false`, {
+    source_code,
+    language_id,
+    stdin
+  });
+  const token = submission.data.token;
+
+  // Poll for result
+  let result;
+  for (let i = 0; i < 20; i++) { // Poll up to 20 times
+    await new Promise((r) => setTimeout(r, 1000)); // Wait 1s
+    const res = await axios.get(`${JUDGE0_API_URL}/submissions/${token}?base64_encoded=false`);
+    if (res.data.status && res.data.status.id >= 3) {
+      result = res.data;
+      break;
+    }
+  }
+  return result;
+};
+</file>
+
+<file path="backend/src/sockets/index.js">
+const { analyzeCode } = require('../services/aiService');
+
+// Simple debounce map for each room
+const debounceTimers = {};
+
+module.exports.setupSockets = (io) => {
+  io.on('connection', (socket) => {
+    console.log('A user connected:', socket.id);
+
+    // Join a Socket.io room
+    socket.on('joinRoom', ({ roomName, userId }) => {
+      if (roomName) {
+        socket.join(roomName);
+        socket.roomName = roomName;
+        socket.userId = userId;
+        console.log(`User ${userId} joined room ${roomName}`);
+        // Notify others in the room
+        socket.to(roomName).emit('userJoined', { userId });
+      }
+    });
+
+    // Leave a Socket.io room
+    socket.on('leaveRoom', ({ roomName, userId }) => {
+      if (roomName) {
+        socket.leave(roomName);
+        console.log(`User ${userId} left room ${roomName}`);
+        socket.to(roomName).emit('userLeft', { userId });
+      }
+    });
+
+    // WebRTC signaling relay
+    socket.on('signal', ({ roomName, from, to, data }) => {
+      if (roomName && to) {
+        // Relay the signal to the intended recipient in the room
+        for (const [id, s] of io.of('/').sockets) {
+          if (s.roomName === roomName && s.userId === to) {
+            s.emit('signal', { from, data });
+          }
+        }
+      }
+    });
+
+    // Real-time code sync + AI analysis
+    socket.on('codeChange', ({ roomName, code, language, userId }) => {
+      if (roomName) {
+        // Broadcast code change to all other users in the room
+        socket.to(roomName).emit('codeUpdate', { code });
+
+        // Debounce AI analysis per room
+        if (debounceTimers[roomName]) clearTimeout(debounceTimers[roomName]);
+        debounceTimers[roomName] = setTimeout(async () => {
+          const aiResult = await analyzeCode({ code, language, userId, roomName });
+          if (aiResult && aiResult.question) {
+            io.to(roomName).emit('aiQuestion', aiResult);
+          }
+        }, 1500); // 1.5s debounce
+      }
+    });
+
+    // Real-time chat/messages
+    socket.on('chatMessage', ({ roomName, userId, message }) => {
+      if (roomName && message) {
+        io.to(roomName).emit('chatMessage', {
+          userId,
+          message,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+
+    socket.on('disconnect', () => {
+      console.log('User disconnected:', socket.id);
+    });
+  });
+};
+</file>
+
+<file path="backend/test_ai_integration.js">
+const { io } = require('socket.io-client');
+
+const SOCKET_URL = 'http://localhost:5000'; // Adjust if backend runs elsewhere
+const roomName = 'testroom';
+const userId = 1;
+
+const socket = io(SOCKET_URL, {
+  transports: ['websocket'],
+});
+
+socket.on('connect', () => {
+  console.log('Connected as', socket.id);
+  socket.emit('joinRoom', { roomName, userId });
+
+  // Send a codeChange event
+  socket.emit('codeChange', {
+    roomName,
+    code: 'def foo(): return 42',
+    language: 'python',
+    userId
+  });
+});
+
+socket.on('aiQuestion', (data) => {
+  console.log('Received aiQuestion:', data);
+  socket.disconnect();
+});
+
+socket.on('disconnect', () => {
+  console.log('Disconnected');
+});
+</file>
+
+<file path="database/.gitkeep">
+# placeholder
+</file>
+
+<file path="database/README.md">
+# Database Config
+
+Configuration and migration files for PostgreSQL/MySQL.
+
+## Setup
+ 
+See ../../execution_guide.md for instructions.
+</file>
+
+<file path="development_plan.md">
+Sequelize is fine# Development Plan: Real-Time Coding Interview Platform
+
+This document outlines the recommended phases, milestones, and tasks for building the platform described in `techstack.md`.
+
+---
+
+## Phase 1: Core Platform Foundation
+
+### 1. Project Setup
+- Initialize Git repository and workspaces
+- Set up folder structure (frontend, backend, ai_module, judge0, database)
+- Add basic documentation and .gitignore
+
+### 2. Database & Backend API
+- Design database schema (users, rooms, sessions, etc.)
+- Set up PostgreSQL/MySQL and ORM (e.g., Sequelize, TypeORM, or Knex)
+- Implement user authentication (signup/login endpoints)
+- Implement room management (create/join/list rooms)
+- Set up API endpoints for frontend integration
+
+### 3. Real-Time Collaboration Backend
+- Integrate Socket.io for real-time communication
+- Implement code sync and broadcast logic for rooms
+- Add support for chat/messages in rooms (optional)
+
+### 4. Frontend Core
+- Bootstrap React app
+- Implement authentication UI (login/signup forms)
+- Build room lobby (create/join/list rooms)
+- Integrate CodeMirror editor (basic setup)
+- Connect to backend via REST and WebSocket
+- Display real-time code updates
+
+### 5. Code Execution Integration
+- Set up Judge0 CE (Docker)
+- Implement backend API to forward code to Judge0 and return results
+- Add "Run" button and output display in frontend
+
+### 6. Video Conferencing
+- Integrate WebRTC for peer-to-peer video
+- Implement signalling via backend (Socket.io)
+- Add video UI components in frontend
+
+---
+
+## Phase 2: AI Analysis & Questioning
+
+### 1. AI Module Setup
+- Bootstrap Python service (Flask or FastAPI)
+- Research/select open-source LLM for code analysis
+- Implement endpoint to receive code snippets/deltas
+
+### 2. Backend-AI Integration
+- Forward code changes from backend to AI module (HTTP or message queue)
+- Receive and store AI-generated questions
+- Broadcast questions to relevant frontend clients
+
+### 3. Frontend AI Integration
+- Display AI-generated questions in the UI (chat, panel, or tooltip)
+- Allow user to respond or dismiss questions (optional)
+
+---
+
+## Phase 3: Testing, Polish, and Deployment
+
+### 1. Testing
+- Unit and integration tests for backend, frontend, and AI module
+- Manual and automated end-to-end tests
+
+### 2. UX/UI Polish
+- Improve styling (e.g., Tailwind CSS)
+- Add helpful error messages and loading states
+- Responsive/mobile-friendly design
+
+### 3. Documentation
+- Update and expand setup guides
+- Add API documentation (Swagger/OpenAPI)
+
+### 4. Deployment
+- Dockerize all services
+- Prepare docker-compose for local/dev deployment
+- Plan for cloud deployment (optional)
+
+---
+
+## Team Roles (Recommended)
+- **Frontend Developer(s):** React, CodeMirror, WebRTC
+- **Backend Developer(s):** Node.js, Express, Socket.io, DB
+- **AI/ML Engineer:** Python, LLM integration, code analysis
+- **DevOps/Infra:** Docker, deployment, CI/CD
+
+---
+
+## Milestones & Deliverables
+- [ ] Core backend API and DB ready
+- [ ] Real-time code collaboration working
+- [ ] Frontend MVP (auth, rooms, editor)
+- [ ] Code execution integrated
+- [ ] Video conferencing functional
+- [ ] AI module MVP (basic question generation)
+- [ ] End-to-end demo (all features connected)
+- [ ] Documentation and deployment scripts
+
+---
+
+_Refer to `techstack.md` and `execution_guide.md` for further details and upgrade paths._
+</file>
+
+<file path="execution_guide.md">
+# Step-by-Step Execution Guide for Real-Time Coding Interview Platform
+
+This guide will help you set up and run the platform locally using the free/open-source stack described in `techstack.md`.
+
+---
+
+## Prerequisites
+
+- **Node.js** (v16+ recommended)
+- **npm** or **yarn**
+- **Python** (3.8+)
+- **Docker** (for Judge0 CE)
+- **PostgreSQL** or **MySQL** (local or Docker)
+- **Git**
+
+---
+
+## 1. Clone the Repository
+
+```bash
+git clone <your-repo-url>
+cd <project-root>
+```
+
+---
+
+## 2. Setup the Database
+
+- Install and start PostgreSQL or MySQL.
+- Create a database for the project.
+- Update the backend config with your DB credentials.
+
+---
+
+## 3. Start the Backend Server
+
+```bash
+cd backend
+npm install
+npm run dev
+```
+- The backend will run on `http://localhost:5000` by default.
+
+---
+
+## 4. Start the Frontend
+
+```bash
+cd frontend
+npm install
+npm start
+```
+- The frontend will run on `http://localhost:3000` by default.
+
+---
+
+## 5. Start the AI Analysis Module
+
+```bash
+cd ai_module
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+python app.py
+```
+- The AI module will run on `http://localhost:8000` by default.
+
+---
+
+## 6. Start Judge0 CE (Code Execution System)
+
+- Make sure Docker is running.
+- From the project root:
+
+```bash
+docker-compose -f judge0/docker-compose.yml up -d
+```
+- Judge0 API will be available at `http://localhost:2358` by default.
+
+---
+
+## 7. (Optional) Start STUN/TURN Server for WebRTC
+
+- For local testing, you may use public STUN servers.
+- For production, deploy [coturn](https://github.com/coturn/coturn).
+
+---
+
+## 8. Environment Variables
+
+- Copy `.env.example` files in each service to `.env` and fill in the required values.
+
+---
+
+## 9. Access the Platform
+
+- Open `http://localhost:3000` in your browser.
+- Register/login, create/join a room, and start collaborating!
+
+---
+
+## 10. Troubleshooting
+
+- Check logs in each service directory for errors.
+- Ensure all services are running and accessible on their respective ports.
+
+---
+
+## 11. Useful Commands
+
+- Stop all Docker containers:
+  ```bash
+  docker-compose -f judge0/docker-compose.yml down
+  ```
+- Restart backend/frontend/AI module as needed.
+
+---
+
+## 12. Next Steps
+
+- See `techstack.md` for upgrade paths and advanced configuration.
+- Contribute by opening issues or PRs!
+</file>
+
+<file path="frontend/.gitkeep">
+# placeholder
+</file>
+
+<file path="frontend/README.md">
+# Frontend
+
+React-based SPA for collaborative code editing, video conferencing, and real-time interaction.
+
+## Setup
+ 
+See ../../execution_guide.md for instructions.
+</file>
+
+<file path="issues.md">
+# Issues Tracker
+
+This file tracks unresolved and recently resolved issues for the project. For professional teams, consider using a dedicated issue tracker (e.g., GitHub Issues).
+
+---
+
+## Issue Template
+
+**Title:** [Short summary of the issue]
+
+**Description:**
+- What is the problem?
+- Steps to reproduce (if applicable)
+- Expected behavior
+- Actual behavior
+
+**Environment:**
+- OS/Browser/Platform
+- Version (if relevant)
+
+**Screenshots/Logs:** (if applicable)
+
+**Priority:** [Low/Medium/High/Critical]
+
+**Assignee:** [Who will fix it?]
+
+**Status:** [Open/In Progress/Blocked/Closed]
+
+---
+
+## Unresolved Issues
+
+### 1. Code editor does not sync changes in real-time
+
+**Description:**
+- When two users are in the same room, code changes made by one user are not reflected for the other.
+- Steps: User A types, User B sees no update.
+
+**Environment:** Chrome 123, Windows 10
+
+**Priority:** High
+
+**Assignee:** @backend-dev
+
+**Status:** Open
+
+---
+
+## Recently Resolved Issues
+
+_(Move issues here with a date and commit/PR reference when resolved)_
+</file>
+
+<file path="judge0/.gitkeep">
+# placeholder
+</file>
+
+<file path="judge0/README.md">
+# Judge0 CE Integration
+
+Self-hosted code execution system for running user code securely.
+
+## Setup
+ 
+See ../../execution_guide.md for instructions.
+</file>
+
+<file path="package.json">
+{
+  "name": "real-time-coding-interview-platform",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend",
+    "ai_module"
+  ],
+  "scripts": {
+    "start": "echo 'See execution_guide.md for instructions.'"
+  }
+}
+</file>
+
+<file path="README.md">
+# Real-Time Coding Interview Platform
+
+A full-stack platform for real-time coding interviews with collaborative editing, video, code execution, and AI-powered counter-questioning.
+
+- **Frontend:** React, CodeMirror, WebRTC
+- **Backend:** Node.js, Express, Socket.io
+- **AI Module:** Python, LLMs
+- **Code Execution:** Judge0 CE
+- **Database:** PostgreSQL/MySQL
+
+See [execution_guide.md](./execution_guide.md) for setup and usage instructions.
+</file>
+
+<file path="techstack.md">
+Okay, here is a systematic plan for building your real-time coding interview platform with AI counter-questioning, drawing upon the information in the provided sources. The plan prioritises free and open-source technologies initially, with considerations for later upgrades to premium services.
+
+**Systematic Plan for Building a Real-Time Coding Interview Platform**
+
+The platform you envision requires several interconnected components working in real-time: a collaborative code editor, video conferencing, code execution capabilities, and an AI layer for real-time code analysis and questioning. Building such a system involves frontend, backend, database, and dedicated services for code execution and AI processing.
+
+Here is a structured path detailing the components, technologies, app flow, and dependencies:
+
+**Phase 1: Core Platform Foundation (Focus on Free Technologies)**
+
+1.  **Define Core Requirements and Features:**
+    *   Real-time collaborative code editing.
+    *   Integrated video conferencing for candidates and interviewers.
+    *   Ability to create and join interview rooms.
+    *   Real-time code execution and compilation.
+    *   User authentication (Login/Signup).
+    *   Display of execution results/output.
+
+2.  **Choose Core Technologies (Initial Free Stack):**
+    *   **Frontend:** A single-page application (SPA) framework is suitable.
+        *   **React.js** is mentioned in sources for building web editors and as a frontend technology for a collaborative editor project. It's a strong, free open-source choice.
+        *   User Interface (UI): Build components for the editor, video feed, and controls. Styling can be done with CSS, possibly using a framework like Tailwind CSS (used in one source).
+    *   **Backend:** Needed to manage rooms, users, and facilitate real-time communication.
+        *   **Node.js** and **Express.js** are recommended backend frameworks. Both are free and open-source.
+        *   **Database:** A free open-source database is needed to store user data, room information, and potentially past interview details. **PostgreSQL** or **MySQL** are excellent choices.
+    *   **Real-time Communication:** Essential for synchronising code changes and potentially other real-time features like chat or cursor positions.
+        *   **WebSockets** provide persistent, bidirectional communication between clients and the server. They offer low latency and efficient bandwidth usage compared to traditional HTTP polling.
+        *   **Socket.io** is a popular library for implementing WebSockets with Node.js. It's free and open-source.
+        *   The **Subscription/Notification** architectural pattern is a good fit for distributing real-time updates (like code changes) from the server to multiple subscribed clients in a room.
+    *   **Video Conferencing:** Needs to allow face-to-face interaction within the platform.
+        *   **WebRTC** is a free, open-source technology built into web browsers that enables peer-to-peer real-time audio, video, and data transmission.
+        *   While WebRTC is peer-to-peer, scaling beyond a few participants often requires Server-Side components like STUN (Session Traversal Utilities for NAT) and TURN (Traversal Using Relays around NAT) servers to handle network complexities like firewalls. Open-source STUN/TURN servers like `coturn` are available for self-hosting (free). For larger scale or simplified setup, managed WebRTC services would be a premium upgrade path.
+        *   Mesh architecture is a WebRTC topology where each participant connects directly to every other. It's simple but resource-intensive for clients with more participants. For larger interviews, other topologies (SFU/MCU - not detailed in sources) might be needed, which typically require server infrastructure. The collaborative editor source uses WebRTC for integrated video conferencing within interview rooms.
+    *   **Code Editor Library:** To provide the rich text editor functionality.
+        *   **CodeMirror** is a versatile JavaScript text editor library specifically for editing code in the browser. It supports syntax highlighting, language modes, and add-ons. It's open-source and free.
+        *   **react-codemirror2** is a React wrapper for CodeMirror. Also open-source and free.
+    *   **Code Execution System:** To compile and run the code submitted by candidates.
+        *   **Judge0** is mentioned as an open-source online code execution system. It supports sandboxed compilation and execution for many languages via a robust API. **Judge0 CE** is its open-source flavor. Self-hosting Judge0 is a way to achieve this functionality for free initially. It relies on Docker and other backend components for sandboxing and execution.
+
+3.  **Build Core Components (Frontend & Backend):**
+    *   Set up a new React project.
+    *   Install necessary libraries: `codemirror`, `react-codemirror2`, `socket.io-client` (for frontend).
+    *   Create reusable components like a Button and an Editor component integrating `react-codemirror2`. Configure CodeMirror options (language mode, line numbers, potentially themes).
+    *   Manage state for editor content (HTML, CSS, JS in the example, but for coding interviews, it would be one main code area and possibly others) using React hooks like `useState`. Use `useEffect` to handle side effects, like updating output or sending changes.
+    *   Set up the Node.js/Express.js backend. Install `socket.io` for the server.
+    *   Implement API endpoints for user authentication (login, signup) and room management (create room, join room).
+    *   Integrate WebSockets on the backend to handle client connections and broadcast code changes within rooms. When a client makes a change in the editor, the frontend sends the change to the backend via WebSocket, and the backend broadcasts it to all other clients in the same room.
+    *   Set up the chosen database (PostgreSQL/MySQL) and connect the backend to it for storing user and room data.
+
+4.  **Integrate Code Execution:**
+    *   Set up and self-host the open-source **Judge0 CE** system. This involves deploying its backend services (likely containerized with Docker).
+    *   The main platform backend (Node.js/Express.js) needs to communicate with the Judge0 API to submit code for execution. This would typically happen when a user clicks a "Run" button or similar.
+    *   Implement functionality in the backend to send the code content and selected language to the Judge0 API.
+    *   Receive the execution results (output, errors, status, etc.) from Judge0.
+    *   Send the results back to the relevant clients via WebSockets for display in the frontend.
+
+5.  **Integrate Video Conferencing:**
+    *   Implement WebRTC in the frontend. This involves accessing user media devices (camera, microphone), setting up peer connections, and handling network negotiation (SDP, ICE candidates).
+    *   Integrate a self-hosted open-source STUN/TURN server (e.g., `coturn`) to assist WebRTC connections, especially across different networks.
+    *   Use WebSockets (or a separate channel via the backend) for signalling WebRTC connection information between peers in a room (e.g., sending/receiving SDP offers/answers and ICE candidates).
+
+**Phase 2: Real-Time AI Code Analysis and Questioning**
+
+This phase adds the unique feature of the platform, building upon the real-time data flow established in Phase 1.
+
+1.  **Identify AI Data Source:** The real-time stream of code changes from the collaborative editor is the primary input for the AI analysis.
+
+2.  **Choose AI Technologies (Initial Free Stack):**
+    *   **AI Development/Runtime:**
+        *   **Python** is the standard language for AI/ML development.
+        *   AI/ML Frameworks: **TensorFlow** or **PyTorch** are leading open-source frameworks.
+        *   Code Analysis Models: This is the most complex part. You'll need models capable of understanding code structure, logic, potential issues, and common concepts related to the language.
+            *   Initially, explore open-source Language Models (LMs) or Large Language Models (LLMs) from platforms like Hugging Face. Some models might be suitable for code analysis tasks, potentially requiring fine-tuning on a dataset of code snippets and corresponding technical questions/critiques. Note that general LLMs might need adaptation for real-time, focused code analysis. There are open-source text-to-text models that could potentially generate questions based on analysed code features.
+    *   **Integration:**
+        *   Create a separate AI Analysis Module (a Python application) that communicates with the main backend.
+        *   Use a communication method between the Node.js backend and the Python AI module. This could be internal API calls (HTTP) or a message queue (e.g., RabbitMQ or Kafka, free open-source options). A message queue fits well with the asynchronous nature of real-time data streams.
+
+3.  **Develop AI Analysis Module:**
+    *   Set up a Python environment with TensorFlow/PyTorch and relevant code parsing libraries for supported languages.
+    *   Implement logic to receive code snippets or deltas in real-time from the main backend (via API or message queue).
+    *   Process the code using the chosen AI/ML models. This involves:
+        *   Parsing the code to understand its structure.
+        *   Analysing characteristics relevant to typical interview questions (e.g., time/space complexity, error handling, use of language features, potential bugs, alternative approaches).
+        *   Identifying specific points in the code to question.
+        *   Generating a question based on the analysis point.
+    *   Implement logic to manage the frequency and relevance of questions to avoid overwhelming the candidate. The AI should generate questions contextually based on the candidate's current code progress and potential issues detected.
+    *   Send the generated question back to the main backend (via API or message queue).
+
+4.  **Integrate AI Output into Platform Flow:**
+    *   The main backend receives questions from the AI Analysis Module.
+    *   Broadcast the question to the relevant client(s) in the interview room via WebSockets.
+    *   The frontend displays the AI-generated question to the candidate (e.g., in a separate chat area, a tooltip near the code, or a dedicated question panel).
+
+**App Flow (Simplified):**
+
+1.  User authenticates (Signup/Login).
+2.  User creates or joins an interview room. Backend manages rooms via API and Database.
+3.  Once in a room, Frontend establishes WebSocket connection to Backend. Frontend sets up WebRTC connection with other participants, signalling via Backend/WebSockets.
+4.  User types code in the editor (CodeMirror).
+5.  Frontend detects changes (`onBeforeChange` handler in CodeMirror).
+6.  Frontend sends code changes to Backend via WebSocket.
+7.  Backend receives changes, broadcasts to other clients in the room via WebSocket for collaboration.
+8.  Backend *also* sends the code (or relevant changes) to the AI Analysis Module (via internal API or message queue).
+9.  AI Analysis Module processes the code, generates a potential question [Python/TensorFlow/PyTorch].
+10. AI Analysis Module sends question back to Backend (via internal API or message queue).
+11. Backend receives question, sends to relevant Frontend client(s) via WebSocket.
+12. Frontend displays question.
+13. User can trigger Code Execution ("Run" button). Frontend sends code to Backend via API.
+14. Backend sends code to Judge0 API.
+15. Judge0 compiles/executes code, returns results to Backend.
+16. Backend sends results to Frontend via WebSocket.
+17. Frontend displays results.
+
+**Tech Stack and Dependencies (Summary - Initial Free):**
+
+*   **Frontend:**
+    *   React.js
+    *   CodeMirror, react-codemirror2
+    *   Socket.io-client
+    *   WebRTC (built-in browser)
+*   **Backend (Node.js/Express.js):**
+    *   Express.js
+    *   Socket.io
+    *   Database Client (e.g., `pg` for PostgreSQL, `mysql` for MySQL)
+    *   HTTP client (for Judge0 API calls)
+    *   STUN/TURN server (e.g., coturn - separate deployment but free)
+    *   Optional: Message queue client (e.g., `amqplib` for RabbitMQ, `kafka-node` for Kafka)
+*   **Database:**
+    *   PostgreSQL OR MySQL (self-hosted)
+*   **Code Execution System:**
+    *   Judge0 CE (self-hosted via Docker)
+*   **AI Analysis Module (Python):**
+    *   Python
+    *   TensorFlow OR PyTorch
+    *   Code parsing libraries (e.g., `ast`, `tree-sitter`, `pygments`)
+    *   Specific open-source LM/LLM for code analysis/question generation (e.g., from Hugging Face)
+    *   HTTP server framework (e.g., Flask, FastAPI) OR message queue client (e.g., `pika` for RabbitMQ, `kafka-python` for Kafka)
+
+**Structured Path to Feed into AI Coding Agent:**
+
+The AI coding agent (AI Analysis Module) needs a stream of the candidate's code as it is being written. The real-time collaboration layer provides this stream.
+
+1.  **Real-time Code Capture:** The frontend editor (CodeMirror) provides events (`onBeforeChange`) whenever the content changes.
+2.  **Delta or Full Code Transmission:** The frontend can send either the full code content on change or, more efficiently, code *deltas* (the specific changes made) to the backend via WebSockets. Sending deltas is more complex but reduces bandwidth and processing on the backend and AI module.
+3.  **Backend Routing:** The Node.js backend receives the real-time code data (deltas or full content) from the client via WebSocket. Instead of *just* broadcasting it for collaboration, it *also* forwards this data specifically to the AI Analysis Module.
+4.  **AI Module Ingestion:** The Python AI Analysis Module has an endpoint (HTTP or listens to a message queue) designed to receive this code data stream.
+5.  **Buffering/Throttling:** The AI module might need to buffer or throttle the incoming changes. Analysing every single keystroke in real-time might be too computationally expensive and generate too many questions. Similar to the iframe update delay, you could wait for a brief pause in typing before triggering analysis, or analyse snapshots of the code periodically.
+6.  **Code Preprocessing:** The AI module preprocesses the received code data (parsing, tokenization) using language-specific tools or libraries.
+7.  **Model Inference:** The preprocessed code is fed into the AI/ML models (TensorFlow/PyTorch + selected LM/LLM) for analysis.
+8.  **Question Generation Logic:** Based on the model output (e.g., identifying a suboptimal pattern, a potential bug, a missing edge case), custom logic in the AI module formulates a specific, relevant technical question in natural language.
+9.  **Question Delivery:** The generated question is sent back to the main backend for delivery to the user interface.
+
+**Potential Upgrade Paths (Premium Services):**
+
+*   **Code Execution:** Replace self-hosted Judge0 CE with **Judge0 hosted on Sulu or RapidAPI** (paid plans). This offloads infrastructure management and scaling of the execution environment.
+*   **Database:** Migrate to a **managed cloud database** service (e.g., AWS RDS, Google Cloud SQL, Azure Database) (paid) for easier scaling, backups, and maintenance.
+*   **Hosting & Scalability:** Deploy the frontend, backend, and AI module on a **cloud platform** (AWS, GCP, Azure) (paid). Use **containerisation (Docker)** and **container orchestration (Kubernetes)** for managing deployment and scaling. Platforms like **Red Hat OpenShift** provide enterprise-grade Kubernetes and AI/ML tooling. Use managed services for Node.js backend hosting or serverless functions for specific tasks.
+*   **Video Conferencing:** Replace self-hosted WebRTC infrastructure (STUN/TURN, potentially SFU/MCU) with a **managed WebRTC API/service** (e.g., Twilio, Vonage, Daily.co) (paid). This simplifies implementation, handles scaling, and often improves reliability and quality.
+*   **AI Models:** Supplement or replace open-source AI models with **commercial AI services** (e.g., OpenAI API, Google AI Platform, Azure Machine Learning) (paid). These offer access to larger, potentially more capable pre-trained models, including those specifically for code analysis or generation, reducing the need for extensive in-house model development and training.
+*   **MLOps:** Implement MLOps practices and tools for managing the AI model lifecycle in a production environment. This is covered by platforms like Red Hat OpenShift AI or using open-source tools like Kubeflow or Tekton, but typically requires cloud/Kubernetes infrastructure.
+
+By following this structured plan, starting with the suggested free and open-source technologies, you can build a functional prototype that demonstrates the core features, including the innovative real-time AI counter-questioning based on code. As the project matures and requires higher scalability, reliability, and reduced operational overhead, you can strategically swap out self-hosted open-source components for equivalent managed or premium services.
+</file>
+
+</files>
