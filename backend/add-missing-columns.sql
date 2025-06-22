@@ -1,0 +1,1 @@
+-- Add missing columns to assessment_sessions table

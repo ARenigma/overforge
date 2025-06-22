@@ -9,8 +9,8 @@ import CodeEditor from "@/components/code-editor"
 import ChatPanel from "@/components/chat-panel"
 import VideoPanel from "@/components/video-panel"
 import AIQuestionModal from "@/components/ai-question-modal"
-import { useAuth } from "@/context/auth-context"
-import { io, type Socket } from "socket.io-client"
+import { useAuth } from "@/hooks/useAuth"
+import io from "socket.io-client"
 import { Brain, Users, MessageCircle, Video, Timer } from "lucide-react"
 
 export default function RoomInterface() {
@@ -19,7 +19,7 @@ export default function RoomInterface() {
   const [code, setCode] = useState("")
   const [language, setLanguage] = useState("javascript")
   const [experienceLevel, setExperienceLevel] = useState("junior")
-  const [socket, setSocket] = useState<Socket | null>(null)
+  const [socket, setSocket] = useState<any>(null)
   const [isAIModalOpen, setIsAIModalOpen] = useState(false)
   const [timer, setTimer] = useState(0)
   const [isTimerRunning, setIsTimerRunning] = useState(true)
@@ -56,19 +56,19 @@ export default function RoomInterface() {
       })
     })
 
-    newSocket.on("codeUpdate", ({ code: newCode }) => {
+    newSocket.on("codeUpdate", ({ code: newCode }: { code: string }) => {
       setCode(newCode)
     })
 
-    newSocket.on("languageChange", ({ language: newLanguage }) => {
+    newSocket.on("languageChange", ({ language: newLanguage }: { language: string }) => {
       setLanguage(newLanguage)
     })
 
-    newSocket.on("roomParticipants", ({ participants: roomParticipants }) => {
+    newSocket.on("roomParticipants", ({ participants: roomParticipants }: { participants: string[] }) => {
       setParticipants(roomParticipants)
     })
 
-    newSocket.on("connect_error", (err) => {
+    newSocket.on("connect_error", (err: any) => {
       console.error("Socket connection error:", err.message)
     })
 
@@ -172,9 +172,8 @@ export default function RoomInterface() {
         <div className="flex-1 p-4">
           <CodeEditor
             value={code}
-            onChange={handleCodeChange}
+            onChangeAction={handleCodeChange}
             language={language}
-            onLanguageChange={handleLanguageChange}
           />
         </div>
 
@@ -206,11 +205,11 @@ export default function RoomInterface() {
       {/* AI Question Modal */}
       <AIQuestionModal
         isOpen={isAIModalOpen}
-        onClose={() => setIsAIModalOpen(false)}
+        onCloseAction={() => setIsAIModalOpen(false)}
         language={language}
         experienceLevel={experienceLevel}
-        onTimerPause={handleTimerPause}
-        onTimerResume={handleTimerResume}
+        onTimerPauseAction={handleTimerPause}
+        onTimerResumeAction={handleTimerResume}
       />
     </div>
   )

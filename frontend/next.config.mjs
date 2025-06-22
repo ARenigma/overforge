@@ -9,6 +9,32 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  experimental: {
+    forceSwcTransforms: true,
+    esmExternals: false,
+    optimizeFonts: true,
+  },
+  webpack: (config) => {
+    config.cache = false;
+    return config;
+  },
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'X-DNS-Prefetch-Control',
+            value: 'on'
+          },
+          {
+            key: 'X-Frame-Options',
+            value: 'DENY'
+          }
+        ],
+      },
+    ];
+  },
 }
 
 export default nextConfig

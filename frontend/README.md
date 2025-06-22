@@ -1,173 +1,138 @@
-# Real-Time Coding Interview Platform - Complete Frontend
+# OverForge Frontend
 
-A production-ready Next.js frontend for the real-time coding interview platform with integrated backend API routes.
+Clean and modern Next.js frontend for the OverForge AI Interview Platform.
 
-## 🚀 Features
+## 📁 Directory Structure
 
-- ✅ **Authentication**: JWT-based login/signup with secure token management
-- ✅ **Real-time Collaboration**: Socket.io for synchronized code editing and chat
-- ✅ **Video Conferencing**: WebRTC implementation with camera/microphone controls
-- ✅ **Code Execution**: Integration with Judge0 API via backend proxy
-- ✅ **AI-Powered Questions**: Dynamic question generation based on language and experience level
-- ✅ **Room Management**: Create and join coding interview rooms
-- ✅ **Multi-language Support**: JavaScript, Python, C++, Java with syntax highlighting
-- ✅ **Responsive Design**: Works on desktop and mobile devices
-- ✅ **Timer System**: Built-in interview timer with pause/resume functionality
+```
+frontend/
+├── app/                    # Next.js 14 App Router pages
+├── src/                    # Source code and utilities
+├── components/             # Reusable React components
+├── lib/                    # Library utilities and configurations
+├── context/                # React context providers
+├── hooks/                  # Custom React hooks
+├── styles/                 # Global styles and Tailwind CSS
+├── public/                 # Static assets
+├── docs/                   # Documentation (if any)
+├── .next/                  # Next.js build cache (auto-generated)
+├── node_modules/           # Dependencies
+├── package.json            # Dependencies and scripts
+├── tailwind.config.ts      # Tailwind CSS configuration
+├── next.config.mjs         # Next.js configuration
+├── tsconfig.json           # TypeScript configuration
+├── middleware.ts           # Next.js middleware
+├── .env.local              # Environment variables (local)
+└── README.md               # This file
+```
 
-## 📁 Project Structure
+## 🚀 Quick Start
 
-\`\`\`
-├── components/
-│   ├── ai-question-modal.tsx    # AI question generation modal
-│   ├── auth-form.tsx            # Login/signup forms
-│   ├── chat-panel.tsx           # Real-time chat component
-│   ├── code-editor.tsx          # Code editor with execution
-│   ├── room-interface.tsx       # Main room layout
-│   ├── room-manager.tsx         # Room creation/joining
-│   └── video-panel.tsx          # Video conferencing
-├── context/
-│   └── auth-context.tsx         # Authentication state management
-├── app/
-│   ├── api/                     # Next.js API routes (backend proxies)
-│   ├── room/[id]/page.tsx       # Individual room pages
-│   ├── layout.tsx               # Root layout with providers
-│   └── page.tsx                 # Home page (auth + room manager)
-├── .env.local                   # Environment variables
-└── package.json                 # Dependencies and scripts
-\`\`\`
-
-## 🛠️ Quick Setup
-
-1. **Install dependencies:**
-\`\`\`bash
+1. **Install Dependencies**
+   ```bash
 npm install
-\`\`\`
+   ```
 
-2. **Configure environment variables:**
-\`\`\`bash
-cp .env.local.example .env.local
-\`\`\`
+2. **Setup Environment**
+   ```bash
+   cp .env.local.supabase.template .env.local
+   # Edit .env.local with your configuration
+   ```
 
-Edit `.env.local`:
-\`\`\`env
-BACKEND_URL=http://localhost:5000
-NEXT_PUBLIC_SOCKET_URL=http://localhost:5000
-\`\`\`
-
-3. **Start the development server:**
-\`\`\`bash
+3. **Start Development Server**
+   ```bash
 npm run dev
-\`\`\`
+   ```
 
-4. **Open your browser:**
-Navigate to `http://localhost:3000`
+4. **Open in Browser**
+   ```
+   http://localhost:3000
+   ```
 
-## 🔧 Backend Integration
+## 📖 Key Features
 
-This frontend includes Next.js API routes that act as proxies to your Express backend:
+- **Modern Next.js 14** with App Router
+- **TypeScript** for type safety
+- **Tailwind CSS** for responsive design
+- **Radix UI Components** for accessibility
+- **Real-time Socket.io** integration
+- **Supabase Authentication**
+- **Monaco Editor** for code editing
+- **Human-Centric UI/UX** design
 
-- **Authentication**: `/api/auth/login`, `/api/auth/signup`
-- **Room Management**: `/api/rooms`, `/api/rooms/join`
-- **Chat**: `/api/room/[id]/chat`
-- **Code Execution**: `/api/execute`
+## 🎯 Core Pages
 
-## 🎯 Key Components
+- **`/`** - Landing page and authentication
+- **`/language-selection`** - Job profile selection
+- **`/room/[id]`** - Interview room with live coding
+- **`/dashboard/candidate`** - Candidate dashboard
+- **`/dashboard/interviewer`** - Interviewer dashboard
 
-### 1. **AI Question Modal**
-- Dynamic question generation based on programming language and experience level
-- Built-in hints and difficulty indicators
-- Timer integration with pause/resume functionality
+## 🛠️ Tech Stack
 
-### 2. **Room Interface**
-- Split-screen layout with code editor and communication panels
-- Real-time code synchronization across participants
-- Integrated video chat and text messaging
-- Language selection and code execution
+- **Framework**: Next.js 14 (App Router)
+- **Language**: TypeScript
+- **Styling**: Tailwind CSS
+- **UI Components**: Radix UI
+- **Code Editor**: Monaco Editor
+- **Real-time**: Socket.io Client
+- **Authentication**: Supabase Auth
+- **Form Handling**: React Hook Form
+- **State Management**: React Context + Hooks
 
-### 3. **Authentication System**
-- Secure JWT token management
-- Persistent login state with localStorage
-- Protected routes and API endpoints
+## 🎨 Design System
 
-### 4. **Video Conferencing**
-- WebRTC peer-to-peer connection
-- Camera and microphone controls
-- Connection state management
-- STUN server configuration for NAT traversal
+- **Color Scheme**: Modern dark/light theme support
+- **Typography**: Optimized font hierarchy
+- **Components**: Consistent design language
+- **Responsive**: Mobile-first approach
+- **Accessibility**: WCAG compliant components
 
-## 🌐 Environment Variables
+## 🔧 Configuration
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `BACKEND_URL` | Express backend API URL | `http://localhost:5000` |
-| `NEXT_PUBLIC_SOCKET_URL` | Socket.io server URL | `http://localhost:5000` |
+Key configuration files:
+- `next.config.mjs` - Next.js settings
+- `tailwind.config.ts` - Tailwind CSS customization
+- `tsconfig.json` - TypeScript compiler options
+- `components.json` - Shadcn/ui component configuration
 
-## 📦 Dependencies
+## 📝 Environment Variables
 
-### Core Framework
-- **Next.js 14**: React framework with App Router
-- **React 18**: UI library with latest features
-- **TypeScript**: Type safety and better DX
+Required environment variables in `.env.local`:
+```bash
+NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+NEXT_PUBLIC_BACKEND_URL=http://localhost:5000
+NEXT_PUBLIC_AI_MODULE_URL=http://localhost:8000
+```
 
-### Real-time Features
-- **Socket.io Client**: Real-time communication
-- **WebRTC**: Peer-to-peer video/audio
+## 🚀 Build & Deploy
 
-### Code Editor
-- **CodeMirror 6**: Modern code editor
-- **Language Support**: JavaScript, Python, C++, Java
+```bash
+# Build for production
+npm run build
 
-### UI Components
-- **Tailwind CSS**: Utility-first styling
-- **shadcn/ui**: Pre-built accessible components
-- **Lucide React**: Beautiful icons
+# Start production server
+npm start
 
-## 🚀 Deployment
+# Run linting
+npm run lint
+```
 
-### Vercel (Recommended)
-1. Push your code to GitHub
-2. Connect your repository to Vercel
-3. Add environment variables in Vercel dashboard
-4. Deploy automatically
+## 🎭 Human-Centric Features
 
-### Other Platforms
-This is a standard Next.js app and can be deployed to:
-- Netlify
-- AWS Amplify
-- Railway
-- DigitalOcean App Platform
+- **Intuitive Job Selection**: Clear, visual job profile cards
+- **Live Code Analysis**: Real-time feedback and semantic understanding
+- **Natural Chat Flow**: Human-like conversation timing
+- **Progressive Assessment**: 3-depth parameter evaluation
+- **Intelligent Hints**: Contextual guidance system
+- **Interviewer Collaboration**: Live monitoring and override capabilities
 
-## 🔄 Development Workflow
+## 📱 Responsive Design
 
-1. **Start Backend**: Ensure your Express backend is running on port 5000
-2. **Start Frontend**: Run `npm run dev` to start the Next.js development server
-3. **Test Features**: 
-   - Create an account or login
-   - Create/join a room
-   - Test real-time code collaboration
-   - Try video chat functionality
-   - Generate AI questions
+Optimized for all devices:
+- **Desktop**: Full-featured experience
+- **Tablet**: Adaptive layout
+- **Mobile**: Touch-friendly interface
 
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **Socket Connection Failed**
-   - Check if backend is running
-   - Verify `NEXT_PUBLIC_SOCKET_URL` in `.env.local`
-
-2. **Video Not Working**
-   - Ensure HTTPS in production (WebRTC requirement)
-   - Check browser permissions for camera/microphone
-
-3. **Code Execution Fails**
-   - Verify backend Judge0 integration
-   - Check API route proxy configuration
-
-4. **Authentication Issues**
-   - Clear localStorage and cookies
-   - Verify backend JWT configuration
-
-## 📝 License
-
-This project is licensed under the MIT License.
+The frontend is designed with a human-centric approach, focusing on natural interactions and seamless user experience! 🚀

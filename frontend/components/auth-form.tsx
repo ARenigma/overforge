@@ -9,22 +9,25 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { useAuth } from "@/context/auth-context"
-import { Loader2, User, Mail, Lock } from "lucide-react"
+import { useAuth } from "@/hooks/useAuth"
+import { Loader2, User, Mail, Lock, Eye, EyeOff } from "lucide-react"
 
 export default function AuthForm() {
   const [loginForm, setLoginForm] = useState({
-    usernameOrEmail: "",
+    email: "",
     password: "",
   })
 
   const [signupForm, setSignupForm] = useState({
-    username: "",
     email: "",
     password: "",
     firstName: "",
     lastName: "",
+    role: "interviewer",
   })
+
+  const [showLoginPassword, setShowLoginPassword] = useState(false)
+  const [showSignupPassword, setShowSignupPassword] = useState(false)
 
   const { login, signup, loading, error } = useAuth()
 
@@ -62,15 +65,15 @@ export default function AuthForm() {
             <TabsContent value="login">
               <form onSubmit={handleLoginSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="usernameOrEmail">Username or Email</Label>
+                  <Label htmlFor="email">Username or Email</Label>
                   <div className="relative">
                     <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                     <Input
-                      id="usernameOrEmail"
-                      type="text"
-                      placeholder="Enter username or email"
-                      value={loginForm.usernameOrEmail}
-                      onChange={(e) => setLoginForm({ ...loginForm, usernameOrEmail: e.target.value })}
+                      id="email"
+                      type="email"
+                      placeholder="admin@test.com"
+                      value={loginForm.email}
+                      onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
                       className="pl-10"
                       required
                     />
@@ -83,13 +86,20 @@ export default function AuthForm() {
                     <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                     <Input
                       id="password"
-                      type="password"
+                      type={showLoginPassword ? "text" : "password"}
                       placeholder="Enter password"
                       value={loginForm.password}
                       onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                      className="pl-10"
+                      className="pl-10 pr-10"
                       required
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowLoginPassword(!showLoginPassword)}
+                      className="absolute right-3 top-3 h-4 w-4 text-muted-foreground hover:text-foreground"
+                    >
+                      {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </div>
                 </div>
 
@@ -126,18 +136,26 @@ export default function AuthForm() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="username">Username</Label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      id="username"
-                      type="text"
-                      placeholder="johndoe"
-                      value={signupForm.username}
-                      onChange={(e) => setSignupForm({ ...signupForm, username: e.target.value })}
-                      className="pl-10"
-                      required
-                    />
+                  <Label htmlFor="role">I am a</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant={signupForm.role === "candidate" ? "default" : "outline"}
+                      onClick={() => setSignupForm({ ...signupForm, role: "candidate" })}
+                      className="w-full"
+                    >
+                      <User className="mr-2 h-4 w-4" />
+                      Candidate
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={signupForm.role === "interviewer" ? "default" : "outline"}
+                      onClick={() => setSignupForm({ ...signupForm, role: "interviewer" })}
+                      className="w-full"
+                    >
+                      <User className="mr-2 h-4 w-4" />
+                      Interviewer
+                    </Button>
                   </div>
                 </div>
 
@@ -163,13 +181,20 @@ export default function AuthForm() {
                     <Lock className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                     <Input
                       id="signupPassword"
-                      type="password"
+                      type={showSignupPassword ? "text" : "password"}
                       placeholder="Create a password"
                       value={signupForm.password}
                       onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })}
-                      className="pl-10"
+                      className="pl-10 pr-10"
                       required
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowSignupPassword(!showSignupPassword)}
+                      className="absolute right-3 top-3 h-4 w-4 text-muted-foreground hover:text-foreground"
+                    >
+                      {showSignupPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
                   </div>
                 </div>
 

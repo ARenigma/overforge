@@ -1,162 +1,277 @@
-const { analyzeCode } = require('../services/aiService');
+const { Server } = require('socket.io');
+const { fetchInitialRoomQuestions } = require('../services/aiService');
+const AssessmentSocketHandler = require('./assessment-socket');
+const livingAIInterviewer = require('../services/living-ai-interviewer');
 
-// Simple debounce map for each room
-const debounceTimers = {};
+// Debounce map for joinRoom events to prevent API abuse
+const joinRoomDebounce = new Map();
 
-// Per-room AI question timer state and context
-const roomTimers = {}; // { [roomName]: { timers: [], questionSets: 0, languageId, experience, code } }
+// Room management
+const roomTimers = {}; // Store session context and timers
+
+// Simple in-memory chat storage for Enhanced Chat Panel
+const roomChatHistory = new Map(); // roomId -> array of messages
 
 const sanitizeMessage = (msg) => {
-  if (typeof msg !== 'string') return '';
-  // Remove HTML tags
-  return msg.replace(/<[^>]*>/g, '').slice(0, 500);
+  return msg?.trim()?.substring(0, 1000) || ''; // Limit message length
 };
 
-const isValidRoomName = (name) => /^[a-zA-Z0-9_-]{3,32}$/.test(name);
+// Validation helper for session names
+const isValidRoomName = (name) => /^[a-zA-Z0-9_.-]{3,128}$/.test(name); // Adjusted length for session IDs
 
-module.exports.setupSockets = (io) => {
+function initializeSocket(server) {
+  const io = new Server(server, {
+    cors: {
+      origin: process.env.FRONTEND_URL || "http://localhost:3000",
+      methods: ["GET", "POST"],
+      credentials: true
+    }
+  });
+
+  // Initialize Assessment Socket Handler for Living AI Interviewer
+  new AssessmentSocketHandler(io);
+  
+  // Custom emit wrapper that also stores messages in history (CREATE FIRST)
+  io.emitAndStore = function(roomName, event, data) {
+    // Store chat messages for history
+    if (event === 'chatMessage' && data) {
+      if (!roomChatHistory.has(roomName)) {
+        roomChatHistory.set(roomName, []);
+      }
+      const messages = roomChatHistory.get(roomName);
+      messages.push({
+        id: data.id || Date.now().toString(),
+        userId: data.userId || 'system',
+        username: data.username || data.sender?.name || 'System',
+        content: data.message || data.content,
+        timestamp: data.timestamp || new Date().toISOString(),
+        sender: data.sender,
+        questionContext: data.questionContext
+      });
+      
+      // Keep only last 50 messages per room to prevent memory issues
+      if (messages.length > 50) {
+        messages.splice(0, messages.length - 50);
+      }
+      
+      console.log(`💾 Stored chat message for room ${roomName}. Total messages: ${messages.length}`);
+    }
+    
+    // Emit normally
+    return io.to(roomName).emit(event, data);
+  };
+
+  // Pass socket IO instance to Living AI Interviewer for chat emission (AFTER storage function exists)
+  livingAIInterviewer.setSocketIO(io);
+
+  // Pass the storage function directly to LHIS
+  livingAIInterviewer.setStorageFunction(io.emitAndStore);
+
   io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
 
-    // Join a Socket.io room
-    socket.on('joinRoom', ({ roomName, userId, username }) => {
-      if (isValidRoomName(roomName)) {
+    // Join a session (roomName is sessionId)
+    socket.on('joinRoom', async ({ roomName, userId, username, language, experienceLevel, jobDescription, jobProfile }) => {
+      // Prevent duplicate join room calls (API abuse protection)
+      const joinKey = `${roomName}-${userId}`;
+      const lastJoinTime = joinRoomDebounce.get(joinKey);
+      
+      if (lastJoinTime && Date.now() - lastJoinTime < 5000) {
+        console.log(`⚠️  Debouncing duplicate joinRoom call for ${joinKey}`);
+        return;
+      }
+      
+      // Update debounce timestamp
+      joinRoomDebounce.set(joinKey, Date.now());
+      
+      // Clean up old entries periodically
+      if (joinRoomDebounce.size > 100) {
+        const now = Date.now();
+        for (const [key, timestamp] of joinRoomDebounce.entries()) {
+          if (now - timestamp > 60000) { // Remove entries older than 1 minute
+            joinRoomDebounce.delete(key);
+          }
+        }
+      }
+      
+      if (!isValidRoomName(roomName)) {
+        console.error(`Invalid session ID format: ${roomName}`);
+        socket.emit('joinRoomError', { message: 'Invalid session ID format.' });
+        return;
+      }
+      if (!language || !experienceLevel) {
+        console.error(`Language or experience level missing for session ${roomName}. Lang: ${language}, Exp: ${experienceLevel}`);
+        socket.emit('joinRoomError', { message: 'Language or experience level must be provided to start the session.' });
+        return;
+      }
+
+      try {
         socket.join(roomName);
         socket.roomName = roomName;
         socket.userId = userId;
         socket.username = username;
-        console.log(`User ${userId} joined room ${roomName}`);
+        console.log(`User ${userId} (${username}) joined session ${roomName} with Lang: ${language}, Exp: ${experienceLevel}`);
         socket.to(roomName).emit('userJoined', { userId, username });
-
-        // Start AI question timers if not already started
-        if (!roomTimers[roomName]) {
-          roomTimers[roomName] = { timers: [], questionSets: 0, languageId: null, experience: null, code: "" };
-          // First set at 2 min
-          const t1 = setTimeout(async () => {
-            if (io.sockets.adapter.rooms.has(roomName)) {
-              await emitAIQuestions(roomName, io, 1);
-              roomTimers[roomName].questionSets++;
-            }
-          }, 2 * 60 * 1000);
-          // Second set at 4 min
-          const t2 = setTimeout(async () => {
-            if (io.sockets.adapter.rooms.has(roomName)) {
-              await emitAIQuestions(roomName, io, 2);
-              roomTimers[roomName].questionSets++;
-            }
-          }, 4 * 60 * 1000);
-          roomTimers[roomName].timers = [t1, t2];
+        
+        // Initialize Living AI Interviewer Assessment System
+        const hasJobAssessment = jobDescription || jobProfile;
+        if (hasJobAssessment) {
+          console.log(`🎯 Job assessment detected for session ${roomName} - LHIS will handle this`);
+          
+          // Store basic session info for LHIS
+            roomTimers[roomName] = { 
+              languageId: language, 
+              experience: experienceLevel,
+              assessmentMode: true,
+            jobProfileId: jobProfile
+          };
+          
+          // Let LHIS handle the assessment initialization
+          return;
         }
+
+        // FALLBACK: Basic question generation for non-assessment sessions
+        console.log(`Session ${roomName}: Fetching initial questions for Lang=${language}, Exp=${experienceLevel}`);
+        const aiQuestions = await fetchInitialRoomQuestions(language, experienceLevel);
+        
+        if (aiQuestions && aiQuestions.length > 0) {
+          const fetchedQuestions = aiQuestions.map((q, index) => ({
+            id: `q${index + 1}`,
+            title: q.title || `Question ${index + 1}`,
+            description: q.problem || q.description || 'Coding challenge',
+            language: q.language || language,
+          }));
+          
+          console.log(`Successfully fetched ${fetchedQuestions.length} initial questions for session ${roomName}`);
+          
+          roomTimers[roomName] = { 
+            languageId: language, 
+            experience: experienceLevel,
+            assessmentMode: false,
+            initialQuestions: fetchedQuestions
+          };
+
+          socket.emit('initialRoomQuestions', fetchedQuestions);
+        } else {
+          console.error(`❌ No initial questions generated by AI for session ${roomName}`);
+          socket.emit('joinRoomError', { message: 'AI service is unavailable. Please ensure the AI module is running and accessible.' });
+          return;
+        }
+
+      } catch (error) {
+        console.error(`Error in joinRoom handler for ${roomName}:`, error);
+        socket.emit('joinRoomError', { message: 'Failed to process session entry.' });
       }
     });
 
-    // Interview info: store language/experience for the room
-    socket.on('interviewInfo', async ({ roomName, userId, username, languageId, experience }) => {
-      if (roomTimers[roomName]) {
-        roomTimers[roomName].languageId = languageId;
-        roomTimers[roomName].experience = experience;
-      }
-      // Compose a prompt for the AI module
-      const prompt = `Generate 2 technical real-world inspired coding interview questions for a candidate with ${experience} years of experience in language ID ${languageId}. Format as Q1: <question>\nQ2: <question>.`;
-      // Call AI module (simulate code as empty string, pass language and experience)
-      const aiResult = await analyzeCode({ code: prompt, language: languageId, userId, roomName });
-      if (aiResult && aiResult.question) {
-        // Split into two questions if possible
-        const questions = aiResult.question.split(/Q[12]:/).map(q => q.trim()).filter(Boolean);
-        questions.forEach(q => {
-          io.to(roomName).emit('aiQuestion', { question: q, type: 'interview', context: { languageId, experience } });
-        });
-      }
-    });
-
-    // Leave a Socket.io room
+    // Leave a session
     socket.on('leaveRoom', ({ roomName, userId, username }) => {
       if (roomName) {
         socket.leave(roomName);
-        console.log(`User ${userId} left room ${roomName}`);
+        console.log(`User ${userId} (${username}) left session ${roomName}`);
         socket.to(roomName).emit('userLeft', { userId, username });
-        // Clean up timers if room is empty
         if (io.sockets.adapter.rooms.get(roomName)?.size === 0) {
-          if (roomTimers[roomName]) {
-            roomTimers[roomName].timers.forEach(clearTimeout);
             delete roomTimers[roomName];
-          }
+          console.log(`Cleaned up session ${roomName}`);
         }
+      }
+    });
+
+    // Code change handler - Routes to Living AI Interviewer
+    socket.on('codeChange', async ({ roomName, questionId, code, language, userId }) => {
+      console.log(`📝 CodeChange received for session ${roomName}:`);
+      console.log(`   Question ID: ${questionId}`);
+      console.log(`   Code length: ${code?.length}`);
+      console.log(`   User ID: ${userId}`);
+      console.log(`   Language: ${language}`);
+
+      if (!roomName) {
+        console.log('❌ CodeChange event missing roomName parameter');
+        return;
+      }
+
+      // BULLETPROOF: Always check for active LHIS sessions first
+      const lhisSession = livingAIInterviewer.activeSessions.get(roomName);
+      if (lhisSession) {
+        console.log(`🎯 LHIS session detected for ${roomName}, delegating to assessment socket`);
+        // Assessment socket will handle this - do not process here to prevent duplicates
+        return;
+      }
+
+      // Also check room timers for legacy support
+      if (roomTimers[roomName]?.assessmentMode || roomTimers[roomName]?.jobProfileId) {
+        console.log(`🎯 Assessment mode detected for ${roomName}, delegating to assessment socket`);
+        // Assessment socket will handle this - do not process here to prevent duplicates
+            return;
+      }
+
+      // Basic session: Just relay code changes
+      try {
+        socket.to(roomName).emit('codeChange', { questionId, code, language, userId });
+        console.log(`✅ Code change relayed for session ${roomName}`);
+      } catch (error) {
+        console.error(`❌ Error processing code change for session ${roomName}:`, error);
+      }
+    });
+
+    // Simplified chat functionality with storage
+    socket.on('chatMessage', async ({ roomName, message, userId, username }) => {
+      try {
+        const sanitizedMessage = sanitizeMessage(message);
+        if (!sanitizedMessage) return;
+
+        const chatMessage = {
+          id: Date.now(), // Simple timestamp ID
+          userId,
+          username,
+          message: sanitizedMessage,
+          timestamp: new Date().toISOString()
+        };
+
+        // Store and emit
+        io.emitAndStore(roomName, 'chatMessage', chatMessage);
+      } catch (error) {
+        console.error('Chat message error:', error);
       }
     });
 
     // WebRTC signaling relay
     socket.on('signal', ({ roomName, from, to, data }) => {
       if (roomName && to) {
-        // Relay the signal to the intended recipient in the room
         for (const [id, s] of io.of('/').sockets) {
           if (s.roomName === roomName && s.userId === to) {
             s.emit('signal', { from, data });
+            break;
           }
         }
       }
     });
 
-    // Real-time code sync + AI analysis
-    socket.on('codeChange', ({ roomName, code, language, userId }) => {
-      if (roomName) {
-        socket.to(roomName).emit('codeUpdate', { code });
-        // Store latest code for the room
-        if (roomTimers[roomName]) {
-          roomTimers[roomName].code = code;
-        }
-        // Debounce AI analysis per room
-        if (debounceTimers[roomName]) clearTimeout(debounceTimers[roomName]);
-        debounceTimers[roomName] = setTimeout(async () => {
-          const aiResult = await analyzeCode({ code, language, userId, roomName });
-          if (aiResult && aiResult.question) {
-            io.to(roomName).emit('aiQuestion', aiResult);
-          }
-        }, 1500); // 1.5s debounce
+    // User info getter
+    socket.on('getUserInfo', (callback) => {
+      if (typeof callback === 'function') {
+        callback({
+          id: socket.userId,
+          name: socket.username
+        });
       }
     });
 
-    // Real-time chat/messages
-    socket.on('chatMessage', ({ roomName, userId, username, message, timestamp }) => {
-      if (isValidRoomName(roomName) && message && typeof message === 'string') {
-        const sanitized = sanitizeMessage(message);
-        if (sanitized.length > 0) {
-          io.to(roomName).emit('chatMessage', {
-            userId,
-            username,
-            message: sanitized,
-            timestamp: timestamp || new Date().toISOString()
-          });
-        }
+    // Get chat history with actual stored messages
+    socket.on('getChatHistory', (roomName, callback) => {
+        if (typeof callback === 'function') {
+        const messages = roomChatHistory.get(roomName) || [];
+        console.log(`📚 Loading chat history for room ${roomName}: ${messages.length} messages`);
+        callback(messages);
       }
     });
 
     socket.on('disconnect', () => {
       console.log('User disconnected:', socket.id);
-      // Clean up timers if this was the last user in the room
-      const roomName = socket.roomName;
-      if (roomName && io.sockets.adapter.rooms.get(roomName)?.size === 0) {
-        if (roomTimers[roomName]) {
-          roomTimers[roomName].timers.forEach(clearTimeout);
-          delete roomTimers[roomName];
-        }
-      }
     });
   });
-};
+  
+  return io;
+}
 
-// Helper to emit 2 AI questions per set, using latest code and context
-async function emitAIQuestions(roomName, io, setNum) {
-  const ctx = roomTimers[roomName] || {};
-  const code = ctx.code || "";
-  const languageId = ctx.languageId || "";
-  const experience = ctx.experience || "";
-  const prompt = `Given the following code (language ID: ${languageId}, experience: ${experience}):\n\n${code}\n\nGenerate 2 technical interview questions about this code. Format as Q1: <question>\nQ2: <question>.`;
-  const aiResult = await analyzeCode({ code: prompt, language: languageId, userId: null, roomName });
-  if (aiResult && aiResult.question) {
-    const questions = aiResult.question.split(/Q[12]:/).map(q => q.trim()).filter(Boolean);
-    questions.forEach(q => {
-      io.to(roomName).emit('aiQuestion', { question: q, type: 'interview', context: { set: setNum, languageId, experience } });
-    });
-  }
-} 
+module.exports = { initializeSocket };

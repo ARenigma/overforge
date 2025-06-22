@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Video, VideoOff, Mic, MicOff, Phone, PhoneOff } from "lucide-react"
 
 interface VideoPanelProps {
@@ -101,7 +100,7 @@ export default function VideoPanel({ roomId, userId, socket }: VideoPanelProps) 
       }
 
       // Listen for WebRTC signals
-      socket.on("webrtc-signal", async ({ from, signal }) => {
+      socket.on("webrtc-signal", async ({ from, signal }: { from: string; signal: any }) => {
         if (from === userId) return // Ignore own signals
 
         try {
@@ -128,7 +127,7 @@ export default function VideoPanel({ roomId, userId, socket }: VideoPanelProps) 
       socket.emit("join-video-call", { roomId, userId })
 
       // Listen for other users joining
-      socket.on("user-joined-video", async ({ userId: remoteUserId }) => {
+      socket.on("user-joined-video", async ({ userId: remoteUserId }: { userId: string }) => {
         if (remoteUserId !== userId) {
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
@@ -186,72 +185,84 @@ export default function VideoPanel({ roomId, userId, socket }: VideoPanelProps) 
   }
 
   return (
-    <Card className="w-full">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center justify-between">
-          <span>Video Conference</span>
-          <div className="flex items-center gap-2">
-            {isConnected && <span className="text-sm text-green-600 font-medium">Connected</span>}
-            {isConnecting && <span className="text-sm text-yellow-600 font-medium">Connecting...</span>}
-          </div>
-        </CardTitle>
-      </CardHeader>
-
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Local Video */}
-          <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
-            <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-            <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-sm">You</div>
-            {!isVideoEnabled && (
-              <div className="absolute inset-0 bg-gray-800 flex items-center justify-center">
-                <VideoOff className="h-8 w-8 text-gray-400" />
-              </div>
-            )}
-          </div>
-
-          {/* Remote Video */}
-          <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
-            {remoteStream ? (
-              <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center text-gray-400">
-                <div className="text-center">
-                  <Video className="h-8 w-8 mx-auto mb-2" />
-                  <p className="text-sm">Waiting for participant...</p>
-                </div>
-              </div>
-            )}
-            {remoteStream && (
-              <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-sm">
-                Participant
-              </div>
-            )}
-          </div>
+    <div className="w-full h-full flex flex-col">
+      {/* Status */}
+      {(isConnected || isConnecting) && (
+        <div className="flex justify-end text-[10px]">
+          {isConnected && <span className="text-green-600 font-medium">Connected</span>}
+          {isConnecting && <span className="text-yellow-600 font-medium">Connecting...</span>}
         </div>
+      )}
 
-        {/* Controls */}
-        <div className="flex items-center justify-center gap-2">
-          {!localStream ? (
-            <Button onClick={initializeWebRTC} disabled={isConnecting}>
-              <Phone className="h-4 w-4 mr-2" />
-              {isConnecting ? "Connecting..." : "Join Call"}
-            </Button>
-          ) : (
-            <>
-              <Button variant={isVideoEnabled ? "default" : "destructive"} size="icon" onClick={toggleVideo}>
-                {isVideoEnabled ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
-              </Button>
-              <Button variant={isAudioEnabled ? "default" : "destructive"} size="icon" onClick={toggleAudio}>
-                {isAudioEnabled ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
-              </Button>
-              <Button variant="destructive" size="icon" onClick={endCall}>
-                <PhoneOff className="h-4 w-4" />
-              </Button>
-            </>
+      {/* Video grid */}
+      <div className="grid grid-cols-2 gap-1 flex-grow">
+        {/* Local Video */}
+        <div className="relative bg-muted rounded-lg overflow-hidden aspect-video">
+          <video ref={localVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+          <div className="absolute bottom-1 left-1 bg-black/50 text-white px-1 py-0.5 rounded text-[10px]">You</div>
+          {!isVideoEnabled && (
+            <div className="absolute inset-0 bg-muted/80 flex items-center justify-center">
+              <VideoOff className="h-4 w-4 text-muted-foreground" />
+            </div>
           )}
         </div>
-      </CardContent>
-    </Card>
+
+        {/* Remote Video */}
+        <div className="relative bg-muted rounded-lg overflow-hidden aspect-video">
+          {remoteStream ? (
+            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+              <div className="text-center">
+                <Video className="h-4 w-4 mx-auto mb-1" />
+                <p className="text-[10px]">Waiting...</p>
+              </div>
+            </div>
+          )}
+          {remoteStream && (
+            <div className="absolute bottom-1 left-1 bg-black/50 text-white px-1 py-0.5 rounded text-[10px]">
+              Peer
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex items-center justify-center gap-1">
+        {!localStream ? (
+          <Button onClick={initializeWebRTC} disabled={isConnecting} size="sm" className="h-6 text-[10px] py-0">
+            <Phone className="h-3 w-3 mr-0.5" />
+            {isConnecting ? "Connecting..." : "Join Call"}
+          </Button>
+        ) : (
+          <>
+            <Button 
+              variant={isVideoEnabled ? "default" : "destructive"} 
+              size="sm" 
+              onClick={toggleVideo}
+              className="h-5 w-5 p-0"
+            >
+              {isVideoEnabled ? <Video className="h-2.5 w-2.5" /> : <VideoOff className="h-2.5 w-2.5" />}
+            </Button>
+            <Button 
+              variant={isAudioEnabled ? "default" : "destructive"} 
+              size="sm" 
+              onClick={toggleAudio}
+              className="h-5 w-5 p-0"
+            >
+              {isAudioEnabled ? <Mic className="h-2.5 w-2.5" /> : <MicOff className="h-2.5 w-2.5" />}
+            </Button>
+            <Button 
+              variant="destructive" 
+              size="sm" 
+              onClick={endCall}
+              className="h-5 w-5 p-0"
+            >
+              <PhoneOff className="h-2.5 w-2.5" />
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
   )
 }

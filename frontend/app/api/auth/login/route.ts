@@ -1,31 +1,31 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextRequest, NextResponse } from 'next/server'
 
 export async function POST(request: NextRequest) {
   try {
-    const { usernameOrEmail, password } = await request.json()
-
-    if (!usernameOrEmail || !password) {
-      return NextResponse.json({ message: "Username/email and password are required" }, { status: 400 })
-    }
-
-    // Forward the request to your backend
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:5000"
-
-    const response = await fetch(`${backendUrl}/api/users/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ usernameOrEmail, password }),
+    const body = await request.json()
+    
+    // Forward the request to the backend
+    const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
+    const response = await fetch(`${backendUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
     })
 
+    const data = await response.json()
+
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}))
-      return NextResponse.json({ message: errorData.message || "Login failed" }, { status: response.status })
+      return NextResponse.json(data, { status: response.status })
     }
 
-    const data = await response.json()
     return NextResponse.json(data)
   } catch (error) {
-    console.error("Login error:", error)
-    return NextResponse.json({ message: "Login failed" }, { status: 500 })
+    console.error('Login API error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
   }
-}
+} 
