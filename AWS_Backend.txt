@@ -1,0 +1,26 @@
+AWS Backend Developer - Senior Level
+
+We are seeking a Senior AWS Backend Developer to build scalable cloud-native applications.
+
+Key Responsibilities:
+- Design and implement AWS Lambda functions for serverless microservices
+- Develop APIs using AWS API Gateway and integrate with DynamoDB
+- Build event-driven architectures using SQS, SNS, and EventBridge
+- Implement infrastructure as code using AWS CloudFormation
+- Design and optimize DynamoDB table structures and GSI patterns
+- Configure AWS Cognito for authentication and authorization
+- Implement caching strategies using AWS ElastiCache
+- Monitor applications using CloudWatch and X-Ray distributed tracing
+- Deploy applications using AWS CodePipeline and CodeDeploy
+
+Technical Requirements:
+- 4+ years experience with AWS services (Lambda, DynamoDB, API Gateway)
+- Strong knowledge of serverless architecture patterns
+- Experience with AWS SDK (Python/Node.js) and boto3
+- Proficiency in DynamoDB data modeling and query optimization
+- Understanding of AWS IAM roles and security best practices
+- Experience with Infrastructure as Code (CloudFormation, CDK)
+- Knowledge of event-driven architectures and messaging patterns
+- Familiarity with AWS monitoring and logging services
+
+This is a senior backend role focused entirely on AWS cloud services.

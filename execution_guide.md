@@ -1,4 +1,4 @@
-# Step-by-Step Execution Guide for Real-Time Coding Interview Platform
+# Step-by-Step Execution Guide for overForge Platform
 
 This guide will help you set up and run the platform locally using the free/open-source stack described in `techstack.md`.
 

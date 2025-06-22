@@ -5,9 +5,8 @@ import type React from "react"
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useAuth } from "@/context/auth-context"
+import { useAuth } from "@/hooks/useAuth"
 import { Send, MessageCircle } from "lucide-react"
 
 interface Message {
@@ -74,7 +73,7 @@ export default function ChatPanel({ roomId, socket }: ChatPanelProps) {
       // Create a new message object
       const newMessage: Message = {
         id: data.messageId,
-        userId: user.id,
+        userId: String(user.id),
         username: user.username,
         content: inputValue.trim(),
         timestamp: new Date().toISOString(),
@@ -101,59 +100,50 @@ export default function ChatPanel({ roomId, socket }: ChatPanelProps) {
   }
 
   return (
-    <Card className="h-full flex flex-col">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2">
-          <MessageCircle className="h-5 w-5" />
-          Chat
-        </CardTitle>
-      </CardHeader>
-
-      <CardContent className="flex-1 flex flex-col p-0">
-        <ScrollArea className="flex-1 px-4">
-          <div className="space-y-4 pb-4">
-            {messages.length === 0 ? (
-              <p className="text-center text-muted-foreground text-sm py-8">No messages yet. Start the conversation!</p>
-            ) : (
-              messages.map((message) => (
+    <div className="h-full flex flex-col">
+      <ScrollArea className="flex-1 px-2">
+        <div className="space-y-2 py-2">
+          {messages.length === 0 ? (
+            <p className="text-center text-muted-foreground text-xs py-4">No messages yet. Start the conversation!</p>
+          ) : (
+            messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex flex-col ${message.userId === String(user?.id) ? "items-end" : "items-start"}`}
+              >
                 <div
-                  key={message.id}
-                  className={`flex flex-col ${message.userId === user?.id ? "items-end" : "items-start"}`}
+                  className={`max-w-[85%] rounded-lg p-2 ${
+                    message.userId === String(user?.id) ? "bg-primary text-primary-foreground" : "bg-muted"
+                  }`}
                 >
-                  <div
-                    className={`max-w-[80%] rounded-lg p-3 ${
-                      message.userId === user?.id ? "bg-primary text-primary-foreground" : "bg-muted"
-                    }`}
-                  >
-                    <p className="text-sm">{message.content}</p>
-                  </div>
-                  <div className="flex items-center mt-1 text-xs text-muted-foreground">
-                    <span className="font-medium">{message.username}</span>
-                    <span className="ml-2">{new Date(message.timestamp).toLocaleTimeString()}</span>
-                  </div>
+                  <p className="text-xs">{message.content}</p>
                 </div>
-              ))
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-        </ScrollArea>
-
-        <div className="p-4 border-t">
-          <form onSubmit={handleSendMessage} className="flex gap-2">
-            <Input
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder="Type a message..."
-              disabled={isLoading}
-              className="flex-1"
-            />
-            <Button type="submit" size="icon" disabled={!inputValue.trim() || isLoading}>
-              <Send className="h-4 w-4" />
-            </Button>
-          </form>
+                <div className="flex items-center mt-0.5 text-xs text-muted-foreground">
+                  <span className="font-medium text-[10px]">{message.username}</span>
+                  <span className="ml-1 text-[10px]">{new Date(message.timestamp).toLocaleTimeString()}</span>
+                </div>
+              </div>
+            ))
+          )}
+          <div ref={messagesEndRef} />
         </div>
-      </CardContent>
-    </Card>
+      </ScrollArea>
+
+      <div className="p-2 border-t">
+        <form onSubmit={handleSendMessage} className="flex gap-1">
+          <Input
+            type="text"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            placeholder="Type a message..."
+            disabled={isLoading}
+            className="flex-1 h-8 text-xs"
+          />
+          <Button type="submit" size="icon" disabled={!inputValue.trim() || isLoading} className="h-8 w-8">
+            <Send className="h-3 w-3" />
+          </Button>
+        </form>
+      </div>
+    </div>
   )
 }

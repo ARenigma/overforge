@@ -12,14 +12,13 @@ import { javascript } from "@codemirror/lang-javascript"
 import { python } from "@codemirror/lang-python"
 import { cpp } from "@codemirror/lang-cpp"
 import { java } from "@codemirror/lang-java"
-import { useAuth } from "@/context/auth-context"
+import { useAuth } from "@/hooks/useAuth"
 import { Play, Code, Terminal } from "lucide-react"
 
 interface CodeEditorProps {
   value: string
-  onChange: (value: string) => void
+  onChangeAction: (value: string) => void
   language: string
-  onLanguageChange: (language: string) => void
 }
 
 const languages = [
@@ -29,7 +28,7 @@ const languages = [
   { value: "java", label: "Java", id: 62 },
 ]
 
-export default function CodeEditor({ value, onChange, language, onLanguageChange }: CodeEditorProps) {
+export default function CodeEditor({ value, onChangeAction, language }: CodeEditorProps) {
   const [output, setOutput] = useState("")
   const [isRunning, setIsRunning] = useState(false)
   const [executionTime, setExecutionTime] = useState<number | null>(null)
@@ -96,63 +95,34 @@ export default function CodeEditor({ value, onChange, language, onLanguageChange
   }
 
   return (
-    <Card className="h-full flex flex-col">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2">
-            <Code className="h-5 w-5" />
-            Code Editor
-          </CardTitle>
-          <div className="flex items-center gap-2">
-            <Select value={language} onValueChange={onLanguageChange}>
-              <SelectTrigger className="w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {languages.map((lang) => (
-                  <SelectItem key={lang.value} value={lang.value}>
-                    {lang.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button onClick={handleRunCode} disabled={isRunning} size="sm">
-              <Play className="h-4 w-4 mr-2" />
-              {isRunning ? "Running..." : "Run"}
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
+    <div className="h-full flex flex-col">
+      <div className="flex-1">
+        <CodeMirror
+          value={value}
+          height="100%"
+          extensions={[getLanguageExtension(), EditorView.lineWrapping]}
+          onChange={onChangeAction}
+          theme="light"
+          className="overflow-auto bg-card"
+        />
+      </div>
 
-      <CardContent className="flex-1 flex flex-col p-0">
-        <div className="flex-1 border-b">
-          <CodeMirror
-            value={value}
-            height="400px"
-            extensions={[getLanguageExtension(), EditorView.lineWrapping]}
-            onChange={onChange}
-            theme="dark"
-            className="overflow-auto"
-          />
-        </div>
-
-        {(output || isRunning) && (
-          <div className="h-48 border-t">
-            <div className="flex items-center justify-between p-3 bg-muted/50 border-b">
-              <div className="flex items-center gap-2">
-                <Terminal className="h-4 w-4" />
-                <span className="font-medium">Output</span>
-              </div>
-              {executionTime && <Badge variant="outline">{executionTime}ms</Badge>}
+      {(output || isRunning) && (
+        <div className="h-48 border-t">
+          <div className="flex items-center justify-between p-3 bg-muted/50 border-b">
+            <div className="flex items-center gap-2">
+              <Terminal className="h-4 w-4" />
+              <span className="font-medium">Output</span>
             </div>
-            <ScrollArea className="h-[calc(100%-49px)]">
-              <pre className="p-4 text-sm font-mono whitespace-pre-wrap">
-                {isRunning ? "Executing code..." : output}
-              </pre>
-            </ScrollArea>
+            {executionTime && <Badge variant="outline">{executionTime}ms</Badge>}
           </div>
-        )}
-      </CardContent>
-    </Card>
+          <ScrollArea className="h-[calc(100%-49px)]">
+            <pre className="p-4 text-sm font-mono text-green-500 whitespace-pre-wrap">
+              {isRunning ? "Executing code..." : output}
+            </pre>
+          </ScrollArea>
+        </div>
+      )}
+    </div>
   )
 }

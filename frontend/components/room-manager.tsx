@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { useAuth } from "@/context/auth-context"
+import { useAuth } from "@/hooks/useAuth"
 import { Plus, Users, ArrowRight, Loader2 } from "lucide-react"
 
 interface Room {
@@ -140,7 +140,7 @@ export default function RoomManager() {
         <div className="text-center">
           <h1 className="text-3xl font-bold">Room Manager</h1>
           <p className="text-muted-foreground mt-2">
-            Create a new room or join an existing one to start your coding interview
+            Create a new room or join an existing one to start your <span className="text-gray-900">over</span><span className="text-orange-500 font-bold">Forge</span> session
           </p>
         </div>
 
@@ -164,7 +164,7 @@ export default function RoomManager() {
                 <Plus className="h-5 w-5" />
                 Create New Room
               </CardTitle>
-              <CardDescription>Start a new coding interview session</CardDescription>
+              <CardDescription>Start a new overForge session</CardDescription>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleCreateRoom} className="space-y-4">

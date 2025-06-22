@@ -37,7 +37,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   useEffect(() => {
     // Check if user is authenticated
-    const token = localStorage.getItem("token")
+    const token = localStorage.getItem("auth_token")
     if (!token) {
       router.push("/login")
       return
@@ -49,7 +49,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   const fetchUserData = async () => {
     try {
-      const token = localStorage.getItem("token")
+      const token = localStorage.getItem("auth_token")
       const response = await fetch("/api/user/profile", {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -66,7 +66,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }
 
   const handleLogout = () => {
-    localStorage.removeItem("token")
+    localStorage.removeItem("auth_token")
+    localStorage.removeItem("user")
+    localStorage.removeItem("selectedLanguage")
+    localStorage.removeItem("selectedExperience")
     router.push("/login")
   }
 

@@ -1,215 +1,181 @@
 "use client"
 
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ArrowRight, Code, Users, Video, Zap } from "lucide-react"
-import { useEffect } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { useAuth } from "@/context/auth-context"
-import AuthForm from "@/components/auth-form"
+import { Button } from "@/components/ui/button"
+import { UserCheck, Users } from "lucide-react"
+import { useAuth } from "@/hooks/useAuth"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { DotGridBackground } from "@/components/dot-grid-background"
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 
 export default function HomePage() {
-  const { user } = useAuth()
+  const { user, loading, logout } = useAuth()
   const router = useRouter()
+  const [showStrikethrough, setShowStrikethrough] = useState(false)
+  const [showSeconds, setShowSeconds] = useState(false)
 
+  // Animation effect for strikethrough and "seconds" emergence
   useEffect(() => {
-    if (user) {
-      router.push("/dashboard")
-    }
-  }, [user, router])
+    console.log("HomePage mounted, router available:", !!router)
+    
+    const timer1 = setTimeout(() => {
+      setShowStrikethrough(true)
+    }, 800) // Start strikethrough after 0.8 seconds
 
-  if (!user) {
-    return <AuthForm />
+    const timer2 = setTimeout(() => {
+      setShowSeconds(true)
+    }, 1400) // Show "seconds" after strikethrough completes
+
+    return () => {
+      clearTimeout(timer1)
+      clearTimeout(timer2)
+    }
+  }, [router])
+
+  // Button handlers
+  const handleStartPracticing = () => {
+    router.push('/auth?mode=signup')
+  }
+
+  const handleStartInterviewing = () => {
+    router.push('/auth?mode=signup')
+  }
+
+  const handleSignIn = () => {
+    router.push('/auth')
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-orange-500"></div>
+      </div>
+    )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-100">
-      {/* Navigation */}
-      <nav className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <Code className="h-8 w-8 text-purple-600" />
-            <span className="text-xl font-bold text-gray-900">CodeInterview</span>
+    <div className="min-h-screen bg-background text-foreground relative overflow-hidden">
+      <DotGridBackground />
+
+      {/* Header with glass effect */}
+      <header className="fixed top-0 w-full z-50 bg-background/80 backdrop-blur-md border-b border-border">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center py-4">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl text-foreground">Over</span><span className="text-2xl text-orange-500 font-bold">Forge</span>
+            </div>
+            
+            <div className="flex items-center gap-4">
+              <ThemeToggle />
+              {user && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">
+                    Welcome, {user.firstName}
+                  </span>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={logout}
+                    className="flex items-center justify-center"
+                  >
+                    Logout
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="flex items-center space-x-4">
-            <Link href="/auth">
-              <Button variant="ghost">Login</Button>
-            </Link>
-            <Link href="/auth">
-              <Button>Get Started</Button>
-            </Link>
+        </div>
+      </header>
+
+      {/* Main Content - Centered and Aligned with Grid */}
+      <main className="flex items-center justify-center min-h-screen px-4 sm:px-6 lg:px-8">
+        <div className="text-center max-w-4xl mx-auto relative z-10">
+          {/* Hero Title */}
+          <div className="text-center mb-8">
+            <h1 className="text-4xl mb-4">
+              <span className="text-foreground">Over</span><span className="text-orange-500 font-bold">Forge</span>
+            </h1>
+            <p className="text-xl text-muted-foreground mb-8">
+              AI-Powered Technical Interview Platform
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8 mb-12">
+            <Card className="p-6 hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center text-blue-600">
+                  <Users className="mr-2" />
+                  For Candidates
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-4">
+                  Practice coding interviews with AI-powered feedback and real-time assistance.
+                </p>
+                <Button 
+                  className="w-full bg-blue-600 hover:bg-blue-700"
+                  onClick={handleStartPracticing}
+                >
+                  Start Practicing
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card className="p-6 hover:shadow-lg transition-shadow">
+              <CardHeader>
+                <CardTitle className="flex items-center text-green-600">
+                  <UserCheck className="mr-2" />
+                  For Interviewers
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground mb-4">
+                  Conduct efficient technical interviews with AI-assisted evaluation tools.
+                </p>
+                <Button 
+                  className="w-full bg-green-600 hover:bg-green-700"
+                  onClick={handleStartInterviewing}
+                >
+                  Start Interviewing
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="text-center">
+            <p className="text-muted-foreground mb-4">
+              Already have an account?
+            </p>
+            <Button 
+              variant="outline" 
+              onClick={handleSignIn}
+              className="border-orange-500 text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-950"
+            >
+              Sign In
+            </Button>
           </div>
         </div>
-      </nav>
+      </main>
 
-      {/* Hero Section */}
-      <section className="container mx-auto px-4 py-20 text-center">
-        <h1 className="text-5xl font-bold text-gray-900 mb-6">
-          Real-Time
-          <span className="text-purple-600"> Coding Interviews</span>
-        </h1>
-        <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
-          Conduct seamless technical interviews with collaborative coding, video chat, and AI-powered questions. Perfect
-          for remote hiring and technical assessments.
-        </p>
-        <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <Link href="/auth">
-            <Button size="lg" className="w-full sm:w-auto">
-              Start Interviewing
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
-          </Link>
-          <Link href="#demo">
-            <Button variant="outline" size="lg" className="w-full sm:w-auto">
-              Watch Demo
-            </Button>
-          </Link>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section className="container mx-auto px-4 py-20">
-        <div className="text-center mb-16">
-          <h2 className="text-3xl font-bold text-gray-900 mb-4">Everything you need for technical interviews</h2>
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Our platform provides all the tools you need to conduct effective coding interviews.
-          </p>
-        </div>
-
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8">
-          <Card className="border-0 shadow-lg">
-            <CardHeader>
-              <Code className="h-12 w-12 text-purple-600 mb-4" />
-              <CardTitle>Collaborative Coding</CardTitle>
-              <CardDescription>
-                Real-time code editing with syntax highlighting and multiple language support.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-
-          <Card className="border-0 shadow-lg">
-            <CardHeader>
-              <Video className="h-12 w-12 text-blue-600 mb-4" />
-              <CardTitle>Video Chat</CardTitle>
-              <CardDescription>
-                Built-in video conferencing for face-to-face interviews and screen sharing.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-
-          <Card className="border-0 shadow-lg">
-            <CardHeader>
-              <Zap className="h-12 w-12 text-green-600 mb-4" />
-              <CardTitle>Code Execution</CardTitle>
-              <CardDescription>
-                Run and test code in real-time with support for multiple programming languages.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-
-          <Card className="border-0 shadow-lg">
-            <CardHeader>
-              <Users className="h-12 w-12 text-orange-600 mb-4" />
-              <CardTitle>AI Questions</CardTitle>
-              <CardDescription>
-                Smart question generation based on experience level and programming language.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="bg-purple-600 text-white py-20">
-        <div className="container mx-auto px-4 text-center">
-          <h2 className="text-3xl font-bold mb-4">Ready to revolutionize your hiring process?</h2>
-          <p className="text-xl mb-8 opacity-90">
-            Join hundreds of companies using CodeInterview for their technical assessments.
-          </p>
-          <Link href="/auth">
-            <Button size="lg" variant="secondary">
-              Start Your Free Trial
-            </Button>
-          </Link>
-        </div>
-      </section>
+      {/* CSS Animation for Glow Effect */}
+      <style jsx>{`
+        @keyframes glow {
+          from {
+            box-shadow: 0 0 5px rgba(249, 115, 22, 0.4), 0 0 10px rgba(249, 115, 22, 0.3), 0 0 15px rgba(249, 115, 22, 0.2);
+          }
+          to {
+            box-shadow: 0 0 10px rgba(249, 115, 22, 0.6), 0 0 20px rgba(249, 115, 22, 0.4), 0 0 30px rgba(249, 115, 22, 0.3);
+          }
+        }
+      `}</style>
 
       {/* Footer */}
-      <footer className="bg-gray-900 text-white py-12">
-        <div className="container mx-auto px-4">
-          <div className="grid md:grid-cols-4 gap-8">
-            <div>
-              <div className="flex items-center space-x-2 mb-4">
-                <Code className="h-6 w-6" />
-                <span className="text-lg font-bold">CodeInterview</span>
-              </div>
-              <p className="text-gray-400">The future of technical interviews is here.</p>
-            </div>
-            <div>
-              <h3 className="font-semibold mb-4">Product</h3>
-              <ul className="space-y-2 text-gray-400">
-                <li>
-                  <Link href="#" className="hover:text-white">
-                    Features
-                  </Link>
-                </li>
-                <li>
-                  <Link href="#" className="hover:text-white">
-                    Pricing
-                  </Link>
-                </li>
-                <li>
-                  <Link href="#" className="hover:text-white">
-                    API
-                  </Link>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="font-semibold mb-4">Company</h3>
-              <ul className="space-y-2 text-gray-400">
-                <li>
-                  <Link href="#" className="hover:text-white">
-                    About
-                  </Link>
-                </li>
-                <li>
-                  <Link href="#" className="hover:text-white">
-                    Blog
-                  </Link>
-                </li>
-                <li>
-                  <Link href="#" className="hover:text-white">
-                    Careers
-                  </Link>
-                </li>
-              </ul>
-            </div>
-            <div>
-              <h3 className="font-semibold mb-4">Support</h3>
-              <ul className="space-y-2 text-gray-400">
-                <li>
-                  <Link href="#" className="hover:text-white">
-                    Help Center
-                  </Link>
-                </li>
-                <li>
-                  <Link href="#" className="hover:text-white">
-                    Contact
-                  </Link>
-                </li>
-                <li>
-                  <Link href="#" className="hover:text-white">
-                    Status
-                  </Link>
-                </li>
-              </ul>
-            </div>
-          </div>
-          <div className="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
-            <p>&copy; 2024 CodeInterview. All rights reserved.</p>
-          </div>
+      <footer className="bg-muted py-8">
+        <div className="max-w-4xl mx-auto px-4 text-center">
+          <p className="text-muted-foreground">
+            © 2024 <span className="text-foreground">Over</span><span className="text-orange-500 font-bold">Forge</span>. All rights reserved.
+          </p>
         </div>
       </footer>
     </div>

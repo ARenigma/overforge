@@ -91,4 +91,42 @@ body {
   body {
     @apply bg-background text-foreground;
   }
+  
+  /* Fix input field text visibility */
+  input[type="password"],
+  input[type="text"],
+  input[type="email"] {
+    color: hsl(var(--foreground)) !important;
+    background-color: hsl(var(--background)) !important;
+  }
+  
+  /* Ensure password fields show characters properly */
+  input[type="password"]::-webkit-textfield-decoration-container {
+    display: none !important;
+  }
+}
+
+/* Parameter question styling */
+.parameter-question-container {
+  position: relative;
+}
+
+.parameter-question {
+  border-left: 3px solid #3b82f6;
+}
+
+.parameter-question-content strong {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+}
+
+@keyframes highlight-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+
+.highlight-parameter-question {
+  animation: highlight-pulse 2s ease-out;
 }
