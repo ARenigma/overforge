@@ -14,9 +14,35 @@ module.exports = (sequelize, DataTypes) => {
     }
   }
   Room.init({
-    name: DataTypes.STRING,
-    createdBy: DataTypes.INTEGER,
-    isActive: DataTypes.BOOLEAN
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      unique: true,
+      validate: {
+        notEmpty: true,
+        len: [3, 32] // Example validation
+      }
+    },
+    createdBy: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      references: {
+        model: 'Users', // Assumes your User model is named 'Users'
+        key: 'id'
+      }
+    },
+    isActive: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: true
+    },
+    language: {
+      type: DataTypes.STRING,
+      allowNull: true // Or false if it's mandatory at room creation
+    },
+    experienceLevel: {
+      type: DataTypes.STRING, // e.g., "0-2", "2-5", "5+"
+      allowNull: true // Or false
+    }
   }, {
     sequelize,
     modelName: 'Room',

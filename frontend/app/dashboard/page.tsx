@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -9,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { BarChart3, Users, TrendingUp, Activity, Plus, Download, Filter, Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import DashboardLayout from "@/components/dashboard-layout"
+import { useSupabaseAuth } from "@/context/SupabaseAuthContext"
 
 interface DashboardData {
   stats: {
@@ -37,36 +39,77 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
+  const router = useRouter()
+  const { user, token, loading: authLoading } = useSupabaseAuth()
 
+  // Add debugging logs
   useEffect(() => {
-    fetchDashboardData()
-  }, [])
+    console.log('Dashboard - Auth state:', { user, token, authLoading })
+    if (!authLoading && !user) {
+      console.log('Dashboard - No user found, redirecting to login')
+      router.push('/auth/login')
+      return
+    }
+    if (user && token) {
+      console.log('Dashboard - User authenticated, fetching data')
+      fetchDashboardData()
+    }
+  }, [user, token, authLoading, router])
 
   const fetchDashboardData = async () => {
     try {
-      const token = localStorage.getItem("token")
+      console.log('Dashboard - Fetching data with token:', !!token)
+      
+      if (!token) {
+        console.log('Dashboard - No token available for API call')
+        setIsLoading(false)
+        return
+      }
+
       const response = await fetch("/api/dashboard", {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       })
 
+      console.log('Dashboard - API response status:', response.status)
+
       if (response.ok) {
         const dashboardData = await response.json()
+        console.log('Dashboard - Data fetched successfully')
         setData(dashboardData)
+      } else {
+        console.error('Dashboard - API error:', response.status, response.statusText)
       }
     } catch (error) {
-      console.error("Failed to fetch dashboard data:", error)
+      console.error("Dashboard - Failed to fetch dashboard data:", error)
     } finally {
       setIsLoading(false)
     }
   }
 
-  if (isLoading) {
+  if (authLoading || isLoading) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">
+              {authLoading ? 'Checking authentication...' : 'Loading dashboard...'}
+            </p>
+          </div>
+        </div>
+      </DashboardLayout>
+    )
+  }
+
+  if (!user) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <p className="text-gray-600">Redirecting to login...</p>
+          </div>
         </div>
       </DashboardLayout>
     )

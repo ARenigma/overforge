@@ -1,19 +1,33 @@
 // app/api/room/[id]/route.ts
 
-import type { NextApiRequest, NextApiResponse } from "next"
+import { type NextRequest, NextResponse } from "next/server"
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
-  const { id } = req.query
+export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const authHeader = request.headers.get("authorization")
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
+    }
 
-  if (req.method === "GET") {
-    // Handle GET request
-    res.status(200).json({ roomId: id })
-  } else if (req.method === "POST") {
-    // Handle POST request
-    res.status(201).json({ message: "Room created successfully", roomId: id })
-  } else {
-    // Handle other HTTP methods
-    res.setHeader("Allow", ["GET", "POST"])
-    res.status(405).end(`Method ${req.method} Not Allowed`)
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:5000"
+    const { id } = params
+
+    const response = await fetch(`${backendUrl}/api/rooms/${id}`, {
+      method: "GET",
+      headers: {
+        Authorization: authHeader,
+      },
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return NextResponse.json({ message: errorData.message || "Failed to fetch room" }, { status: response.status })
+    }
+
+    const data = await response.json()
+    return NextResponse.json(data)
+  } catch (error) {
+    console.error("Fetch room error:", error)
+    return NextResponse.json({ message: "Failed to fetch room" }, { status: 500 })
   }
 }

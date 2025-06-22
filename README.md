@@ -1,6 +1,6 @@
-# Real-Time Coding Interview Platform
+# overForge Platform
 
-A full-stack platform for real-time coding interviews with collaborative editing, video, code execution, and AI-powered counter-questioning.
+A full-stack real-time collaborative coding platform with AI-powered interviews, assessments, and intelligent counter-questioning.
 
 - **Frontend:** React, CodeMirror, WebRTC
 - **Backend:** Node.js, Express, Socket.io

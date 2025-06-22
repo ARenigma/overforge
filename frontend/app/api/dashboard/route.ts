@@ -1,5 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
 
+export const dynamic = 'force-dynamic'
+
 // Mock dashboard data
 const dashboardData = {
   stats: {
@@ -86,4 +88,4 @@ export async function GET(request: NextRequest) {
     console.error("Dashboard API error:", error)
     return NextResponse.json({ message: "Internal server error" }, { status: 500 })
   }
-}
+} 
