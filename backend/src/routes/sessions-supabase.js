@@ -4,6 +4,7 @@ const { authenticateSupabase, optionalAuth } = require('../middleware/supabase-a
 const SupabaseSessionService = require('../services/supabase-session');
 const SupabaseUserService = require('../services/supabase-user');
 const rateLimit = require('express-rate-limit');
+const { supabase } = require('../config/supabase');
 
 const router = express.Router();
 
@@ -169,10 +170,163 @@ router.get('/my-sessions', authenticateSupabase, async (req, res) => {
   }
 });
 
+// Simple test route for debugging (above the problems route)
+router.get('/:sessionId/test', optionalAuth, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    console.log(`🧪 TEST ROUTE: ${sessionId}`);
+    
+    res.json({
+      success: true,
+      message: 'Test route working',
+      sessionId: sessionId,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Test route error:', error);
+    res.status(500).json({ success: false, error: 'Test route failed' });
+  }
+});
+
+// Get session problems for room interface (must come before /:id route)
+router.get('/:sessionId/problems', optionalAuth, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    
+    console.log(`🔍 Fetching problems for session: ${sessionId}`);
+    
+    // Check both old session format and new parameter-based format
+    let session = null;
+    let isParameterSession = false;
+    
+    // First try interview_sessions_v2 (parameter-based) - Start with simple query
+    console.log(`🔍 Trying simple query first...`);
+    const { data: simpleSession, error: simpleError } = await supabase
+      .from('interview_sessions_v2')
+      .select('*')
+      .eq('session_id', sessionId)
+      .single();
+    
+    console.log(`Simple query result:`, { data: simpleSession ? 'FOUND' : 'NOT FOUND', error: simpleError });
+    
+        if (simpleSession && !simpleError) {
+      console.log(`🔍 Fetching related problems manually...`);
+      
+      // Fetch core problem manually
+      let coreProblems = [];
+      if (simpleSession.core_language_problem_id) {
+        const { data: coreProblem, error: coreError } = await supabase
+          .from('master_problems')
+          .select('id, title, description, difficulty_level, time_estimate')
+          .eq('id', simpleSession.core_language_problem_id)
+          .single();
+        
+        if (coreProblem && !coreError) {
+          coreProblems = [coreProblem];
+        }
+        console.log(`Core problem:`, coreProblem ? 'FOUND' : 'NOT FOUND', coreError?.message);
+      }
+      
+      // Fetch tech problem manually
+      let techProblems = [];
+      if (simpleSession.tech_stack_problem_id) {
+        const { data: techProblem, error: techError } = await supabase
+          .from('master_problems')
+          .select('id, title, description, difficulty_level, time_estimate')
+          .eq('id', simpleSession.tech_stack_problem_id)
+          .single();
+        
+        if (techProblem && !techError) {
+          techProblems = [techProblem];
+        }
+        console.log(`Tech problem:`, techProblem ? 'FOUND' : 'NOT FOUND', techError?.message);
+      }
+      
+      // Combine the session with the problems
+      session = {
+        ...simpleSession,
+        core_problem: coreProblems,
+        tech_problem: techProblems
+      };
+      isParameterSession = true;
+      console.log(`✅ Found parameter-based session with ${coreProblems.length + techProblems.length} problems: ${sessionId}`);
+    }
+    
+    // Note: No legacy table fallback since interview_sessions table doesn't exist
+    
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+    
+    let problems = [];
+    
+    if (isParameterSession) {
+      // Format problems from parameter-based session
+      problems = [];
+      
+      if (session.core_problem && session.core_problem.length > 0) {
+        const coreProblem = session.core_problem[0];
+        problems.push({
+          id: `core-${coreProblem.id}`,
+          title: `${session.core_language} Problem`,
+          description: coreProblem.description,
+          language: session.core_language.toLowerCase(),
+          category: 'core_language',
+          difficulty: coreProblem.difficulty_level,
+          timeEstimate: coreProblem.time_estimate
+        });
+      }
+      
+      if (session.tech_problem && session.tech_problem.length > 0) {
+        const techProblem = session.tech_problem[0];
+        problems.push({
+          id: `tech-${techProblem.id}`,
+          title: `${session.tech_stack} Problem`,
+          description: techProblem.description,
+          language: session.core_language.toLowerCase(), // Use core language for coding
+          category: 'tech_stack',
+          difficulty: techProblem.difficulty_level,
+          timeEstimate: techProblem.time_estimate
+        });
+      }
+      
+      console.log(`📋 Loaded ${problems.length} problems from parameter session`);
+    } else {
+      // Handle legacy session format (if needed)
+      console.log(`📋 Legacy session format - falling back to AI generation`);
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        sessionId: sessionId,
+        isParameterSession: isParameterSession,
+        sessionType: isParameterSession ? 'parameter_based' : 'legacy',
+        coreLanguage: session.core_language || session.language,
+        techStack: session.tech_stack,
+        seniorityLevel: session.seniority_level || session.experienceLevel,
+        problems: problems,
+        sessionData: session
+      }
+    });
+    
+  } catch (error) {
+    console.error(`❌ Error fetching session problems for ${req.params.sessionId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch session problems'
+    });
+  }
+});
+
 // Get session by ID
 router.get('/:id', authenticateSupabase, async (req, res) => {
   try {
     const { id } = req.params;
+    
     const session = await SupabaseSessionService.findById(id);
 
     if (!session) {
@@ -183,11 +337,16 @@ router.get('/:id', authenticateSupabase, async (req, res) => {
     }
 
     // Check if user has access to this session (admin has global access)
+    // Handle both legacy and parameter-based session field names
+    const interviewerId = session.interviewer_id || session.interviewerId;
+    const candidateId = session.candidate_id || session.candidateId;
+    const isPublic = session.is_public || session.isPublic;
+    
     const hasAccess = 
       req.user.role === 'admin' ||
-      session.interviewerId === req.user.id ||
-      session.candidateId === req.user.id ||
-      (session.isPublic && req.user.role === 'candidate');
+      interviewerId === req.user.id ||
+      candidateId === req.user.id ||
+      (isPublic && req.user.role === 'candidate');
 
     if (!hasAccess) {
       return res.status(403).json({

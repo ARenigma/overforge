@@ -1,0 +1,23 @@
+# Ignore virtualenv
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+
+# Ignore sensitive files
+.env
+*.sqlite3
+*.log
+
+# Ignore IDE/editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db 

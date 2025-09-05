@@ -62,13 +62,48 @@ class SupabaseSessionService {
    * Find session by ID
    */
   static async findById(id) {
+    // Check if this is a parameter-based session (starts with 'param-')
+    if (id && id.startsWith('param-')) {
+      // Handle parameter-based sessions from interview_sessions_v2
+      const { data: session, error } = await supabase
+        .from('interview_sessions_v2')
+        .select('*')
+        .eq('session_id', id)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        throw new Error(`Database error: ${error.message}`);
+      }
+
+      if (!session) {
+        return null;
+      }
+
+      // Fetch interviewer and candidate data separately to avoid foreign key issues
+      const [interviewerData, candidateData] = await Promise.all([
+        session.interviewer_id ? supabase
+          .from('Users')
+          .select('id, firstName, lastName, email, role')
+          .eq('id', session.interviewer_id)
+          .single() : { data: null, error: null },
+        session.candidate_id ? supabase
+          .from('Users')
+          .select('id, firstName, lastName, email, role')
+          .eq('id', session.candidate_id)
+          .single() : { data: null, error: null }
+      ]);
+
+      return {
+        ...session,
+        interviewer: interviewerData.data,
+        candidate: candidateData.data
+      };
+    }
+
+    // Handle legacy sessions from interview_sessions
     const { data, error } = await supabase
       .from('interview_sessions')
-      .select(`
-        *,
-        interviewer:Users!interview_sessions_interviewerId_fkey(id, firstName, lastName, email, role),
-        candidate:Users!interview_sessions_candidateId_fkey(id, firstName, lastName, email, role)
-      `)
+      .select('*')
       .eq('id', id)
       .single();
 
@@ -76,7 +111,29 @@ class SupabaseSessionService {
       throw new Error(`Database error: ${error.message}`);
     }
 
-    return data;
+    if (!data) {
+      return null;
+    }
+
+    // Fetch interviewer and candidate data separately to avoid foreign key issues
+    const [interviewerData, candidateData] = await Promise.all([
+      data.interviewerId ? supabase
+        .from('Users')
+        .select('id, firstName, lastName, email, role')
+        .eq('id', data.interviewerId)
+        .single() : { data: null, error: null },
+      data.candidateId ? supabase
+        .from('Users')
+        .select('id, firstName, lastName, email, role')
+        .eq('id', data.candidateId)
+        .single() : { data: null, error: null }
+    ]);
+
+    return {
+      ...data,
+      interviewer: interviewerData.data,
+      candidate: candidateData.data
+    };
   }
 
   /**

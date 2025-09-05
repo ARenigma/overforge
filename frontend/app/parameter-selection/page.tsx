@@ -25,6 +25,7 @@ import {
   TrendingUp
 } from "lucide-react"
 import { DotGridBackground } from "@/components/dot-grid-background"
+import { useSupabaseAuth } from "@/context/SupabaseAuthContext"
 
 interface CoreLanguage {
   name: string
@@ -95,6 +96,8 @@ const getCategoryIcon = (category: string) => {
   }
 }
 
+type AssessmentMode = 'core_only' | 'core_and_framework' | 'tech_stack';
+
 export default function ParameterSelectionPage() {
   const [coreLanguages, setCoreLanguages] = useState<CoreLanguage[]>([])
   const [techStacks, setTechStacks] = useState<GroupedTechStacks>({})
@@ -106,44 +109,29 @@ export default function ParameterSelectionPage() {
   const [selectedSubcategory, setSelectedSubcategory] = useState("")
   const [selectedSeniority, setSelectedSeniority] = useState("")
   
+  const [assessmentMode, setAssessmentMode] = useState<AssessmentMode>('tech_stack');
+
   const [loading, setLoading] = useState(false)
   const [problemsLoading, setProblemsLoading] = useState(false)
-  const [user, setUser] = useState<any>(null)
   const [error, setError] = useState<string | null>(null)
   
   const router = useRouter()
+  const { user, token, loading: authLoading } = useSupabaseAuth()
 
   useEffect(() => {
-    const token = localStorage.getItem("auth_token")
-    const userData = localStorage.getItem("user")
-
-    if (!token || !userData) {
-      router.push("/auth")
+    console.log('Parameter Selection - Auth state:', { user, token, authLoading })
+    if (!authLoading && !user) {
+      console.log('Parameter Selection - No user found, redirecting to login')
+      router.push('/auth/login')
       return
     }
-
-    try {
-      const parsedUser = JSON.parse(userData)
-      
-      if (!parsedUser || !parsedUser.id) {
-        localStorage.removeItem("user")
-        localStorage.removeItem("auth_token")
-        router.push("/auth")
-        return
-      }
-      
-      setUser(parsedUser)
+    if (user && token) {
+      console.log('Parameter Selection - User authenticated, fetching data')
       fetchParameterData(token)
-    } catch (error) {
-      console.error("Error parsing user data:", error)
-      localStorage.removeItem("user")
-      localStorage.removeItem("auth_token")
-      router.push("/auth")
-      return
     }
-  }, [router])
+  }, [user, token, authLoading, router])
 
-  const fetchParameterData = async (token: string) => {
+  const fetchParameterData = async (authToken: string) => {
     try {
       setLoading(true)
       setError(null)
@@ -151,13 +139,13 @@ export default function ParameterSelectionPage() {
       const [coreResponse, techResponse] = await Promise.all([
         fetch('/api/parameter-selection/core-languages', {
           headers: {
-            'Authorization': `Bearer ${token}`,
+            'Authorization': `Bearer ${authToken}`,
             'Content-Type': 'application/json'
           }
         }),
         fetch('/api/parameter-selection/tech-stacks', {
           headers: {
-            'Authorization': `Bearer ${token}`,
+            'Authorization': `Bearer ${authToken}`,
             'Content-Type': 'application/json'
           }
         })
@@ -182,11 +170,46 @@ export default function ParameterSelectionPage() {
   }
 
   const checkAvailableProblems = async () => {
-    if (!selectedCoreLanguage || !selectedTechStack || !selectedSeniority) return
+    const baseParams: {
+      coreLanguage: string;
+      seniorityLevel: string;
+      framework: string | null;
+      techStack: string | null;
+      subcategory: string | null;
+    } = {
+      coreLanguage: selectedCoreLanguage,
+      seniorityLevel: selectedSeniority,
+      framework: null,
+      techStack: null,
+      subcategory: null
+    };
+
+    let canCheck = false;
+    switch (assessmentMode) {
+      case 'core_only':
+        if (selectedCoreLanguage && selectedSeniority) {
+          canCheck = true;
+        }
+        break;
+      case 'core_and_framework':
+        if (selectedCoreLanguage && selectedFramework && selectedSeniority) {
+          baseParams.framework = selectedFramework;
+          canCheck = true;
+        }
+        break;
+      case 'tech_stack':
+        if (selectedCoreLanguage && selectedTechStack && selectedSeniority) {
+          baseParams.techStack = selectedTechStack;
+          baseParams.subcategory = selectedSubcategory;
+          canCheck = true;
+        }
+        break;
+    }
+
+    if (!canCheck) return;
 
     try {
       setProblemsLoading(true)
-      const token = localStorage.getItem("auth_token")
 
       const response = await fetch('/api/parameter-selection/available-problems', {
         method: 'POST',
@@ -194,13 +217,7 @@ export default function ParameterSelectionPage() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          coreLanguage: selectedCoreLanguage,
-          techStack: selectedTechStack,
-          framework: selectedFramework || null,
-          seniorityLevel: selectedSeniority,
-          subcategory: selectedSubcategory || null
-        })
+        body: JSON.stringify(baseParams)
       })
 
       if (response.ok) {
@@ -227,25 +244,61 @@ export default function ParameterSelectionPage() {
   }, [selectedCoreLanguage, selectedTechStack, selectedFramework, selectedSubcategory, selectedSeniority])
 
   const canProceed = () => {
-    return selectedCoreLanguage && selectedTechStack && selectedSeniority && availableProblems && availableProblems.totalProblems > 0
-  }
+    if (!selectedSeniority || !selectedCoreLanguage) return false;
 
-  const handleProceed = () => {
-    if (!canProceed()) return
+    switch (assessmentMode) {
+      case 'core_only':
+        return true;
+      case 'core_and_framework':
+        return !!selectedFramework;
+      case 'tech_stack':
+        return !!selectedTechStack;
+      default:
+        return false;
+    }
+  };
 
-    const parameters = {
-      coreLanguage: selectedCoreLanguage,
-      framework: selectedFramework,
-      techStack: selectedTechStack,
-      subcategory: selectedSubcategory,
-      seniorityLevel: selectedSeniority,
-      availableProblems,
-      useNewSystem: true
+  const handleProceed = async () => {
+    if (!canProceed() || authLoading || !user) {
+      setError("Please complete all required fields before proceeding.");
+      return;
     }
 
-    localStorage.setItem('selected_parameters', JSON.stringify(parameters))
-    router.push('/dashboard')
-  }
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/parameter-selection/create-session', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          assessmentMode,
+          coreLanguage: selectedCoreLanguage,
+          framework: assessmentMode === 'core_and_framework' ? selectedFramework : null,
+          techStack: assessmentMode === 'tech_stack' ? selectedTechStack : null,
+          seniorityLevel: selectedSeniority,
+          subcategory: assessmentMode === 'tech_stack' ? selectedSubcategory : null,
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        router.push(`/room/${data.roomId}`);
+      } else {
+        const errorData = await response.json();
+        setError(errorData.message || 'Failed to create session. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error creating session:', error);
+      setError('An unexpected error occurred. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleBackToDashboard = () => {
     if (!user) {
@@ -307,8 +360,8 @@ export default function ParameterSelectionPage() {
           {user && (
             <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg border">
               <User className="w-4 h-4 text-gray-500" />
-              <span className="text-sm font-medium">{user.full_name || user.email}</span>
-              <Badge variant="secondary">{user.role}</Badge>
+              <span className="text-sm font-medium">{user.firstName || user.email}</span>
+              <Badge variant="secondary">{user.role || 'user'}</Badge>
             </div>
           )}
         </div>
@@ -333,149 +386,119 @@ export default function ParameterSelectionPage() {
                   Select the primary programming language for the assessment
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <Select value={selectedCoreLanguage} onValueChange={setSelectedCoreLanguage}>
-                  <SelectTrigger className="w-full h-12">
-                    <SelectValue placeholder="Choose a programming language" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {coreLanguages.map((language) => (
-                      <SelectItem key={language.name} value={language.name}>
-                        <div className="flex items-center justify-between w-full">
-                          <span className="font-medium">{language.name}</span>
-                          <Badge variant="outline" className="text-xs">
-                            <TrendingUp className="w-3 h-3 mr-1" />
-                            {language.popularity}
-                          </Badge>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {selectedCoreLanguage && getSelectedFramework().length > 0 && (
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-gray-700">
-                      Framework (Optional)
-                    </label>
-                    <Select value={selectedFramework} onValueChange={setSelectedFramework}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Choose a framework (optional)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="">No specific framework</SelectItem>
-                        {getSelectedFramework().map((framework) => (
-                          <SelectItem key={framework} value={framework}>
-                            {framework}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+              <CardContent className="px-8 py-6">
+                {/* Assessment Mode Selection */}
+                <div className="mb-8">
+                  <h3 className="text-lg font-semibold mb-3">1. Select Assessment Type</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <button onClick={() => setAssessmentMode('core_only')} className={`p-4 border rounded-lg text-left transition-all ${assessmentMode === 'core_only' ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500' : 'hover:bg-gray-100'}`}><h4 className="font-semibold">Core Language</h4><p className="text-sm text-gray-500">Test fundamental language and algorithm skills.</p></button>
+                    <button onClick={() => setAssessmentMode('core_and_framework')} className={`p-4 border rounded-lg text-left transition-all ${assessmentMode === 'core_and_framework' ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500' : 'hover:bg-gray-100'}`}><h4 className="font-semibold">Language + Framework</h4><p className="text-sm text-gray-500">Test core language plus a specific web framework.</p></button>
+                    <button onClick={() => setAssessmentMode('tech_stack')} className={`p-4 border rounded-lg text-left transition-all ${assessmentMode === 'tech_stack' ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500' : 'hover:bg-gray-100'}`}><h4 className="font-semibold">Full Tech Stack</h4><p className="text-sm text-gray-500">Simulate a real-world project with multiple technologies.</p></button>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Settings className="w-5 h-5" />
-                  Technology Stack
-                </CardTitle>
-                <CardDescription>
-                  Select the technology stack or platform for assessment
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">
-                    Technology Category
-                  </label>
-                  <Select value={selectedSubcategory} onValueChange={setSelectedSubcategory}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Choose a technology category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.keys(techStacks).map((category) => (
-                        <SelectItem key={category} value={category}>
-                          <div className="flex items-center gap-2">
-                            {getCategoryIcon(category)}
-                            <span className="capitalize">{category}</span>
-                            <Badge variant="outline" className="text-xs">
-                              {techStacks[category].length} options
-                            </Badge>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
 
-                {selectedSubcategory && (
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-gray-700">
-                      Specific Technology
-                    </label>
-                    <Select value={selectedTechStack} onValueChange={setSelectedTechStack}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Choose specific technology" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {getSelectedTechStackDetails().map((tech) => (
-                          <SelectItem key={tech.name} value={tech.name}>
-                            <div className="flex items-center justify-between w-full">
-                              <span className="font-medium">{tech.name}</span>
-                              <Badge variant="outline" className="text-xs">
-                                <TrendingUp className="w-3 h-3 mr-1" />
-                                {tech.popularity}
-                              </Badge>
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="w-5 h-5" />
-                  Experience Level
-                </CardTitle>
-                <CardDescription>
-                  Choose the appropriate difficulty level for the assessment
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {experienceLevels.map((level) => (
-                    <div
-                      key={level.value}
-                      className={`p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-blue-300 ${
-                        selectedSeniority === level.value
-                          ? 'border-blue-500 bg-blue-50'
-                          : 'border-gray-200 bg-white'
-                      }`}
-                      onClick={() => setSelectedSeniority(level.value)}
-                    >
-                      <div className="flex items-center justify-between mb-2">
-                        <Badge 
-                          variant={selectedSeniority === level.value ? "default" : "outline"}
-                          className={selectedSeniority === level.value ? "bg-blue-500" : ""}
-                        >
-                          {level.tag}
-                        </Badge>
-                        {selectedSeniority === level.value && (
-                          <CheckCircle className="w-4 h-4 text-blue-500" />
-                        )}
+                <div className="space-y-8">
+                  {/* Step 2: Core Language */}
+                  {(assessmentMode === 'core_only' || assessmentMode === 'core_and_framework' || assessmentMode === 'tech_stack') && (
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
+                      <div className="md:col-span-1">
+                        <h3 className="font-semibold text-gray-800">2. Core Language</h3>
+                        <p className="text-sm text-gray-500">Select the primary programming language.</p>
                       </div>
-                      <h3 className="font-semibold text-gray-900 mb-1">{level.label}</h3>
-                      <p className="text-sm text-gray-600">{level.description}</p>
+                      <div className="md:col-span-3">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                          {coreLanguages.map((lang) => (
+                            <button key={lang.name} onClick={() => setSelectedCoreLanguage(lang.name)} className={`p-4 text-center border rounded-lg transition-all ${selectedCoreLanguage === lang.name ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500' : 'hover:bg-gray-100'}`}>
+                              <span className="font-semibold">{lang.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                  ))}
+                  )}
+
+                  {/* Step 2b: Framework (Conditional) */}
+                  {assessmentMode === 'core_and_framework' && (
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
+                      <div className="md:col-span-1">
+                        <h3 className="font-semibold text-gray-800">3. Framework</h3>
+                        <p className="text-sm text-gray-500">Select a framework for the chosen language.</p>
+                      </div>
+                      <div className="md:col-span-3">
+                        <Select onValueChange={setSelectedFramework} value={selectedFramework}>
+                          <SelectTrigger><SelectValue placeholder="Select a framework..." /></SelectTrigger>
+                          <SelectContent>
+                            {coreLanguages.find(l => l.name === selectedCoreLanguage)?.frameworks.map(fw => (
+                              <SelectItem key={fw} value={fw}>{fw}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Step 3: Tech Stack (Conditional) */}
+                  {assessmentMode === 'tech_stack' && (
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
+                      <div className="md:col-span-1">
+                        <h3 className="font-semibold text-gray-800">3. Tech Stack</h3>
+                        <p className="text-sm text-gray-500">Choose a primary technology to focus on.</p>
+                      </div>
+                      <div className="md:col-span-3 space-y-4">
+                        {Object.entries(techStacks).map(([category, stacks]) => (
+                          <div key={category}>
+                            <h4 className="text-sm font-medium text-gray-500 mb-2 capitalize flex items-center">{getCategoryIcon(category)}<span className="ml-2">{category}</span></h4>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                              {stacks.map((stack) => (
+                                <button key={stack.name} onClick={() => setSelectedTechStack(stack.name)} className={`p-4 text-center border rounded-lg transition-all ${selectedTechStack === stack.name ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-500' : 'hover:bg-gray-100'}`}>
+                                  <span className="font-semibold">{stack.name}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Step 4: Seniority Level */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-start">
+                    <div className="md:col-span-1">
+                      <h3 className="font-semibold text-gray-800">
+                        {assessmentMode === 'tech_stack' ? '4. Seniority' : '3. Seniority'}
+                      </h3>
+                      <p className="text-sm text-gray-500">Choose the appropriate difficulty level for the assessment</p>
+                    </div>
+                    <div className="md:col-span-3">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        {experienceLevels.map((level) => (
+                          <div
+                            key={level.value}
+                            className={`p-4 border-2 rounded-lg cursor-pointer transition-all hover:border-blue-300 ${
+                              selectedSeniority === level.value
+                                ? 'border-blue-500 bg-blue-50'
+                                : 'border-gray-200 bg-white'
+                            }`}
+                            onClick={() => setSelectedSeniority(level.value)}
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <Badge 
+                                variant={selectedSeniority === level.value ? "default" : "outline"}
+                                className={selectedSeniority === level.value ? "bg-blue-500" : ""}
+                              >
+                                {level.tag}
+                              </Badge>
+                              {selectedSeniority === level.value && (
+                                <CheckCircle className="w-4 h-4 text-blue-500" />
+                              )}
+                            </div>
+                            <h3 className="font-semibold text-gray-900 mb-1">{level.label}</h3>
+                            <p className="text-sm text-gray-600">{level.description}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>

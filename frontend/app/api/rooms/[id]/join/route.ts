@@ -36,7 +36,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     console.log(`Join room API - Attempting to join room with ID: ${roomId} (original: ${id})`)
 
     // Forward the request to the actual backend
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:5000"
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:5001"
     
     // The correct endpoint for joining a room by ID in the backend
     const apiUrl = `${backendUrl}/api/rooms/${roomId}/join`

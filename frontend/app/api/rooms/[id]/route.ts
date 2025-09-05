@@ -35,7 +35,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     console.log(`Get room API - Fetching room with ID: ${roomId} (original: ${id})`)
 
     // Forward the request to the actual backend
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:5000"
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:5001"
 
     const response = await fetch(`${backendUrl}/api/rooms/${roomId}`, {
       headers: {

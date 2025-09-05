@@ -1,41 +1,61 @@
 const express = require('express');
 const router = express.Router();
-const { authenticateSupabase } = require('../middleware/supabase-auth');
-const { executeCode, submitCode, getSubmissionResult } = require('../services/judge0Service');
+const productionContainerService = require('../services/productionContainerService');
 
-// POST /api/execute
-router.post('/', authenticateSupabase, async (req, res) => {
+router.post('/', async (req, res) => {
+  console.log('🎯 Execute route called');
+  console.log('🎯 Request body:', req.body);
+  console.log('🎯 Request headers:', req.headers);
+  
+  const { sessionId, code, language, framework, questionId } = req.body;
+
+  console.log('🎯 Extracted parameters:', { sessionId, code: code ? `${code.length} chars` : 'undefined', language, framework, questionId });
+
+  if (!sessionId || !code) {
+    console.log('❌ Missing required parameters:', { sessionId: !!sessionId, code: !!code });
+    return res.status(400).json({ error: 'Session ID and code are required' });
+  }
+
   try {
-    const { source_code, language_id, stdin } = req.body;
-    if (!source_code || typeof source_code !== 'string' || source_code.length < 1 || source_code.length > 10000) {
-      return res.status(400).json({ message: 'source_code must be 1-10000 characters.' });
+    console.log('🎯 Looking for session:', sessionId);
+    const session = await productionContainerService.getSession(sessionId);
+    
+    if (!session) {
+      console.log('❌ Session not found:', sessionId);
+      return res.status(404).json({ error: 'Session not found' });
     }
-    if (!language_id || typeof language_id !== 'number') {
-      return res.status(400).json({ message: 'language_id is required and must be a number.' });
+
+    console.log('✅ Session found:', session);
+    console.log('🎯 Executing in container:', session.containerId);
+    
+    const result = await productionContainerService.executeInContainer(session.containerId, code, language, framework);
+    
+    console.log('✅ Execution result:', result);
+    
+    // Shape the final response payload for the frontend
+    const responsePayload = {
+      success: result.success !== false, // Default to true if success is not explicitly false
+      session: session,
+      output: result.output,
+      error: result.error,
+      executionTime: result.executionTime,
+    };
+
+    // If the execution was a console program, it won't have a webUrl.
+    // Nullify the session's webUrl to prevent the preview tab from opening.
+    if (!result.webUrl) {
+      responsePayload.session.webUrl = null;
     }
-    if (stdin && typeof stdin === 'string' && stdin.length > 10000) {
-      return res.status(400).json({ message: 'stdin too large.' });
-    }
-    // Submit code and return token
-    const submission = await submitCode({ source_code, language_id, stdin, timeLimit: 5, outputLimit: 10000 });
-    res.json({ token: submission.token });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err.message || 'Code submission failed.' });
+    
+    res.json(responsePayload);
+  } catch (error) {
+    console.error(`❌ Execution error for session ${sessionId}:`, error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to execute code in container', 
+      details: error.message 
+    });
   }
 });
 
-// GET /api/execute/:token - fetch result for a submission token
-router.get('/:token', authenticateSupabase, async (req, res) => {
-  try {
-    const { token } = req.params;
-    if (!token) return res.status(400).json({ message: 'Token is required.' });
-    const result = await getSubmissionResult(token);
-    res.json({ result });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err.message || 'Failed to fetch submission result.' });
-  }
-});
-
-module.exports = router; 
+module.exports = router;

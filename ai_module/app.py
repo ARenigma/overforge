@@ -40,6 +40,14 @@ class RoomQuestionRequest(BaseModel):
     promptDirective: Optional[str] = None
     preferredProvider: Optional[str] = None
 
+# New: Approaches generation request
+class ApproachGenRequest(BaseModel):
+    title: str
+    description: str
+    category: Optional[str] = None
+    technology: Optional[str] = None
+    preferredProvider: Optional[str] = None
+
 class ProviderSwitchRequest(BaseModel):
     provider: str
 
@@ -1064,6 +1072,110 @@ async def analyze(request: AnalyzeRequest):
             "context": request.code,
             "error": str(e)
         }
+
+@app.post("/generate-approaches")
+async def generate_approaches(request: ApproachGenRequest):
+    """Generate 2-3 approaches for a given problem and return strict JSON."""
+    base_prompt = f"""
+You are generating solution approaches for a coding interview problem.
+
+PROBLEM:
+Title: {request.title}
+Category: {request.category or 'unknown'}
+Technology: {request.technology or 'generic'}
+Description: {request.description}
+
+TASK:
+Propose 2-3 distinct solution approaches. Each must include the following fields:
+- approach_key (kebab-case short key, e.g., "two-pointer", "hashmap", "recursive")
+- title (concise approach name)
+- summary (1-2 sentences)
+- pros (array of strings)
+- cons (array of strings)
+- time_complexity (e.g., "O(n log n)")
+- space_complexity (e.g., "O(n)" or "O(1)")
+
+Respond EXACTLY with JSON and NOTHING ELSE:
+{{
+  "approaches": [
+    {{
+      "approach_key": "two-pointer",
+      "title": "Two Pointer",
+      "summary": "...",
+      "pros": ["..."],
+      "cons": ["..."],
+      "time_complexity": "O(n)",
+      "space_complexity": "O(1)"
+    }}
+  ]
+}}
+""".strip()
+
+    try:
+        ai_response = await ai_manager.generate_response(
+            prompt=base_prompt,
+            preferred_provider=request.preferredProvider
+        )
+
+        if not ai_response.get("success"):
+            return {
+                "success": False,
+                "error": ai_response.get("error"),
+                "attempted_providers": ai_response.get("attempted_providers", [])
+            }
+
+        raw = (ai_response.get("content") or "").strip()
+
+        # Try to parse JSON
+        try:
+            # Prefer a full object containing approaches
+            obj = None
+            start = raw.find('{')
+            end = raw.rfind('}') + 1
+            if start >= 0 and end > start:
+                obj = json.loads(raw[start:end])
+            if isinstance(obj, dict) and isinstance(obj.get('approaches'), list):
+                arr = obj['approaches']
+            else:
+                # Maybe the model returned a raw array
+                arr = json.loads(raw)
+        except Exception:
+            # Attempt to extract any object with approaches: [...]
+            m = re.search(r"\{[\s\S]*?\"approaches\"\s*:\s*\[[\s\S]*?\][\s\S]*?\}", raw, re.IGNORECASE)
+            if not m:
+                return { "success": True, "approaches": [] }
+            obj = json.loads(m.group(0))
+            arr = obj.get('approaches', [])
+
+        def coerce_list(v):
+            if isinstance(v, list):
+                return v
+            if isinstance(v, str):
+                return [v]
+            return []
+
+        norm = []
+        for a in arr[:3]:
+            key = a.get('approach_key') or a.get('key') or a.get('title') or 'approach'
+            key = re.sub(r"[^a-z0-9]+", '-', str(key).lower()).strip('-')
+            norm.append({
+                'approach_key': key,
+                'title': a.get('title') or a.get('approach') or a.get('approach_key') or 'Approach',
+                'summary': a.get('summary') or a.get('description') or '',
+                'pros': coerce_list(a.get('pros')),
+                'cons': coerce_list(a.get('cons')),
+                'time_complexity': a.get('time_complexity') or a.get('time') or '',
+                'space_complexity': a.get('space_complexity') or a.get('space') or ''
+            })
+
+        return {
+            "success": True,
+            "approaches": norm,
+            "provider_used": ai_response.get("provider"),
+            "model_used": ai_response.get("model")
+        }
+    except Exception as e:
+        return { "success": False, "error": str(e) }
 
 @app.post("/generate-room-questions")
 async def generate_room_questions(request: RoomQuestionRequest):

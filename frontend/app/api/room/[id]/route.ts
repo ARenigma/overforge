@@ -9,7 +9,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
     }
 
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:5000"
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:5001"
     const { id } = params
 
     const response = await fetch(`${backendUrl}/api/rooms/${id}`, {

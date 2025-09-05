@@ -12,7 +12,6 @@ const nextConfig = {
   experimental: {
     forceSwcTransforms: true,
     esmExternals: false,
-    optimizeFonts: true,
   },
   webpack: (config) => {
     config.cache = false;

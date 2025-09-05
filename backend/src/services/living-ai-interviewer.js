@@ -29,6 +29,46 @@ class LivingAIInterviewer {
   }
 
   /**
+   * Ensure session has required nested shapes to avoid runtime errors
+   */
+  ensureSessionShapes(session) {
+    if (!session) return;
+    if (!session.assessmentSession) session.assessmentSession = { retry_count: {}, assessment_state: { startTime: new Date().toISOString() } };
+    if (!session.assessmentSession.retry_count) session.assessmentSession.retry_count = {};
+    if (!session.conversationContext) session.conversationContext = {};
+    if (!(session.conversationContext.activeThreads instanceof Set)) session.conversationContext.activeThreads = new Set();
+    if (!(session.conversationContext.recentMentions instanceof Map)) session.conversationContext.recentMentions = new Map();
+    if (typeof session.conversationContext.conversationMood !== 'string') session.conversationContext.conversationMood = 'neutral';
+    if (typeof session.conversationContext.sessionPhase !== 'string') session.conversationContext.sessionPhase = 'introduction';
+    if (!session.candidatePersonality) {
+      session.candidatePersonality = {
+        communicationStyle: 'concise',
+        technicalDepth: 'surface',
+        responsePatterns: [],
+        interests: new Set(),
+        concerns: new Set(),
+        strengths: new Set(),
+        preferredExplanationStyle: 'unknown'
+      };
+    }
+  }
+
+  /**
+   * Compute simple code stats: meaningful lines and boilerplate ratio
+   */
+  getCodeStats(code) {
+    const lines = (code || '').split(/\r?\n/);
+    const nonEmpty = lines.filter(l => l.trim().length > 0);
+    const isComment = (l) => /^(\s*\/\/|\s*#|\s*\/\*|\s*\*)/.test(l.trim());
+    const isImport = (l) => /^(\s*import\b|\s*from\b|\s*using\b|\s*package\b)/.test(l.trim());
+    const boilerplateLike = nonEmpty.filter(l => isComment(l) || isImport(l));
+    const meaningfulLines = nonEmpty.length - boilerplateLike.length;
+    const boilerplateRatio = nonEmpty.length === 0 ? 1 : boilerplateLike.length / nonEmpty.length;
+    const hasImplementationSignals = /(class\s+\w+|def\s+\w+\(|function\s+\w+\(|public\s+\w+\(|=\s*new\s+|\w+\s*=\s*\w+|if\s*\(|for\s*\(|while\s*\()/i.test(code);
+    return { nonEmpty: nonEmpty.length, meaningfulLines, boilerplateRatio, hasImplementationSignals };
+  }
+
+  /**
    * Initialize parameter progress dynamically based on actual parameters
    * Handles both old format (with ids) and new format (array indices)
    */
@@ -201,7 +241,7 @@ class LivingAIInterviewer {
           title: jobProfile.title,
           description: jobProfile.description,
           parameters: jobProfile.parameters,
-          masterProblem: jobProfile.master_problem?.description || jobProfile.master_problem
+          masterProblem: null // Disable AI master problem - use database problems only
         },
         assessmentCriteria: jobProfile.assessment_criteria,
         initialMessage: this.generatePersonalWelcomeMessage(jobProfile, candidateId, language)
@@ -251,9 +291,18 @@ class LivingAIInterviewer {
    */
   async analyzeCodeProgress(sessionId, questionId, code, language) {
     const session = this.activeSessions.get(sessionId);
-    if (!session || !code || code.trim().length < parameterDetectionConfig.codeThresholds.minimumCharacters) {
+    this.ensureSessionShapes(session);
+    if (!session || !code) {
       return false; // Not enough code for analysis
     }
+
+    // Enforce quality filters before AI detection
+    const { codeThresholds, qualityFilters } = parameterDetectionConfig;
+    const stats = this.getCodeStats(code);
+    if (code.trim().length < codeThresholds.minimumCharacters) return false;
+    if (qualityFilters && qualityFilters.requireImplementation && !stats.hasImplementationSignals) return false;
+    if (codeThresholds && typeof codeThresholds.minimumMeaningfulLines === 'number' && stats.meaningfulLines < codeThresholds.minimumMeaningfulLines) return false;
+    if (qualityFilters && typeof qualityFilters.maxBoilerplateRatio === 'number' && stats.boilerplateRatio > qualityFilters.maxBoilerplateRatio) return false;
 
     const { jobProfile, parameterProgress } = session;
     let newParameterDetected = false;
@@ -608,7 +657,7 @@ Respond with JSON:
       return null;
     }
 
-    console.log(`🎯 LHIS: Triggering ${parameter.name} - Depth ${parameterKey}.${currentDepth + 1}`);
+    console.log(`🎯 LHIS: Triggering ${parameter.name} - Depth ${currentDepth + 1}`);
 
     // Mark as awaiting answer
     session.awaitingAnswer = {
@@ -1136,14 +1185,18 @@ Generate a question that shows you understand their specific implementation:`;
       
       const conceptScore = Math.min((conceptMatches / correctWords.length) * 100, 100);
       
-      // Length and effort scoring
-      const lengthScore = Math.min((candidateAnswer.length / 50) * 20, 20);
+      // Length and effort scoring (reduced weight to avoid penalizing concise answers)
+      const lengthScore = Math.min((candidateAnswer.length / 80) * 10, 10);
       
       // Technical keyword scoring
       const technicalWords = ['implement', 'design', 'architecture', 'pattern', 'service', 'data', 'security', 'performance'];
       const techScore = technicalWords.filter(word => answerLower.includes(word)).length * 5;
+
+      // Explanation markers (reward reasoning even when concise)
+      const explanationMarkers = ['because', 'therefore', 'trade-off', 'tradeoff', 'reason', 'justify', 'versus', 'vs.'];
+      const reasoningScore = explanationMarkers.filter(w => answerLower.includes(w)).length * 4;
       
-      const totalScore = Math.min((conceptScore + lengthScore + techScore) / 100, 1);
+      const totalScore = Math.min((conceptScore + lengthScore + techScore + reasoningScore) / 100, 1);
       
       return {
         score: Math.max(totalScore, 0.1), // Minimum score for effort
@@ -1633,14 +1686,14 @@ Respond as a human interviewer would - be natural, helpful, and contextually app
       return 'java';
     }
     
-    // Python patterns
-    if (/\b(def\s+\w+|import\s+\w+|print\s*\(|__\w+__)\b/i.test(code)) {
-      return 'python';
+    // JavaScript/TypeScript patterns (modern syntax, imports/exports, TS types)
+    if (/(\bimport\s+.+\s+from\s+['"])|(\bexport\s+(default|const|function|class))|=>|:\s*(string|number|boolean|any|unknown|never|void)\b|\binterface\s+\w+\b|\benum\s+\w+\b|\b(function\s+\w+|const\s+\w+|console\.log|require\s*\()\b/i.test(code)) {
+      return 'javascript';
     }
     
-    // JavaScript patterns
-    if (/\b(function\s+\w+|const\s+\w+|console\.log|=>|require\s*\()\b/i.test(code)) {
-      return 'javascript';
+    // Python patterns (incl. type hints, explicit from-import)
+    if (/(\bdef\s+\w+\(.*\)\s*->\s*\w+\s*:)|\b(def\s+\w+\()|\b(from\s+\w+(?:\.\w+)*\s+import\s+\w+)\b|\bprint\s*\(|__\w+__\b/i.test(code)) {
+      return 'python';
     }
     
     // C++ patterns
@@ -2119,6 +2172,27 @@ Respond as a human interviewer would - be natural, helpful, and contextually app
         const currentDepthLabel = depthLabels[currentDepth] || `Depth ${currentDepth + 1}`;
         
         // Build comprehensive context for AI question generation
+        // Enrich with stored approaches for comparative questioning (non-breaking if unavailable)
+        let approachesContext = '';
+        try {
+          const ProblemSolutionsService = require('./problemSolutionsService');
+          const { buildApproachComparisonContext } = require('./approachPromptUtil');
+          const problemId = session?.currentProblemId || session?.problem_id || null;
+          if (problemId) {
+            const approaches = await ProblemSolutionsService.fetchActiveApproachesByProblemId(problemId);
+            if (approaches && approaches.length > 0) {
+              approachesContext = '\nCOMPARATIVE APPROACH CONTEXT:\n' + buildApproachComparisonContext(approaches, candidateCode, session.language || 'text') + '\n';
+            }
+          }
+        } catch (e) {
+          console.log('⚠️ LHIS: Unable to enrich prompt with approaches (non-blocking):', e.message);
+        }
+
+        // Provide a minimal comparative fallback even when approaches are unavailable
+        if (!approachesContext) {
+          approachesContext = '\nCOMPARATIVE APPROACH CONTEXT:\n- No stored approaches available.\n- Critically compare current approach against at least two plausible alternatives for this parameter.\n- Discuss trade-offs (time/space complexity, readability, maintainability, extensibility).\n';
+        }
+
         const questionPrompt = `You are an expert technical interviewer conducting a live coding assessment. 
 
 INTERVIEW CONTEXT:
@@ -2134,13 +2208,14 @@ ${candidateCode}
 
 DEPTH LEVEL GUIDELINES:
 ${this.getDepthLevelGuidelines(currentDepth)}
+${approachesContext}
 
 TASK: Generate a high-quality assessment question that:
 1. References the candidate's actual code implementation
 2. Tests understanding at the ${currentDepthLabel} level
 3. Is specific to ${parameter.name}
-4. Sounds natural and conversational
-5. Encourages detailed technical explanation
+4. Critically examine why their approach vs alternatives (roads not taken)
+5. Sounds natural and conversational; encourage detailed technical explanation
 
 Respond with this exact JSON format:
 {

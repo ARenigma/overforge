@@ -1,0 +1,220 @@
+# version: '3.8' # Removed as it's obsolete in Docker Compose v2
+
+services:
+  # Framework-based Environments
+  python-django:
+    build:
+      context: ./workspace/python-django
+      dockerfile: Dockerfile
+    container_name: interview-python-django
+    ports:
+      - "8001:8000"
+    environment:
+      - DJANGO_SECRET_KEY=interview-secret-key-django
+      - POSTGRES_DB=django_interview_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=interview123
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+    depends_on:
+      - postgres
+    volumes:
+      - ./workspace/python-django:/app
+      - /app/__pycache__
+    networks:
+      - interview-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=100m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  javascript-express:
+    build:
+      context: ./workspace/javascript-express
+      dockerfile: Dockerfile
+    container_name: interview-javascript-express
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+    volumes:
+      - ./workspace/javascript-express:/app
+      - /app/node_modules
+    networks:
+      - interview-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=50m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  javascript-nodejs:
+    build:
+      context: ./workspace/javascript-nodejs
+      dockerfile: Dockerfile
+    container_name: interview-javascript-nodejs
+    ports:
+      - "3002:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - APP_TYPE=nodejs
+    volumes:
+      - ./workspace/javascript-nodejs:/app
+      - /app/node_modules
+    networks:
+      - interview-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.75'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=50m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  java-springboot:
+    build:
+      context: .
+      dockerfile: ./java-springboot/Dockerfile
+    container_name: interview-java-springboot
+    ports:
+      - "8082:8080" # Maps Spring Boot to 8082
+    environment:
+      - SPRING_PROFILES_ACTIVE=interview
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/springboot_interview_db
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=interview123
+    depends_on:
+      - postgres
+    volumes:
+      - ./workspace/java-springboot:/app
+    networks:
+      - interview-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 768M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    security_opt:
+      - no-new-privileges:true
+    read_only: false
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=100m
+    command: tail -f /dev/null
+
+  # Core language containers
+  java-core:
+    build:
+      context: .
+      dockerfile: ./java-core/Dockerfile
+    command: tail -f /dev/null
+    container_name: interview-java-core
+    volumes:
+      - ./workspace/java-core:/app
+    networks:
+      - interview-network
+
+  python-core:
+    build:
+      context: .
+      dockerfile: ./python-core/Dockerfile
+    command: tail -f /dev/null
+    container_name: interview-python-core
+    volumes:
+      - ./workspace/python-core:/app
+    networks:
+      - interview-network
+
+  javascript-core:
+    build:
+      context: .
+      dockerfile: ./javascript-core/Dockerfile
+    command: tail -f /dev/null
+    container_name: interview-javascript-core
+    volumes:
+      - ./workspace/javascript-core:/app
+    networks:
+      - interview-network
+
+  # PostgreSQL Database (shared)
+  postgres:
+    image: postgres:13
+    container_name: interview-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=interview123
+      - POSTGRES_DB=interview_master
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-multiple-databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
+    networks:
+      - interview-network
+    restart: unless-stopped
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: interview-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - interview-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  interview-network:
+    driver: bridge 

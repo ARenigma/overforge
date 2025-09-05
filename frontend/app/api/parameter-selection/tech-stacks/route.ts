@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
     const authorization = request.headers.get('authorization')
     
     // Forward the request to the backend
-    const backendUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/parameter-selection/tech-stacks`
+    const backendUrl = `${process.env.BACKEND_URL || 'http://localhost:5001'}/api/parameter-selection/tech-stacks`
     
     const response = await fetch(backendUrl, {
       method: 'GET',

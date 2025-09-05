@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Forward the request to the actual backend
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:5000"
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:5001"
     console.log(`Rooms API - Connecting to backend at: ${backendUrl}/api/rooms`)
 
     const response = await fetch(`${backendUrl}/api/rooms`, {
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Forward the request to the actual backend
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:5000"
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:5001"
     console.log(`Create Room API - Connecting to backend at: ${backendUrl}/api/rooms`)
 
     const response = await fetch(`${backendUrl}/api/rooms`, {

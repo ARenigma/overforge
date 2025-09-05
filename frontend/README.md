@@ -102,7 +102,7 @@ Required environment variables in `.env.local`:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
-NEXT_PUBLIC_BACKEND_URL=http://localhost:5000
+NEXT_PUBLIC_BACKEND_URL=http://localhost:5001
 NEXT_PUBLIC_AI_MODULE_URL=http://localhost:8000
 ```
 

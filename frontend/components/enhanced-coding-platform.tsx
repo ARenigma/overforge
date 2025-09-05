@@ -15,7 +15,7 @@ import { GoToLineDialog } from "@/components/go-to-line-dialog"
 import { Timer } from "@/components/timer"
 import { LanguageIcon } from "@/components/language-icon"
 import CodeValidationWarnings from "@/components/CodeValidationWarnings"
-import codeValidationService from "@/src/services/codeValidationService"
+import codeValidationService from "@/services/codeValidationService"
 import { useAuth } from "@/hooks/useAuth"
 import io from "socket.io-client"
 import { cn } from "@/lib/utils"
@@ -90,7 +90,7 @@ export function EnhancedCodingPlatform() {
     setSessionLanguage(sessionLanguageParam)
     setSessionExperience(sessionExperienceParam)
 
-    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000"
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5001"
     const currentSocket = io(socketUrl, {
       auth: { token },
       transports: ["websocket"],
@@ -110,41 +110,37 @@ export function EnhancedCodingPlatform() {
     currentSocket.on("initialRoomQuestions", (questions: AIQuestion[]) => {
       console.log("Received initialRoomQuestions:", questions)
       if (questions && questions.length > 0) {
-        setAiQuestions(questions)
+        setAiQuestions(prevQuestions => {
+          const newQuestions = questions.filter(q => !prevQuestions.some(pq => pq.id === q.id));
+          return [...prevQuestions, ...newQuestions];
+        });
+
+        if (!activeQuestionId) {
         setActiveQuestionId(questions[0].id)
+        }
         
         const initialCodes: { [key: string]: string } = {}
         const initialOutputs: { [key: string]: string } = {}
         const initialRunningStates: { [key: string]: boolean } = {}
 
         questions.forEach(q => {
+          if (!codeByQuestionId[q.id]) {
           initialCodes[q.id] = ""
           initialOutputs[q.id] = ""
           initialRunningStates[q.id] = false
-          
-          // Debug: Log question initialization
-          console.log(`📋 Initializing question ${q.id}:`)
-          console.log(`   Title: ${q.title}`)
-          console.log(`   Language: ${q.language}`)
-          console.log(`   Code initialized as empty`)
+          }
         })
         
-        console.log("🔧 Code state initialization:", {
-          activeQuestionId: questions[0].id,
-          totalQuestions: questions.length,
-          codeKeys: Object.keys(initialCodes),
-          firstQuestionEmpty: true
-        })
+        setCodeByQuestionId(prev => ({...prev, ...initialCodes}))
+        setOutputByQuestionId(prev => ({...prev, ...initialOutputs}))
+        setIsRunningByQuestionId(prev => ({...prev, ...initialRunningStates}))
         
-        setCodeByQuestionId(initialCodes)
-        setOutputByQuestionId(initialOutputs)
-        setIsRunningByQuestionId(initialRunningStates)
-        
+        if (!currentLanguageForEditor) {
         setCurrentLanguageForEditor(questions[0].language) 
+        }
         setAreInitialQuestionsProcessed(true)
-      } else {
+      } else if (aiQuestions.length === 0) {
         console.log("No initial questions received")
-        setAiQuestions([])
         setAreInitialQuestionsProcessed(true)
       }
     })
@@ -168,7 +164,7 @@ export function EnhancedCodingPlatform() {
       console.log("Cleaning up socket connection")
       currentSocket.disconnect()
     }
-  }, [user, token, sessionId, searchParams])
+  }, [user, token, sessionId, searchParams, activeQuestionId, codeByQuestionId, currentLanguageForEditor, aiQuestions.length])
 
   // Active question language sync
   useEffect(() => {
