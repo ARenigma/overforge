@@ -1,0 +1,1 @@
+// Spring REST template will be generated here

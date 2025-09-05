@@ -5,8 +5,16 @@
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
-    "dev": "nodemon src/app.js",
+    "dev": "nodemon",
+    "start:no-docker": "DISABLE_DOCKER=true node src/app.js",
+    "dev:no-docker": "DISABLE_DOCKER=true nodemon",
+    "docker:start": "cd docker-environments && ./manage.sh start",
+    "docker:stop": "cd docker-environments && ./manage.sh stop",
+    "docker:status": "cd docker-environments && ./manage.sh status",
+    "docker:logs": "cd docker-environments && ./manage.sh logs",
     "test": "jest",
+    "seed:solutions:dry": "node scripts/seed-problem-solutions.js --dry-run --limit 10",
+    "seed:solutions": "node scripts/seed-problem-solutions.js --limit 50",
     "migrate": "sequelize-cli db:migrate",
     "seed": "sequelize-cli db:seed:all",
     "reset-db": "sequelize-cli db:drop && sequelize-cli db:create && sequelize-cli db:migrate && sequelize-cli db:seed:all"

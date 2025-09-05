@@ -1,16 +1,32 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import React, { useState } from 'react'
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { BarChart3, Users, TrendingUp, Activity, Plus, Download, Filter, Search } from "lucide-react"
+import { 
+  Users, 
+  Settings, 
+  BarChart3, 
+  Calendar,
+  Clock,
+  Target,
+  ArrowRight,
+  Code,
+  Database,
+  Cloud,
+  CheckCircle,
+  User,
+  LogOut
+} from "lucide-react"
 import { Input } from "@/components/ui/input"
 import DashboardLayout from "@/components/dashboard-layout"
 import { useSupabaseAuth } from "@/context/SupabaseAuthContext"
+import { DotGridBackground } from "@/components/dot-grid-background"
+import ParameterSelectionInterface from "@/components/ParameterSelectionInterface"
 
 interface DashboardData {
   stats: {
@@ -41,9 +57,10 @@ export default function DashboardPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const router = useRouter()
   const { user, token, loading: authLoading } = useSupabaseAuth()
+  const [activeTab, setActiveTab] = useState("start-interview")
 
   // Add debugging logs
-  useEffect(() => {
+  React.useEffect(() => {
     console.log('Dashboard - Auth state:', { user, token, authLoading })
     if (!authLoading && !user) {
       console.log('Dashboard - No user found, redirecting to login')
@@ -51,275 +68,216 @@ export default function DashboardPage() {
       return
     }
     if (user && token) {
-      console.log('Dashboard - User authenticated, fetching data')
-      fetchDashboardData()
+      console.log('Dashboard - User authenticated')
+      setIsLoading(false)
     }
   }, [user, token, authLoading, router])
 
-  const fetchDashboardData = async () => {
-    try {
-      console.log('Dashboard - Fetching data with token:', !!token)
-      
-      if (!token) {
-        console.log('Dashboard - No token available for API call')
-        setIsLoading(false)
-        return
-      }
+  const handleStartInterview = () => {
+    router.push('/parameter-selection')
+  }
 
-      const response = await fetch("/api/dashboard", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      })
+  const handleManageProfiles = () => {
+    router.push('/admin-panel')
+  }
 
-      console.log('Dashboard - API response status:', response.status)
-
-      if (response.ok) {
-        const dashboardData = await response.json()
-        console.log('Dashboard - Data fetched successfully')
-        setData(dashboardData)
-      } else {
-        console.error('Dashboard - API error:', response.status, response.statusText)
-      }
-    } catch (error) {
-      console.error("Dashboard - Failed to fetch dashboard data:", error)
-    } finally {
-      setIsLoading(false)
-    }
+  const handleSignOut = () => {
+    router.push('/auth/login')
   }
 
   if (authLoading || isLoading) {
     return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center h-64">
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <DotGridBackground />
           <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">
-              {authLoading ? 'Checking authentication...' : 'Loading dashboard...'}
-            </p>
-          </div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dashboard...</p>
         </div>
-      </DashboardLayout>
+      </div>
     )
   }
 
   if (!user) {
-    return (
-      <DashboardLayout>
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <p className="text-gray-600">Redirecting to login...</p>
-          </div>
-        </div>
-      </DashboardLayout>
-    )
+    router.push('/auth/login')
+    return null
   }
 
   const filteredProjects =
     data?.projects.filter((project) => project.name.toLowerCase().includes(searchTerm.toLowerCase())) || []
 
   return (
-    <DashboardLayout>
-      <div className="space-y-6">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      <DotGridBackground />
+      
+      <div className="relative z-10 container mx-auto px-4 py-8">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-            <p className="text-gray-600">Welcome back! Here's what's happening.</p>
+            <h1 className="text-3xl font-bold text-gray-900">Interview Dashboard</h1>
+            <p className="text-gray-600">Dual-Problem Assessment System</p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline">
-              <Download className="h-4 w-4 mr-2" />
-              Export
-            </Button>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              New Project
+          {user && (
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg border">
+                <User className="w-4 h-4 text-gray-500" />
+                <span className="text-sm font-medium">{user.firstName || user.email}</span>
+                <Badge variant="secondary">{user.role || 'user'}</Badge>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handleSignOut}
+                className="flex items-center gap-2"
+              >
+                <LogOut className="w-4 h-4" />
+                Sign Out
             </Button>
           </div>
+          )}
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Users</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{data?.stats.totalUsers.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">+12% from last month</p>
+        {/* System Overview Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <Card className="bg-white/70 backdrop-blur-sm border-blue-200">
+            <CardContent className="p-6">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <Code className="w-6 h-6 text-blue-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">Core Language</h3>
+                  <p className="text-sm text-gray-600">Programming fundamentals</p>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active Projects</CardTitle>
-              <BarChart3 className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{data?.stats.activeProjects}</div>
-              <p className="text-xs text-muted-foreground">+3 new this week</p>
+          <Card className="bg-white/70 backdrop-blur-sm border-green-200">
+            <CardContent className="p-6">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                  <Database className="w-6 h-6 text-green-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">Tech Stack</h3>
+                  <p className="text-sm text-gray-600">Platform & frameworks</p>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Revenue</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">${data?.stats.revenue.toLocaleString()}</div>
-              <p className="text-xs text-muted-foreground">+{data?.stats.growth}% from last month</p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">System Health</CardTitle>
-              <Activity className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">99.9%</div>
-              <p className="text-xs text-muted-foreground">Uptime this month</p>
+          <Card className="bg-white/70 backdrop-blur-sm border-purple-200">
+            <CardContent className="p-6">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                  <Target className="w-6 h-6 text-purple-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900">Dual Assessment</h3>
+                  <p className="text-sm text-gray-600">Comprehensive evaluation</p>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Main Content */}
-        <Tabs defaultValue="projects" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="projects">Projects</TabsTrigger>
-            <TabsTrigger value="activity">Recent Activity</TabsTrigger>
-            <TabsTrigger value="analytics">Analytics</TabsTrigger>
+        {/* Main Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-3 bg-white/70 backdrop-blur-sm">
+            <TabsTrigger value="start-interview" className="flex items-center gap-2">
+              <Target className="w-4 h-4" />
+              Start Interview
+            </TabsTrigger>
+            <TabsTrigger value="recent-sessions" className="flex items-center gap-2">
+              <Clock className="w-4 h-4" />
+              Recent Sessions
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="flex items-center gap-2">
+              <Settings className="w-4 h-4" />
+              Settings
+            </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="projects" className="space-y-4">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  placeholder="Search projects..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              <Button variant="outline">
-                <Filter className="h-4 w-4 mr-2" />
-                Filter
-              </Button>
-            </div>
-
-            <div className="grid gap-4">
-              {filteredProjects.map((project) => (
-                <Card key={project.id}>
+          <TabsContent value="start-interview" className="space-y-6">
+            <Card className="bg-white/90 backdrop-blur-sm">
                   <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg">{project.name}</CardTitle>
-                      <Badge variant={project.status === "active" ? "default" : "secondary"}>{project.status}</Badge>
-                    </div>
+                <CardTitle className="flex items-center gap-2">
+                  <Target className="w-6 h-6 text-blue-600" />
+                  New Interview Session
+                </CardTitle>
                     <CardDescription>
-                      {project.team} team members • {project.progress}% complete
+                  Configure assessment parameters and create a new dual-problem interview session
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <Progress value={project.progress} className="w-full" />
+                <ParameterSelectionInterface />
                   </CardContent>
                 </Card>
-              ))}
-            </div>
           </TabsContent>
 
-          <TabsContent value="activity" className="space-y-4">
-            <Card>
+          <TabsContent value="recent-sessions" className="space-y-6">
+            <Card className="bg-white/90 backdrop-blur-sm">
               <CardHeader>
-                <CardTitle>Recent Activity</CardTitle>
-                <CardDescription>Latest updates from your projects</CardDescription>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="w-6 h-6 text-green-600" />
+                  Recent Interview Sessions
+                </CardTitle>
+                <CardDescription>
+                  View and manage your recent interview sessions
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {data?.recentActivity.map((activity) => (
-                    <div key={activity.id} className="flex items-center space-x-4 p-4 border rounded-lg">
-                      <div
-                        className={`w-2 h-2 rounded-full ${
-                          activity.status === "success"
-                            ? "bg-green-500"
-                            : activity.status === "pending"
-                              ? "bg-yellow-500"
-                              : "bg-red-500"
-                        }`}
-                      />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">{activity.description}</p>
-                        <p className="text-xs text-gray-500">{activity.timestamp}</p>
-                      </div>
-                      <Badge variant="outline">{activity.type}</Badge>
-                    </div>
-                  ))}
+                <div className="text-center py-8 text-gray-500">
+                  <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>No recent sessions found</p>
+                  <p className="text-sm">Start a new interview to see sessions here</p>
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="analytics" className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <Card>
+          <TabsContent value="settings" className="space-y-6">
+            <Card className="bg-white/90 backdrop-blur-sm">
                 <CardHeader>
-                  <CardTitle>Performance Metrics</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <Settings className="w-6 h-6 text-purple-600" />
+                  System Settings
+                </CardTitle>
+                <CardDescription>
+                  Configure dashboard and interview preferences
+                </CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
+                  <div className="flex items-center justify-between p-4 border rounded-lg">
                     <div>
-                      <div className="flex justify-between text-sm">
-                        <span>CPU Usage</span>
-                        <span>45%</span>
-                      </div>
-                      <Progress value={45} className="mt-2" />
+                      <h4 className="font-medium">Assessment Mode</h4>
+                      <p className="text-sm text-gray-600">Current: Dual-Problem System</p>
                     </div>
-                    <div>
-                      <div className="flex justify-between text-sm">
-                        <span>Memory Usage</span>
-                        <span>62%</span>
+                    <Badge variant="secondary">Active</Badge>
                       </div>
-                      <Progress value={62} className="mt-2" />
+                  
+                  <div className="flex items-center justify-between p-4 border rounded-lg">
+                    <div>
+                      <h4 className="font-medium">Session Duration</h4>
+                      <p className="text-sm text-gray-600">Default: 60 minutes</p>
                     </div>
+                    <Button variant="outline" size="sm">Configure</Button>
+                  </div>
+                  
+                  <div className="flex items-center justify-between p-4 border rounded-lg">
                     <div>
-                      <div className="flex justify-between text-sm">
-                        <span>Storage</span>
-                        <span>78%</span>
-                      </div>
-                      <Progress value={78} className="mt-2" />
+                      <h4 className="font-medium">Auto-Save</h4>
+                      <p className="text-sm text-gray-600">Save progress automatically</p>
+                    </div>
+                    <CheckCircle className="w-5 h-5 text-green-600" />
                     </div>
                   </div>
                 </CardContent>
               </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>User Engagement</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm">Daily Active Users</span>
-                      <span className="font-semibold">2,847</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm">Session Duration</span>
-                      <span className="font-semibold">12m 34s</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm">Bounce Rate</span>
-                      <span className="font-semibold">23.4%</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
           </TabsContent>
         </Tabs>
       </div>
-    </DashboardLayout>
+    </div>
   )
 }

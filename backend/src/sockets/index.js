@@ -113,8 +113,10 @@ function initializeSocket(server) {
         console.log(`User ${userId} (${username}) joined session ${roomName} with Lang: ${language}, Exp: ${experienceLevel}`);
         socket.to(roomName).emit('userJoined', { userId, username });
         
-        // Initialize Living AI Interviewer Assessment System
+        // Check if this is a parameter-based session (starts with 'param-')
+        const isParameterSession = roomName.startsWith('param-');
         const hasJobAssessment = jobDescription || jobProfile;
+        
         if (hasJobAssessment) {
           console.log(`🎯 Job assessment detected for session ${roomName} - LHIS will handle this`);
           
@@ -129,8 +131,23 @@ function initializeSocket(server) {
           // Let LHIS handle the assessment initialization
           return;
         }
+        
+        if (isParameterSession) {
+          console.log(`📋 Parameter-based session detected: ${roomName} - using database problems`);
+          
+          // Store session info for parameter-based sessions
+          roomTimers[roomName] = { 
+            languageId: language, 
+            experience: experienceLevel,
+            assessmentMode: false,
+            parameterSession: true
+          };
+          
+          // No need to fetch AI questions - parameter system will load database problems
+          return;
+        }
 
-        // FALLBACK: Basic question generation for non-assessment sessions
+        // FALLBACK: Basic question generation for legacy non-assessment sessions
         console.log(`Session ${roomName}: Fetching initial questions for Lang=${language}, Exp=${experienceLevel}`);
         const aiQuestions = await fetchInitialRoomQuestions(language, experienceLevel);
         
@@ -211,6 +228,87 @@ function initializeSocket(server) {
         console.log(`✅ Code change relayed for session ${roomName}`);
       } catch (error) {
         console.error(`❌ Error processing code change for session ${roomName}:`, error);
+      }
+    });
+
+    // Language change handler
+    socket.on('languageChange', ({ roomName, language, userId }) => {
+      console.log(`🔧 Language changed in room ${roomName} by ${userId} to: ${language}`);
+      if (roomName && language) {
+        socket.to(roomName).emit('languageChange', { language, userId });
+        
+        // Update room info if exists
+        if (roomTimers[roomName]) {
+          roomTimers[roomName].languageId = language;
+        }
+      }
+    });
+
+    // Framework change handler
+    socket.on('frameworkChange', ({ roomName, framework, userId }) => {
+      console.log(`🏗️ Framework changed in room ${roomName} by ${userId} to: ${framework}`);
+      if (roomName && framework) {
+        socket.to(roomName).emit('frameworkChange', { framework, userId });
+        
+        // Update room info if exists
+        if (roomTimers[roomName]) {
+          roomTimers[roomName].framework = framework;
+        }
+      }
+    });
+
+    // Code execution handler
+    socket.on('executeCode', async ({ roomName, code, language, framework, userId }) => {
+      console.log(`▶️ Code execution request in room ${roomName}:`);
+      console.log(`   Language: ${language}, Framework: ${framework}`);
+      console.log(`   Code length: ${code?.length}`);
+      
+      try {
+        // Import execution router
+        const executionRouter = require('../services/execution-router');
+        
+        // Determine problem type based on framework
+        const problemType = framework && framework !== 'none' ? 'framework' : 'algorithm';
+        
+        const executionRequest = {
+          sessionId: roomName,
+          type: problemType,
+          language,
+          framework,
+          sourceCode: code,
+          config: {
+            production: process.env.NODE_ENV === 'production',
+            userId: userId
+          }
+        };
+        
+        console.log(`🚀 Routing execution via ${problemType} system`);
+        const result = await executionRouter.executeCode({
+          problemType,
+          language,
+          sourceCode: code,
+          framework,
+          config: { sessionId: roomName, production: process.env.NODE_ENV === 'production', userId }
+        });
+        
+        const isSuccess = !!result && result.success !== false;
+        if (isSuccess) {
+          const output = result.output || result.result?.output || (result.type === 'judge0' ? 'Submission sent to Judge0' : 'Execution completed');
+          const webUrl = result.webUrl || result.result?.webUrl;
+          const executionTime = result.executionTime || result.result?.executionTime;
+          socket.emit('executionResult', { output, webUrl, executionTime });
+          socket.to(roomName).emit('executionResult', { output, userId });
+        } else {
+          const errorMessage = result?.error || (result?.type === 'judge0' ? 'Submission sent to Judge0' : 'Execution failed');
+          socket.emit('executionResult', { output: result?.output || '', error: errorMessage });
+        }
+        
+      } catch (error) {
+        console.error(`❌ Code execution error in room ${roomName}:`, error);
+        socket.emit('executionResult', {
+          output: '',
+          error: `Execution error: ${error.message}`
+        });
       }
     });
 

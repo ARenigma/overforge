@@ -118,8 +118,8 @@ export function EnhancedCodeMirrorEditor({
           fontFamily: "JetBrains Mono, Consolas, Monaco, 'Courier New', monospace",
         },
         ".cm-gutters": {
-          backgroundColor: "#f8f9fa",
-          borderRight: "1px solid #e9ecef",
+          backgroundColor: "#fff",
+          borderRight: "none !important",
         },
         ".cm-lineNumbers": {
           color: "#6c757d",

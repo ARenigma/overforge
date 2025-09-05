@@ -18,7 +18,7 @@ export async function GET(
     const jobProfileId = params.id
 
     // Forward the request to the backend
-    const backendUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/jd-upload/profile/${jobProfileId}`
+    const backendUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}/api/jd-upload/profile/${jobProfileId}`
     
     const response = await fetch(backendUrl, {
       method: 'GET',

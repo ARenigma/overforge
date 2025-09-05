@@ -4,6 +4,10 @@
 @tailwind utilities;
 
 @layer base {
+  html, body, #__next {
+    @apply h-full;
+  }
+
   :root {
     /* Font family variables with fallbacks */
     --font-inter: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -108,6 +112,14 @@
   
   .card-fallback {
     @apply rounded-lg border bg-card text-card-foreground shadow-sm;
+  }
+
+  /* Custom HR with bigger dashes */
+  .hr-big-dash {
+    border: none;
+    height: 1px;
+    /* Uses a repeating gradient to simulate dashes. 6px color, 4px transparent. */
+    background: repeating-linear-gradient(to right, currentColor 0, currentColor 6px, transparent 6px, transparent 10px);
   }
 }
 

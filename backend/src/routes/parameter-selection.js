@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const productionContainerService = require('../services/productionContainerService');
 const { createClient } = require('@supabase/supabase-js');
 const { authenticateSupabase, optionalAuth } = require('../middleware/supabase-auth');
 
@@ -124,52 +125,76 @@ router.get('/popular-combinations', optionalAuth, async (req, res) => {
 // Get available problems for selected parameters
 router.post('/available-problems', optionalAuth, async (req, res) => {
   try {
-    const { coreLanguage, techStack, framework, seniorityLevel, subcategory } = req.body;
+    const { coreLanguage, frameworkLanguage, framework, techStack, seniorityLevel, subcategory } = req.body;
     
     console.log('🔍 Checking available problems for:', {
-      coreLanguage, techStack, framework, seniorityLevel, subcategory
+      coreLanguage, frameworkLanguage, framework, techStack, seniorityLevel, subcategory
     });
 
-    // Get core language problems
-    let coreQuery = supabase
-      .from('master_problems')
-      .select('id, title, description, difficulty_level, time_estimate')
-      .eq('category', 'core_language')
-      .eq('technology', coreLanguage)
-      .eq('seniority_level', seniorityLevel)
-      .eq('is_active', true);
-
-    if (framework) {
-      coreQuery = coreQuery.eq('framework', framework);
+    let coreProblems = [];
+    if (coreLanguage) {
+      const { data, error } = await supabase
+        .from('master_problems')
+        .select('id, title, description, difficulty_level, time_estimate, framework')
+        .eq('category', 'core_language')
+        .eq('technology', coreLanguage)
+        .eq('is_active', true)
+        .is('framework', null);
+      if (error) throw error;
+      coreProblems = data || [];
     }
-
-    const { data: coreProblems, error: coreError } = await coreQuery;
-    if (coreError) throw coreError;
+    
+    let frameworkProblems = [];
+    if (frameworkLanguage) {
+        let frameworkQuery = supabase
+        .from('master_problems')
+        .select('id, title, description, difficulty_level, time_estimate, framework')
+        .eq('category', 'core_language') // Frameworks are still 'core_language' category
+        .eq('technology', frameworkLanguage)
+        .eq('seniority_level', seniorityLevel)
+        .eq('is_active', true)
+        .not('framework', 'is', null);
+        
+        // If specific framework is provided, filter by it
+        if (framework) {
+            frameworkQuery = frameworkQuery.eq('framework', framework);
+        }
+        
+        const { data, error } = await frameworkQuery;
+        if (error) throw error;
+        frameworkProblems = data || [];
+    }
 
     // Get tech stack problems
-    let techQuery = supabase
-      .from('master_problems')
-      .select('id, title, description, difficulty_level, time_estimate')
-      .eq('category', 'tech_stack')
-      .eq('technology', techStack)
-      .eq('seniority_level', seniorityLevel)
-      .eq('is_active', true);
+    let techProblems = [];
+    if (techStack) {
+        let techQuery = supabase
+        .from('master_problems')
+        .select('id, title, description, difficulty_level, time_estimate')
+        .eq('category', 'tech_stack')
+        .eq('technology', techStack)
+        .eq('seniority_level', seniorityLevel)
+        .eq('is_active', true);
 
-    if (subcategory) {
-      techQuery = techQuery.eq('subcategory', subcategory);
+        if (subcategory) {
+            techQuery = techQuery.eq('subcategory', subcategory);
+        }
+        const { data, error } = await techQuery;
+        if (error) throw error;
+        techProblems = data || [];
     }
 
-    const { data: techProblems, error: techError } = await techQuery;
-    if (techError) throw techError;
 
-    console.log(`✅ Found ${coreProblems.length} core problems, ${techProblems.length} tech problems`);
+    const allProblems = [...coreProblems, ...frameworkProblems];
+
+    console.log(`✅ Found ${coreProblems.length} core, ${frameworkProblems.length} framework, ${techProblems.length} tech problems`);
     
     res.json({
       success: true,
       data: {
-        coreLanguageProblems: coreProblems,
+        coreLanguageProblems: allProblems,
         techStackProblems: techProblems,
-        totalProblems: coreProblems.length + techProblems.length
+        totalProblems: allProblems.length + techProblems.length
       }
     });
   } catch (error) {
@@ -185,54 +210,182 @@ router.post('/available-problems', optionalAuth, async (req, res) => {
 router.post('/create-session', authenticateSupabase, async (req, res) => {
   try {
     const { 
-      sessionId, 
-      candidateId, 
       coreLanguage, 
       coreFramework, 
+      frameworkLanguage,
       techStack, 
       techSubcategory, 
-      seniorityLevel 
+      seniorityLevel,
+      sessionType = 'parameter_based'
     } = req.body;
 
-    console.log('🎯 Creating new interview session with parameters:', {
-      sessionId, candidateId, coreLanguage, coreFramework, techStack, seniorityLevel
+    // Generate a unique session ID
+    const sessionId = `param-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    console.log('🎯 Creating new parameter-based interview session:', {
+      sessionId, 
+      coreLanguage, 
+      coreFramework, 
+      frameworkLanguage,
+      techStack, 
+      techSubcategory, 
+      seniorityLevel,
+      sessionType,
+      interviewerId: req.user.id
     });
 
-    // Use the SQL function to create session and assign problems
-    const { data, error } = await supabase.rpc('create_interview_session_with_problems', {
-      p_session_id: sessionId,
-      p_interviewer_id: req.user.id,
-      p_candidate_id: candidateId,
-      p_core_language: coreLanguage,
-      p_tech_stack: techStack,
-      p_core_framework: coreFramework,
-      p_tech_subcategory: techSubcategory,
-      p_seniority_level: seniorityLevel
-    });
+    // First, check available problems for this combination
+    let coreProblems = [];
+    if (coreLanguage) {
+        let { data, error } = await supabase
+        .from('master_problems')
+        .select('id, title, description, difficulty_level, time_estimate, framework')
+        .eq('category', 'core_language')
+        .eq('technology', coreLanguage)
+        .eq('seniority_level', seniorityLevel)
+        .eq('is_active', true)
+        .is('framework', null);
+      if (error) throw error;
+      coreProblems = data || [];
+    }
 
-    if (error) throw error;
+    let frameworkProblems = [];
+    if (coreFramework && frameworkLanguage) {
+      let { data, error } = await supabase
+        .from('master_problems')
+        .select('id, title, description, difficulty_level, time_estimate, framework')
+        .eq('category', 'core_language')
+        .eq('technology', frameworkLanguage)
+        .eq('framework', coreFramework)
+        .eq('seniority_level', seniorityLevel)
+        .eq('is_active', true);
+      if (error) throw error;
+      frameworkProblems = data || [];
+    }
 
-    console.log('✅ Interview session created successfully');
-    
-    res.json({
-      success: true,
-      data: {
-        sessionId: data.session_id,
-        coreLanguageProblem: {
-          id: data.core_problem_id,
-          title: data.core_problem_title
-        },
-        techStackProblem: {
-          id: data.tech_problem_id,
-          title: data.tech_problem_title
+    // Get tech stack problems
+    let techProblems = [];
+    if (techStack) {
+        let techQuery = supabase
+        .from('master_problems')
+        .select('id, title, description, difficulty_level, time_estimate')
+        .eq('category', 'tech_stack')
+        .eq('technology', techStack)
+        .eq('seniority_level', seniorityLevel)
+        .eq('is_active', true);
+
+        if (techSubcategory) {
+            techQuery = techQuery.eq('subcategory', techSubcategory);
         }
-      }
+        const { data, error } = await techQuery;
+        if (error) throw error;
+        techProblems = data || [];
+    }
+
+
+    if (coreProblems.length === 0 && frameworkProblems.length === 0 && techProblems.length === 0) {
+        return res.status(400).json({
+            success: false,
+            error: `No problems available for the selected combination.`
+        });
+    }
+
+    // Select random problems from available ones
+    const selectedCoreProblem = coreProblems.length > 0 ? coreProblems[Math.floor(Math.random() * coreProblems.length)] : null;
+    const selectedFrameworkProblem = frameworkProblems.length > 0 ? frameworkProblems[Math.floor(Math.random() * frameworkProblems.length)] : null;
+    const selectedTechProblem = techProblems.length > 0 ? techProblems[Math.floor(Math.random() * techProblems.length)] : null;
+
+    // Pre-warm container for CORE questions
+    if (selectedCoreProblem) {
+        console.log(`🔥 Pre-warming container for core problem: ${selectedCoreProblem.title}`);
+        productionContainerService.createSession({
+          sessionId: `core-${selectedCoreProblem.id}`,
+          type: 'core_language',
+          language: coreLanguage,
+          framework: coreLanguage, // Pass the language itself as the "framework" for lookup
+          sourceCode: '',
+          config: { questionTitle: selectedCoreProblem.title }
+        }).catch(err => {
+            console.error(`🚨 Failed to pre-warm container for problem ${selectedCoreProblem.id}:`, err);
+        });
+    }
+
+    // Pre-warm container for framework questions
+    if (selectedFrameworkProblem) {
+        console.log(`🔥 Pre-warming container for framework problem: ${selectedFrameworkProblem.title}`);
+        productionContainerService.createSession({
+          sessionId: `framework-${selectedFrameworkProblem.id}`, // Use a unique ID for the container session
+          type: 'framework',
+          language: frameworkLanguage,
+          framework: coreFramework,
+          sourceCode: '', // No initial code for pre-warming
+          config: { questionTitle: selectedFrameworkProblem.title }
+        }).catch(err => {
+            console.error(`🚨 Failed to pre-warm container for problem ${selectedFrameworkProblem.id}:`, err);
+        });
+    }
+
+    // Create the session record in interview_sessions_v2 table
+    const { data: sessionData, error: sessionError } = await supabase
+        .from('interview_sessions_v2')
+        .insert({
+            session_id: sessionId,
+            interviewer_id: req.user.id,
+            candidate_id: null, // Will be filled when candidate joins
+            core_language: coreLanguage || frameworkLanguage, // Store a language
+            core_framework: coreFramework,
+            tech_stack: techStack,
+            tech_subcategory: techSubcategory,
+            seniority_level: seniorityLevel,
+            core_language_problem_id: selectedCoreProblem ? selectedCoreProblem.id : null,
+            framework_problem_id: selectedFrameworkProblem ? selectedFrameworkProblem.id : null,
+            tech_stack_problem_id: selectedTechProblem ? selectedTechProblem.id : null,
+            status: 'created',
+            session_data: {
+                sessionType,
+                useNewSystem: true,
+            }
+        })
+        .select()
+        .single();
+
+    if (sessionError) throw sessionError;
+
+    console.log('✅ Parameter-based interview session created successfully');
+
+    res.json({
+        success: true,
+        data: {
+            sessionId: sessionId,
+            coreLanguageProblem: selectedCoreProblem ? {
+                id: selectedCoreProblem.id,
+                title: selectedCoreProblem.title,
+                description: selectedCoreProblem.description,
+                difficulty: selectedCoreProblem.difficulty_level,
+                timeEstimate: selectedCoreProblem.time_estimate
+            } : null,
+            frameworkProblem: selectedFrameworkProblem ? {
+                id: selectedFrameworkProblem.id,
+                title: selectedFrameworkProblem.title,
+                description: selectedFrameworkProblem.description,
+                difficulty: selectedFrameworkProblem.difficulty_level,
+                timeEstimate: selectedFrameworkProblem.time_estimate
+            } : null,
+            techStackProblem: selectedTechProblem ? {
+                id: selectedTechProblem.id,
+                title: selectedTechProblem.title,
+                description: selectedTechProblem.description,
+                difficulty: selectedTechProblem.difficulty_level,
+                timeEstimate: selectedTechProblem.time_estimate
+            } : null,
+            sessionData: sessionData
+        }
     });
   } catch (error) {
-    console.error('❌ Error creating interview session:', error);
+    console.error('❌ Error creating parameter-based interview session:', error);
     res.status(500).json({
       success: false,
-      error: 'Failed to create interview session'
+      error: 'Failed to create interview session: ' + error.message
     });
   }
 });

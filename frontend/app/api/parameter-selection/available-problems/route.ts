@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     
     // Forward the request to the backend
-    const backendUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/parameter-selection/available-problems`
+    const backendUrl = `${process.env.BACKEND_URL || 'http://localhost:5001'}/api/parameter-selection/available-problems`
     
     const response = await fetch(backendUrl, {
       method: 'POST',

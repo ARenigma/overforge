@@ -5,6 +5,10 @@ const socketIo = require('socket.io');
 const path = require('path');
 require('dotenv').config();
 
+// Import Docker service for automatic container management
+const dockerService = require('./services/dockerService');
+const templateGeneratorService = require('./services/templateGeneratorService');
+
 // Import routes
 const authRoutes = require('./routes/auth-native-supabase');
 const executeRoutes = require('./routes/execute');
@@ -47,7 +51,9 @@ app.get('/health', (req, res) => {
         livingInterviewer: 'active',
         database: 'supabase-connected',
         authentication: 'supabase-active',
-        sessions: 'active'
+        sessions: 'active',
+        docker: dockerService.getHealthStatus(),
+        containers: dockerService.getAvailableEnvironments()
       }
     });
   } catch (error) {
@@ -62,6 +68,7 @@ app.get('/health', (req, res) => {
 // API Routes - Using Native Supabase Auth
 app.use('/api/auth', authRoutes);
 app.use('/api/sessions', require('./routes/sessions-supabase'));
+app.use('/api/session-containers', require('./routes/session-containers'));
 app.use('/api/job-profiles', require('./routes/job-profiles'));
 app.use('/api/parameter-selection', require('./routes/parameter-selection'));
 app.use('/api/living-assessment', require('./routes/living-assessment'));
@@ -144,10 +151,58 @@ app.use((req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🎯 Living AI Interviewer system active`);
-  console.log(`📡 WebSocket server ready for real-time communication`);
+
+// Start server and Docker containers
+async function startServer() {
+  // Start the HTTP server
+  server.listen(PORT, async () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🎯 Living AI Interviewer system active`);
+    console.log(`📡 WebSocket server ready for real-time communication`);
+    
+    // Initialize template system
+    try {
+      console.log('🎨 Initializing template generation system...');
+      await templateGeneratorService.initializeTemplates();
+      console.log('✅ Template system ready');
+    } catch (error) {
+      console.log('⚠️  Template initialization error (non-fatal):', error.message);
+    }
+    
+    // Start Docker containers automatically
+    try {
+      await dockerService.startContainers();
+    } catch (error) {
+      console.log('⚠️  Docker startup error (non-fatal):', error.message);
+    }
+    
+    console.log(`✅ OverForge backend initialization complete`);
+  });
+
+  // Graceful shutdown handling
+  process.on('SIGTERM', async () => {
+    console.log('🛑 SIGTERM received, shutting down gracefully...');
+    await dockerService.stopContainers();
+    server.close(() => {
+      console.log('✅ Server shut down complete');
+      process.exit(0);
+    });
+  });
+
+  process.on('SIGINT', async () => {
+    console.log('🛑 SIGINT received, shutting down gracefully...');
+    await dockerService.stopContainers();
+    server.close(() => {
+      console.log('✅ Server shut down complete');
+      process.exit(0);
+    });
+  });
+}
+
+// Start the server
+startServer().catch(error => {
+  console.error('❌ Failed to start server:', error);
+  process.exit(1);
 });
 
 module.exports = app; 

@@ -35,11 +35,28 @@ export default function HomePage() {
 
   // Button handlers
   const handleStartPracticing = () => {
-    router.push('/auth?mode=signup')
+    if (user) {
+      // User is logged in, redirect to candidate dashboard
+      router.push('/dashboard/candidate')
+    } else {
+      // User not logged in, redirect to signup
+      router.push('/auth?mode=signup&role=candidate')
+    }
   }
 
   const handleStartInterviewing = () => {
-    router.push('/auth?mode=signup')
+    if (user) {
+      // User is logged in, check role and redirect appropriately
+      if (user.role === 'interviewer') {
+        router.push('/dashboard/interviewer')
+      } else {
+        // If user is a candidate but clicked interviewer button, redirect to candidate dashboard
+        router.push('/dashboard/candidate')
+      }
+    } else {
+      // User not logged in, redirect to signup
+      router.push('/auth?mode=signup&role=interviewer')
+    }
   }
 
   const handleSignIn = () => {
@@ -117,7 +134,7 @@ export default function HomePage() {
                   className="w-full bg-blue-600 hover:bg-blue-700"
                   onClick={handleStartPracticing}
                 >
-                  Start Practicing
+                  {user ? 'Go to Practice Dashboard' : 'Start Practicing'}
                 </Button>
               </CardContent>
             </Card>
@@ -133,11 +150,16 @@ export default function HomePage() {
                 <p className="text-muted-foreground mb-4">
                   Conduct efficient technical interviews with AI-assisted evaluation tools.
                 </p>
+                {user && user.role !== 'interviewer' && (
+                  <p className="text-xs text-amber-600 mb-2 bg-amber-50 p-2 rounded">
+                    Note: You're logged in as a candidate. Click to access your dashboard.
+                  </p>
+                )}
                 <Button 
                   className="w-full bg-green-600 hover:bg-green-700"
                   onClick={handleStartInterviewing}
                 >
-                  Start Interviewing
+                  {user ? (user.role === 'interviewer' ? 'Go to Interview Dashboard' : 'Go to My Dashboard') : 'Start Interviewing'}
                 </Button>
               </CardContent>
             </Card>
