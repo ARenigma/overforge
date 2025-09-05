@@ -17,7 +17,7 @@ export async function GET(
     }
 
     // Forward the request to your backend
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:5000"
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:5001"
 
     const response = await fetch(`${backendUrl}/api/execute/${token}`, {
       method: "GET",

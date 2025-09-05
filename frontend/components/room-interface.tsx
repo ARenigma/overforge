@@ -41,7 +41,7 @@ export default function RoomInterface() {
   useEffect(() => {
     if (!user || !token || !roomId) return
 
-    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5000"
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:5001"
     const newSocket = io(socketUrl, {
       auth: { token },
       transports: ["websocket"],

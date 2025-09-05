@@ -14,7 +14,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     }
 
     // Forward to backend or handle directly
-    const backendUrl = process.env.BACKEND_URL || "http://localhost:5000"
+    const backendUrl = process.env.BACKEND_URL || "http://localhost:5001"
 
     try {
       const response = await fetch(`${backendUrl}/api/room/${params.id}/chat`, {

@@ -1,0 +1,13 @@
+{
+  "name": "javascript-nodejs-environment",
+  "version": "1.0.0",
+  "description": "Node.js environment for OverForge interviews",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js"
+  },
+  "dependencies": {
+    "nodemon": "^3.0.1"
+  }
+} 

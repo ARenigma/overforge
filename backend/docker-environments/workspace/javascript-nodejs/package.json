@@ -1,0 +1,23 @@
+{
+  "name": "adaptive-nodejs-app",
+  "version": "1.0.0",
+  "description": "Adaptive Node.js application that adapts to any user code structure",
+  "main": "adaptive-app.js",
+  "scripts": {
+    "start": "node adaptive-app.js",
+    "dev": "nodemon adaptive-app.js",
+    "test": "echo \"No tests specified\" && exit 0"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": [
+    "nodejs",
+    "adaptive",
+    "api",
+    "framework"
+  ],
+  "author": "Overforge Interview System",
+  "license": "MIT"
+} 

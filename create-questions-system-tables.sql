@@ -8,7 +8,7 @@ CREATE TABLE extracted_parameters (
     id SERIAL PRIMARY KEY,
     technology_name VARCHAR(100) NOT NULL,
     category VARCHAR(50) NOT NULL CHECK (category IN ('core_language', 'tech_stack')),
-    subcategory VARCHAR(50), -- 'cloud', 'database', 'framework', etc.
+    subcategory VARCHAR(50), -- 'cloud', 'database', 'framework', 'containerization', etc.
     frameworks JSONB DEFAULT '[]', -- Array of frameworks for core languages
     frequency_count INTEGER DEFAULT 1,
     last_detected TIMESTAMP DEFAULT NOW(),
@@ -51,14 +51,15 @@ CREATE TABLE interview_sessions_v2 (
     job_profile_id INTEGER, -- Optional, if created from JD
     
     -- Selected Parameters
-    core_language VARCHAR(100) NOT NULL,
+    core_language VARCHAR(100),
     core_framework VARCHAR(100), -- Optional
-    tech_stack VARCHAR(100) NOT NULL,
-    tech_subcategory VARCHAR(50), -- 'cloud', 'database', etc.
-    seniority_level VARCHAR(20) NOT NULL,
+    tech_stack VARCHAR(100),
+    tech_subcategory VARCHAR(255),
+    seniority_level VARCHAR(50) NOT NULL,
     
     -- Assigned Problems
     core_language_problem_id INTEGER REFERENCES master_problems(id),
+    framework_problem_id INTEGER REFERENCES master_problems(id),
     tech_stack_problem_id INTEGER REFERENCES master_problems(id),
     
     -- Session Status
@@ -68,7 +69,8 @@ CREATE TABLE interview_sessions_v2 (
     -- Timestamps
     created_at TIMESTAMP DEFAULT NOW(),
     started_at TIMESTAMP,
-    completed_at TIMESTAMP
+    completed_at TIMESTAMP,
+    CONSTRAINT check_at_least_one_selection CHECK (core_language IS NOT NULL OR core_framework IS NOT NULL OR tech_stack IS NOT NULL)
 );
 
 -- 4. ASSESSMENT RESULTS TABLE
@@ -167,6 +169,45 @@ CREATE INDEX idx_tech_combo_core ON technology_combinations(core_language);
 CREATE INDEX idx_tech_combo_stack ON technology_combinations(tech_stack);
 
 -- =====================================================
+-- ROW LEVEL SECURITY (RLS) POLICIES
+-- =====================================================
+
+-- Enable RLS on all tables
+ALTER TABLE extracted_parameters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE master_problems ENABLE ROW LEVEL SECURITY;
+ALTER TABLE interview_sessions_v2 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assessment_results_v2 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE technology_combinations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE problem_tags ENABLE ROW LEVEL SECURITY;
+
+-- Public read access to extracted parameters and master problems
+CREATE POLICY "Public read access" ON extracted_parameters FOR SELECT USING (true);
+CREATE POLICY "Public read access" ON master_problems FOR SELECT USING (true);
+CREATE POLICY "Public read access" ON technology_combinations FOR SELECT USING (true);
+CREATE POLICY "Public read access" ON problem_tags FOR SELECT USING (true);
+
+-- Session access control
+CREATE POLICY "Interviewers can access their sessions" ON interview_sessions_v2 
+    FOR ALL USING (auth.uid() = interviewer_id);
+
+CREATE POLICY "Users can access their assessment results" ON assessment_results_v2 
+    FOR ALL USING (
+        EXISTS (
+            SELECT 1 FROM interview_sessions_v2 s 
+            WHERE s.session_id = assessment_results_v2.session_id 
+            AND s.interviewer_id = auth.uid()
+        )
+    );
+
+-- Admin full access (if needed)
+CREATE POLICY "Service role full access" ON extracted_parameters FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "Service role full access" ON master_problems FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "Service role full access" ON interview_sessions_v2 FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "Service role full access" ON assessment_results_v2 FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "Service role full access" ON technology_combinations FOR ALL USING (auth.role() = 'service_role');
+CREATE POLICY "Service role full access" ON problem_tags FOR ALL USING (auth.role() = 'service_role');
+
+-- =====================================================
 -- FUNCTIONS AND TRIGGERS
 -- =====================================================
 
@@ -177,9 +218,9 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$ LANGUAGE plpgsql;
 
--- Triggers for updated_at
+-- Apply update_updated_at trigger to relevant tables
 CREATE TRIGGER update_extracted_parameters_updated_at 
     BEFORE UPDATE ON extracted_parameters 
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -201,31 +242,6 @@ BEGIN
     RETURN NEW;
 END;
 $$ language 'plpgsql';
-
--- =====================================================
--- ROW LEVEL SECURITY (RLS) POLICIES
--- =====================================================
-
--- Enable RLS on sensitive tables
-ALTER TABLE interview_sessions_v2 ENABLE ROW LEVEL SECURITY;
-ALTER TABLE assessment_results_v2 ENABLE ROW LEVEL SECURITY;
-
--- Policies for interview_sessions_v2
-CREATE POLICY "Interviewers can manage their own sessions" ON interview_sessions_v2
-    FOR ALL USING (auth.uid() = interviewer_id);
-
-CREATE POLICY "Public read access to session basic info" ON interview_sessions_v2
-    FOR SELECT USING (true);
-
--- Policies for assessment_results_v2
-CREATE POLICY "Interviewers can view results for their sessions" ON assessment_results_v2
-    FOR SELECT USING (
-        EXISTS (
-            SELECT 1 FROM interview_sessions_v2 
-            WHERE session_id = assessment_results_v2.session_id 
-            AND interviewer_id = auth.uid()
-        )
-    );
 
 -- =====================================================
 -- INITIAL SEED DATA SETUP

@@ -526,18 +526,19 @@ Experience Level: ${aiAnalysis.experienceLevel}
         
         console.log(`🎯 Language for problem generation: ${languageForProblem} (inferred: ${inferredLanguage})`);
         
-        const problemResponse = await axios.post(`${this.aiModuleUrl}/generate-assessment-problem`, {
-          parameters: response.data.parameters,
-          language: languageForProblem,
-          experience_level: this.normalizeExperienceLevel(aiAnalysis.experienceLevel)
-        }, {
-          timeout: 30000
-        });
-        
+                // DISABLED: AI problem generation - using database problems only
+        // const problemResponse = await axios.post(`${this.aiModuleUrl}/generate-assessment-problem`, {
+        //   parameters: response.data.parameters,
+        //   language: languageForProblem,
+        //   experience_level: this.normalizeExperienceLevel(aiAnalysis.experienceLevel)
+        // }, {
+        //   timeout: 30000
+        // });
+
         return {
           success: true,
           parameters: response.data.parameters,
-          masterProblem: problemResponse.data.success ? problemResponse.data.problem : null,
+          masterProblem: null, // Use database problems only
           assessmentCriteria: this.generateAssessmentCriteria(response.data.parameters)
         };
       } else {
@@ -670,7 +671,7 @@ Experience Level: ${aiAnalysis.experienceLevel}
         required_skills: aiAnalysis.requiredSkills,
         preferred_skills: aiAnalysis.preferredSkills,
         parameters: parameterResult.parameters,
-        master_problem: parameterResult.masterProblem,
+        master_problem: null, // Using database problems only
         assessment_criteria: parameterResult.assessmentCriteria,
         processing_status: 'completed',
         processing_completed_at: new Date().toISOString(),

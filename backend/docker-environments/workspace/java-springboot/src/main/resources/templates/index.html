@@ -1,0 +1,254 @@
+<!doctype html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>🚀 Spring Boot Model Preview</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .main-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+            margin: 20px auto;
+            max-width: 1200px;
+        }
+        .header {
+            background: linear-gradient(135deg, #6c5ce7, #a29bfe);
+            color: white;
+            padding: 30px;
+            border-radius: 20px 20px 0 0;
+            text-align: center;
+        }
+        .stats-card {
+            background: linear-gradient(135deg, #00b894, #00cec9);
+            color: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 10px;
+            text-align: center;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1);
+        }
+        .field-badge {
+            background: linear-gradient(135deg, #fd79a8, #fdcb6e);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 20px;
+            margin: 5px;
+            display: inline-block;
+            font-weight: 600;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .data-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 15px 0;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            border-left: 5px solid #6c5ce7;
+            transition: transform 0.3s ease;
+        }
+        .data-card:hover {
+            transform: translateY(-5px);
+        }
+        .api-button {
+            background: linear-gradient(135deg, #fd79a8, #fdcb6e);
+            border: none;
+            color: white;
+            padding: 12px 25px;
+            border-radius: 25px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+            margin: 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        .api-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+            color: white;
+        }
+        .no-model {
+            text-align: center;
+            padding: 50px;
+            color: #6c757d;
+        }
+        .reload-btn {
+            background: linear-gradient(135deg, #00b894, #00cec9);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .reload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="main-container">
+            <div class="header">
+                <h1><i class="fas fa-rocket"></i> Spring Boot Model Preview</h1>
+                <p class="lead">Live preview of your Java model implementation</p>
+                <button class="reload-btn" onclick="reloadModel()">
+                    <i class="fas fa-sync-alt"></i> Reload Model
+                </button>
+            </div>
+
+            <div class="container-fluid p-4">
+                <div th:if="${modelDetected}">
+                    <!-- Model Statistics -->
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="stats-card">
+                                <h3><i class="fas fa-database"></i> <span th:text="${modelAnalysis.fieldCount}">0</span></h3>
+                                <p>Model Fields</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="stats-card">
+                                <h3><i class="fas fa-list"></i> <span th:text="${#lists.size(sampleData)}">0</span></h3>
+                                <p>Sample Records</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="stats-card">
+                                <h3><i class="fas fa-code"></i> <span th:text="${modelAnalysis.methodCount}">0</span></h3>
+                                <p>Custom Methods</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Model Information -->
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <div class="data-card">
+                                <h4><i class="fas fa-info-circle"></i> Model: <span th:text="${modelAnalysis.modelName}">Unknown</span></h4>
+                                <p><strong>Package:</strong> <span th:text="${modelAnalysis.packageName}">com.overforge.interview.controller</span></p>
+
+                                <h5 class="mt-3"><i class="fas fa-tags"></i> Detected Fields:</h5>
+                                <div>
+                                    <span th:each="field : ${modelAnalysis.fields}"
+                                          th:text="${field.name + ' (' + field.type + ')'}"
+                                          class="field-badge"></span>
+                                </div>
+
+                                <div class="mt-3">
+                                    <a th:href="@{'/api/' + ${#strings.toLowerCase(modelAnalysis.modelName)}}"
+                                       class="api-button" target="_blank">
+                                        <i class="fas fa-api"></i> View JSON API
+                                    </a>
+                                    <a href="/api/model/analysis" class="api-button" target="_blank">
+                                        <i class="fas fa-chart-bar"></i> Model Analysis
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sample Data -->
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <h4><i class="fas fa-table"></i> Sample Data Preview</h4>
+                            <div th:each="record : ${sampleData}" class="data-card">
+                                <div class="row">
+                                    <div th:each="entry : ${record}" class="col-md-3 mb-2">
+                                        <strong th:text="${entry.key}">Field</strong>:
+                                        <span th:text="${entry.value}">Value</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div th:unless="${modelDetected}" class="no-model">
+                    <div class="data-card">
+                        <h3><i class="fas fa-exclamation-triangle text-warning"></i> No Model Detected</h3>
+                        <p class="lead">Create a Java class in the controller directory to see the magic happen!</p>
+                        <div class="mt-4">
+                            <h5>📝 Example Model:</h5>
+                            <pre class="text-start" style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 20px auto; max-width: 600px;">
+public class Product {
+    private Long id;
+    private String name;
+    private String description;
+    private Double price;
+    private String category;
+    private Integer stock;
+    private Boolean available;
+
+    // Constructors, getters, setters...
+}</pre>
+                        </div>
+                        <button class="api-button" onclick="reloadModel()">
+                            <i class="fas fa-sync-alt"></i> Check for Model
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function reloadModel() {
+            const button = document.querySelector('.reload-btn');
+            const originalText = button.innerHTML;
+            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Reloading...';
+            button.disabled = true;
+
+            fetch('/api/model/reload', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Reload response:', data);
+
+                    // Show success/error message
+                    const alertClass = data.success ? 'alert-success' : 'alert-warning';
+                    const alertHtml = `
+                        <div class="alert ${alertClass} alert-dismissible fade show" role="alert">
+                            <i class="fas fa-${data.success ? 'check-circle' : 'exclamation-triangle'}"></i>
+                            ${data.message}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    `;
+
+                    document.querySelector('.container-fluid').insertAdjacentHTML('afterbegin', alertHtml);
+
+                    // Reload page after a short delay to show updated model
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                })
+                .catch(error => {
+                    console.error('Error reloading model:', error);
+
+                    const alertHtml = '<div class="alert alert-danger alert-dismissible fade show" role="alert">' +
+                                     '<i class="fas fa-exclamation-triangle"></i>' +
+                                     'Error reloading model. Please try again.' +
+                                     '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>' +
+                                     '</div>';
+
+                    document.querySelector('.container-fluid').insertAdjacentHTML('afterbegin', alertHtml);
+                })
+                .finally(() => {
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                });
+        }
+    </script>
+</body>
+</html>

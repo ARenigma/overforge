@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Forward the request to the backend
-    const backendUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'}/api/job-profiles`
+    const backendUrl = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001'}/api/job-profiles`
     
     const response = await fetch(backendUrl, {
       method: 'GET',
