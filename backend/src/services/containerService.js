@@ -19,12 +19,12 @@ class ContainerService {
       'springboot': 'java-springboot'
     };
     
-    // Container to port mapping
+    // Container to port mapping (Windows-safe ports in 9000+ range)
     this.containerPorts = {
-      'python-django': 8001,
+      'python-django': 9000,
       'javascript-express': 3001,
       'javascript-nodejs': 3002,
-      'java-springboot': 8002
+      'java-springboot': 9080
     };
   }
 

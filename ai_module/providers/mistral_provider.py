@@ -1,7 +1,6 @@
 import os
 from typing import Optional, Dict, Any, List
-from mistralai import Mistral
-from mistralai.models import UserMessage, AssistantMessage, SystemMessage
+from mistralai.client import MistralClient
 from config import AIConfig
 
 class MistralProvider:
@@ -13,14 +12,14 @@ class MistralProvider:
         
         # Initialize Mistral client if API key is available
         if AIConfig.MISTRAL_API_KEY:
-            self.mistral_client = Mistral(api_key=AIConfig.MISTRAL_API_KEY)
+            self.mistral_client = MistralClient(api_key=AIConfig.MISTRAL_API_KEY)
             
         # Initialize Codestral client if API key is available
         # Codestral uses a different endpoint: https://codestral.mistral.ai
         if AIConfig.CODESTRAL_API_KEY:
-            self.codestral_client = Mistral(
+            self.codestral_client = MistralClient(
                 api_key=AIConfig.CODESTRAL_API_KEY,
-                server_url="https://codestral.mistral.ai"
+                endpoint="https://codestral.mistral.ai"
             )
     
     def is_available(self, provider_type: str = "mistral") -> bool:
@@ -44,16 +43,16 @@ class MistralProvider:
             else:
                 raise ValueError(f"Provider {provider_type} is not available")
             
-            # Create chat messages using UserMessage class
-            messages: List[Any] = [UserMessage(content=prompt)]
+            # Create chat messages using dict format
+            messages: List[Dict[str, str]] = [{"role": "user", "content": prompt}]
             
             if AIConfig.DEBUG_MODE:
                 print(f"Sending request to {provider_type} with model {model}")
                 if provider_type == "codestral":
                     print(f"Using Codestral endpoint: https://codestral.mistral.ai")
             
-            # Make API call using the chat complete method
-            response = client.chat.complete(
+            # Make API call using the chat method
+            response = client.chat(
                 model=model,
                 messages=messages,
                 temperature=0.7,

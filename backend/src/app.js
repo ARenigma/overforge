@@ -65,6 +65,29 @@ app.get('/health', (req, res) => {
   }
 });
 
+// Test endpoint to manually send chat message
+app.post('/test-chat/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  const { message } = req.body;
+  
+  const testMessage = {
+    id: `test-${Date.now()}`,
+    message: message || 'Test message from backend',
+    timestamp: new Date().toISOString(),
+    sender: { id: 'test', name: 'Test Bot', type: 'system' }
+  };
+  
+  console.log(`🧪 Test: Sending message to main room: ${sessionId}`);
+  console.log(`🧪 Test: Active rooms: ${Array.from(io.sockets.adapter.rooms.keys()).join(', ')}`);
+  
+  // Send to main room only
+  io.to(sessionId).emit('chatMessage', testMessage);
+  io.to(sessionId).emit('newMessage', testMessage);
+  io.emit('debugMessage', { ...testMessage, debugInfo: 'Test message sent globally' });
+  
+  res.json({ success: true, message: 'Test message sent', testMessage });
+});
+
 // API Routes - Using Native Supabase Auth
 app.use('/api/auth', authRoutes);
 app.use('/api/sessions', require('./routes/sessions-supabase'));
@@ -75,6 +98,7 @@ app.use('/api/living-assessment', require('./routes/living-assessment'));
 app.use('/api/admin', adminRoutes);
 app.use('/api/jd-upload', jdUploadRoutes);
 app.use('/api/execute', executeRoutes);
+app.use('/api', require('./routes/solutions'));
 
 // Languages endpoint
 app.get('/api/languages', async (req, res) => {

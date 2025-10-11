@@ -149,21 +149,21 @@ class ProductionContainerService {
     });
   }
 
-  // Get port for shared containers
+  // Get port for shared containers (Windows-safe ports in 9000+ range)
   getSharedContainerPort(baseImage) {
     const portMap = {
       // Framework containers
-      'python-django': 8001,
+      'python-django': 9000,
       'javascript-express': 3001,
       'javascript-nodejs': 3002,
-      'java-springboot': 8002,
+      'java-springboot': 9080,
       
       // Core language containers
-      'python-core': 8003,
+      'python-core': 9003,
       'javascript-core': 3003,
-      'java-core': 8004
+      'java-core': 9004
     };
-    return portMap[baseImage] || 8001;
+    return portMap[baseImage] || 9000;
   }
 
   // 🎯 Smart Template Deployment
