@@ -929,29 +929,19 @@ async def analyze(request: AnalyzeRequest):
                     "usage": ai_response.get("usage", {})
                 }
         
-        # Check if this is a LHIS contextual response prompt
-        # Debug each condition individually
-        cond1 = "experienced technical interviewer" in prompt.lower() and "conducting a live coding assessment" in prompt.lower()
-        cond2 = "contextual check-in message" in prompt.lower()
-        cond3 = "USER RESPONSE:" in prompt and "proactive_check" in prompt
-        cond4 = "human interviewer" in prompt.lower() and "conversational" in prompt.lower()
-        cond5 = "Generate a high-quality assessment question" in prompt
-        cond6 = "expert technical interviewer" in prompt.lower()
-        cond7 = "INTERVIEW CONTEXT:" in prompt and "Parameter:" in prompt
+        # SIMPLIFIED: Check if this is a LHIS depth question prompt
+        # Look for key LHIS indicators - be more flexible
+        is_lhis_prompt = (
+            ("technical interviewer" in prompt.lower() and "assessment" in prompt.lower()) or
+            ("INTERVIEW CONTEXT:" in prompt and "Parameter:" in prompt) or
+            ("Generate a high-quality assessment question" in prompt) or
+            ("depth question" in prompt.lower()) or
+            ("candidate's current code" in prompt.lower())
+        )
         
-        is_lhis_prompt = cond1 or cond2 or cond3 or cond4 or cond5 or cond6 or cond7
-        
-        print(f"🔍 LHIS Detection Debug:")
-        print(f"   - experienced technical interviewer: {'experienced technical interviewer' in prompt.lower()}")
-        print(f"   - conducting a live coding assessment: {'conducting a live coding assessment' in prompt.lower()}")
-        print(f"   - cond1 (exp + conducting): {cond1}")
-        print(f"   - cond2 (contextual check-in): {cond2}")
-        print(f"   - cond3 (USER RESPONSE + proactive): {cond3}")
-        print(f"   - cond4 (human interviewer + conversational): {cond4}")
-        print(f"   - cond5 (Generate assessment question): {cond5}")
-        print(f"   - cond6 (expert technical interviewer): {cond6}")
-        print(f"   - cond7 (INTERVIEW CONTEXT + Parameter): {cond7}")
-        print(f"   - Final is_lhis_prompt: {is_lhis_prompt}")
+        print(f"🔍 SIMPLIFIED LHIS Detection: {is_lhis_prompt}")
+        if is_lhis_prompt:
+            print(f"✅ LHIS prompt detected - proceeding with question generation")
         
         if is_lhis_prompt:
             # For LHIS prompts, return the entire response as the question
@@ -1033,15 +1023,16 @@ async def analyze(request: AnalyzeRequest):
             q2 = q2_match.group(0) if q2_match else ''
             insight = re.sub(r'Q1:.*', '', raw, count=1)
             insight = re.sub(r'Q2:.*', '', insight, count=1).strip()
-        if insight and (q1 or q2):
-            insight = insight.strip()
-        else:
-            insight = ''
-        questions = '\n'.join(filter(None, [q1, q2]))
-                
-        return {
-            "question": questions,
-            "insight": insight,
+            
+            if insight and (q1 or q2):
+                insight = insight.strip()
+            else:
+                insight = ''
+            questions = '\n'.join(filter(None, [q1, q2]))
+                    
+            return {
+                "question": questions,
+                "insight": insight,
                 "type": "llm-generated",
                 "context": request.code,
                 "provider_used": ai_response["provider"],
@@ -2241,5 +2232,7 @@ RESPOND ONLY WITH VALID JSON:
 # Server startup
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 Starting AI Module server on http://localhost:8000")
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=False) 
+    port = AIConfig.AI_MODULE_PORT
+    host = AIConfig.AI_MODULE_HOST
+    print(f"🚀 Starting AI Module server on http://{host}:{port}")
+    uvicorn.run("app:app", host=host, port=port, reload=False) 

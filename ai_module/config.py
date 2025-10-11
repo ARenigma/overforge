@@ -37,6 +37,10 @@ class AIConfig:
     OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
     OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "codellama:7b")
     
+    # Server Configuration
+    AI_MODULE_PORT = int(os.getenv("AI_MODULE_PORT", "9001"))  # Windows-safe port
+    AI_MODULE_HOST = os.getenv("AI_MODULE_HOST", "0.0.0.0")
+    
     # Feature flags
     ENABLE_OLLAMA_FALLBACK = os.getenv("ENABLE_OLLAMA_FALLBACK", "true").lower() == "true"
     DEBUG_MODE = os.getenv("DEBUG_MODE", "false").lower() == "true"

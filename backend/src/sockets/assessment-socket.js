@@ -5,11 +5,13 @@ class AssessmentSocketHandler {
   constructor(io) {
     this.io = io;
     this.lastAnalysisTime = new Map(); // Track last analysis time per session to prevent rapid calls
+    this.lastCodeSnapshot = new Map(); // Track last analyzed code for each session
     
     // Pass socket IO instance to LHIS so it can emit contextual responses
     livingAIInterviewer.setSocketIO(io);
     
     this.setupLHISHandlers();
+    this.startQuestionTimer(); // Start periodic question checking
   }
 
   setupLHISHandlers() {
@@ -58,6 +60,7 @@ class AssessmentSocketHandler {
           const { sessionId, candidateId, role = 'candidate' } = data;
           
           console.log(`👥 LHIS: ${role} joining assessment room: ${sessionId}`);
+          console.log(`🔍 LHIS: joinAssessmentRoom data:`, JSON.stringify(data));
           
           socket.join(`assessment-${sessionId}`);
           socket.assessmentSessionId = sessionId;
@@ -75,8 +78,8 @@ class AssessmentSocketHandler {
         }
       });
 
-      // LHIS - Code change monitoring (configurable char threshold)
-      socket.on('assessmentCodeChange', async (data) => {
+      // LHIS - Code change monitoring (handles both codeChange and assessmentCodeChange)
+      const handleCodeChange = async (data) => {
         try {
           const { sessionId, questionId, code, language } = data;
           
@@ -89,8 +92,12 @@ class AssessmentSocketHandler {
           const lastAnalysis = this.lastAnalysisTime.get(sessionId) || 0;
           const timeSinceLastAnalysis = now - lastAnalysis;
           
-          if (timeSinceLastAnalysis < 3000) {
-            console.log(`⏱️ LHIS: Throttling analysis for session ${sessionId} (${timeSinceLastAnalysis}ms since last)`);
+          // SMART THROTTLING: Allow analysis for meaningful code changes, throttle rapid typing
+          const isSignificantChange = this.isSignificantCodeChange(code, sessionId);
+          const minInterval = isSignificantChange ? 1500 : 4000; // 1.5s for significant, 4s for minor changes
+          
+          if (timeSinceLastAnalysis < minInterval) {
+            console.log(`⏱️ LHIS: Smart throttling for session ${sessionId} (${timeSinceLastAnalysis}ms since last, need ${minInterval}ms) - Significant: ${isSignificantChange}`);
             return;
           }
           
@@ -113,14 +120,57 @@ class AssessmentSocketHandler {
         } catch (error) {
           console.error('❌ LHIS: Code change error:', error);
         }
+      };
+
+      // Register both event handlers to the same function
+      socket.on('assessmentCodeChange', handleCodeChange);
+      socket.on('codeChange', async (data) => {
+        // Convert codeChange format to assessmentCodeChange format
+        const convertedData = {
+          sessionId: data.roomName || data.sessionId,
+          questionId: data.questionId || 'main',
+          code: data.code,
+          language: data.language
+        };
+        console.log(`🔄 LHIS: Converting codeChange to assessmentCodeChange for ${convertedData.sessionId}`);
+        await handleCodeChange(convertedData);
       });
 
       // LHIS - Submit parameter answer
       socket.on('submitParameterAnswer', async (data) => {
         try {
-          const { sessionId, answer } = data;
+          const { sessionId, answer, parameterId, depthLevel } = data;
           
           console.log(`💬 LHIS: Processing parameter answer for session ${sessionId}`);
+          console.log(`💬 LHIS: Full data received:`, JSON.stringify(data, null, 2));
+          
+          // Check if session exists - if not, create it
+          let session = livingAIInterviewer.activeSessions.get(sessionId);
+          console.log(`💬 LHIS: Session exists:`, !!session);
+          
+          if (!session) {
+            console.log(`⚠️ LHIS: Session not found, creating parameter session for ${sessionId}`);
+            const result = await livingAIInterviewer.initializeParameterAssessment(
+              sessionId,
+              'socket-user',
+              'python',
+              'mid'
+            );
+            
+            if (result.success) {
+              session = livingAIInterviewer.activeSessions.get(sessionId);
+              console.log(`✅ LHIS: Session created successfully`);
+            } else {
+              console.error(`❌ LHIS: Failed to create session:`, result.error);
+              socket.emit('assessmentError', { error: 'Failed to create session' });
+              return;
+            }
+          }
+          
+          if (session) {
+            console.log(`💬 LHIS: Session parameterProgress keys:`, Object.keys(session.parameterProgress || {}));
+            console.log(`💬 LHIS: Session awaitingAnswer:`, !!session.awaitingAnswer);
+          }
           
           // DON'T emit user's answer here - it's already handled by frontend
           // This prevents duplicate messages in chat
@@ -200,7 +250,9 @@ class AssessmentSocketHandler {
 
         } catch (error) {
           console.error('❌ LHIS: Parameter answer error:', error);
-          socket.emit('assessmentError', { error: 'Failed to process answer' });
+          console.error('❌ LHIS: Error stack:', error.stack);
+          console.error('❌ LHIS: Data received:', data);
+          socket.emit('assessmentError', { error: 'Failed to process answer', details: error.message });
         }
       });
 
@@ -208,6 +260,53 @@ class AssessmentSocketHandler {
         console.log(`🔌 LHIS Assessment socket disconnected: ${socket.id}`);
       });
     });
+  }
+
+  // Check if we should force the next question regardless of code changes
+  shouldForceNextQuestion(session, parameterId, progress) {
+    const now = Date.now();
+    const sessionStart = session.sessionStartTime || now;
+    const timeSinceStart = now - sessionStart;
+    
+    // Force questions based on different criteria
+    const questionsAsked = progress.questionsAsked.length;
+    
+    // Force Q2 after 90 seconds if only Q1 asked
+    if (questionsAsked === 1 && timeSinceStart > 90000) {
+      return { reason: "90s elapsed since session start, forcing Q2" };
+    }
+    
+    // Force Q3 after 150 seconds if only Q1+Q2 asked  
+    if (questionsAsked === 2 && timeSinceStart > 150000) {
+      return { reason: "150s elapsed since session start, forcing Q3" };
+    }
+    
+    // Force next question if code has grown significantly (solution likely complete)
+    const totalCodeLength = Object.values(session.currentCode || {}).join('').length;
+    if (totalCodeLength > 800 && questionsAsked === 1) {
+      return { reason: "Code length >800 chars, solution likely substantial, forcing Q2" };
+    }
+    
+    if (totalCodeLength > 1200 && questionsAsked === 2) {
+      return { reason: "Code length >1200 chars, solution likely complete, forcing Q3" };
+    }
+    
+    return false;
+  }
+
+  // Start periodic timer to ensure all 3 questions get asked
+  startQuestionTimer() {
+    setInterval(async () => {
+      // Check all active sessions for pending questions
+      const activeSessions = livingAIInterviewer.activeSessions;
+      for (const [sessionId, session] of activeSessions.entries()) {
+        if (session.parameterProgress) {
+          await this.checkForParameterQuestion(sessionId);
+        }
+      }
+    }, 30000); // Check every 30 seconds
+    
+    console.log('⏰ LHIS: Question timer started - checking every 30s for pending questions');
   }
 
   // LHIS - Check for parameter question (clean, single responsibility)
@@ -224,10 +323,19 @@ class AssessmentSocketHandler {
 
       const { parameterProgress } = session;
       
+      // Log current assessment progress
+      livingAIInterviewer.logAssessmentProgress(sessionId);
+
       // Find the first parameter that needs a question (including next depth questions)
       for (const [parameterId, progress] of Object.entries(parameterProgress)) {
         if (progress.codeDetected && progress.questionsAsked.length < 3 && progress.milestone !== 'completed') {
-          console.log(`🎯 LHIS: Found parameter ready for depth ${progress.questionsAsked.length + 1} question: ${parameterId}`);
+          console.log(`🎯 LHIS: Found parameter ready for depth ${progress.questionsAsked.length + 1}/3 question: ${parameterId}`);
+          
+          // Check if we should force next question based on time or completion
+          const shouldForceQuestion = this.shouldForceNextQuestion(session, parameterId, progress);
+          if (shouldForceQuestion) {
+            console.log(`⏰ LHIS: Forcing next question due to: ${shouldForceQuestion.reason}`);
+          }
           
           // Generate question
           const questionData = await livingAIInterviewer.triggerParameterAssessment(
@@ -257,9 +365,18 @@ class AssessmentSocketHandler {
               }
             };
             
-            // Send to main room only (frontend joins this room)
-            this.io.to(sessionId).emit('chatMessage', chatMessage);
-            console.log(`📨 LHIS: Question sent to ${sessionId} room`);
+            // Send to main room only with single event to prevent duplicates
+            this.io.to(sessionId).emit('newMessage', chatMessage);
+            
+            // Also emit to all connected sockets for debugging
+            this.io.emit('debugMessage', {
+              ...chatMessage,
+              debugInfo: `Sent to room: ${sessionId}`
+            });
+            
+            console.log(`📨 LHIS: Question sent to ${sessionId} AND assessment-${sessionId} rooms (both chatMessage & newMessage events)`);
+            console.log(`📨 LHIS: Message content: "${chatMessage.message.substring(0, 100)}..."`);
+            console.log(`📨 LHIS: Active rooms: ${Array.from(this.io.sockets.adapter.rooms.keys()).filter(r => r.startsWith('param-') || r.startsWith('assessment-')).join(', ')}`);
             
             // Only process one question at a time
             break;
@@ -270,6 +387,57 @@ class AssessmentSocketHandler {
     } catch (error) {
       console.error('❌ LHIS: Parameter question check error:', error);
     }
+  }
+
+  /**
+   * Determine if code change is significant enough to warrant immediate AI analysis
+   * This allows continuous monitoring while optimizing API costs
+   */
+  isSignificantCodeChange(currentCode, sessionId) {
+    const lastCode = this.lastCodeSnapshot.get(sessionId) || '';
+    this.lastCodeSnapshot.set(sessionId, currentCode);
+    
+    if (!lastCode) return true; // First time analyzing
+    
+    const currentLines = currentCode.split('\n').filter(line => line.trim());
+    const lastLines = lastCode.split('\n').filter(line => line.trim());
+    
+    // Significant change indicators
+    const indicators = {
+      // New function/class/method definitions
+      newDefinitions: /^(def |class |async def |function |const \w+\s*=\s*\()/m.test(currentCode) && 
+                     !/^(def |class |async def |function |const \w+\s*=\s*\()/m.test(lastCode),
+      
+      // New imports or significant structural changes
+      newImports: /^(import |from .* import|require\()/m.test(currentCode) && 
+                 !/^(import |from .* import|require\()/m.test(lastCode),
+      
+      // Completion of code blocks (new closing braces, return statements)
+      blockCompletion: (currentCode.match(/return |}\s*$/gm) || []).length > 
+                      (lastCode.match(/return |}\s*$/gm) || []).length,
+      
+      // Significant line count increase (new logic)
+      significantGrowth: currentLines.length > lastLines.length + 2,
+      
+      // Implementation of core patterns (decorators, context managers, etc.)
+      corePatterns: /@\w+|with\s+\w+|yield|async|await/.test(currentCode) && 
+                   !/@\w+|with\s+\w+|yield|async|await/.test(lastCode),
+      
+      // Test or example code additions
+      testCode: /test|example|demo/.test(currentCode.toLowerCase()) && 
+               !/test|example|demo/.test(lastCode.toLowerCase())
+    };
+    
+    const isSignificant = Object.values(indicators).some(Boolean);
+    
+    if (isSignificant) {
+      const triggeredBy = Object.entries(indicators)
+        .filter(([_, value]) => value)
+        .map(([key, _]) => key);
+      console.log(`🎯 LHIS: Significant code change detected for ${sessionId}. Triggers: ${triggeredBy.join(', ')}`);
+    }
+    
+    return isSignificant;
   }
 }
 

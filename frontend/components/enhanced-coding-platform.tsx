@@ -311,7 +311,7 @@ export function EnhancedCodingPlatform() {
         })
         
         // LHIS Integration: Always emit assessment code change if code is substantial
-        if (newCode.trim().length >= 50) {
+        if (newCode.trim().length >= 200) {
           socketRef.current.emit('assessmentCodeChange', {
             sessionId,
             questionId: activeQuestionId,

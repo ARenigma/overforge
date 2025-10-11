@@ -84,6 +84,30 @@ class DockerService {
         return false;
       }
 
+      // Check if containers are already running to avoid conflicts
+      try {
+        const { exec: execSync } = require('child_process');
+        const { promisify } = require('util');
+        const execAsync = promisify(execSync);
+        
+        const result = await execAsync('docker compose ps --format json', { 
+          cwd: this.dockerComposePath,
+          timeout: 10000 
+        });
+        
+        const containers = result.stdout.split('\n').filter(line => line.trim()).map(line => JSON.parse(line));
+        const runningContainers = containers.filter(c => c.State === 'running');
+        
+        if (runningContainers.length > 0) {
+          console.log(`✅ Found ${runningContainers.length} containers already running - skipping startup`);
+          this.isInitialized = true;
+          this._updateContainerStatus();
+          return true;
+        }
+      } catch (error) {
+        console.log('🔍 Unable to check container status, proceeding with startup...');
+      }
+
       console.log('🚀 Starting Docker containers automatically...');
       
       return new Promise((resolve, reject) => {
@@ -104,7 +128,13 @@ class DockerService {
         let errorOutput = '';
 
         startProcess.stdout.on('data', (data) => {
-          output += data.toString();
+          const dataStr = data.toString();
+          output += dataStr;
+          
+          // Show progress for long-running operations
+          if (dataStr.includes('Pulling') || dataStr.includes('Building') || dataStr.includes('Creating')) {
+            console.log(`🐳 Docker: ${dataStr.trim()}`);
+          }
         });
 
         startProcess.stderr.on('data', (data) => {
@@ -112,6 +142,8 @@ class DockerService {
         });
 
         startProcess.on('close', (code) => {
+          clearTimeout(timeoutId); // Clear timeout since process completed
+          
           if (code === 0) {
             console.log('✅ Docker containers started successfully');
             this.isInitialized = true;
@@ -125,17 +157,32 @@ class DockerService {
         });
 
         startProcess.on('error', (error) => {
+          clearTimeout(timeoutId); // Clear timeout since process errored
           console.log('⚠️  Docker startup error:', error.message);
           console.log('🔄 Backend will continue without containers');
           resolve(false);
         });
 
-        // Timeout after 120 seconds (increased from 60s)
-        setTimeout(() => {
+        // Timeout after 300 seconds (5 minutes) - more generous for Docker startup
+        const timeoutId = setTimeout(() => {
           startProcess.kill();
-          console.log('⏰ Docker startup timeout - continuing without containers');
-          resolve(false);
-        }, 120000);
+          console.log('⏰ Docker startup timeout (5 minutes) - checking if containers started anyway...');
+          
+          // Check if containers actually started despite timeout
+          setTimeout(async () => {
+            await this._updateContainerStatus();
+            const runningContainers = Array.from(this.containers.values()).filter(c => c.status === 'running');
+            
+            if (runningContainers.length > 0) {
+              console.log(`✅ Found ${runningContainers.length} running containers despite timeout - Docker is working!`);
+              this.isInitialized = true;
+              resolve(true);
+            } else {
+              console.log('❌ No running containers found - continuing without Docker');
+              resolve(false);
+            }
+          }, 2000);
+        }, 300000);
       });
 
     } catch (error) {
