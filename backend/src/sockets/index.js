@@ -71,7 +71,9 @@ function initializeSocket(server) {
     console.log('A user connected:', socket.id);
 
     // Join a session (roomName is sessionId)
-    socket.on('joinRoom', async ({ roomName, userId, username, language, experienceLevel, jobDescription, jobProfile }) => {
+    socket.on('joinRoom', async (data) => {
+      console.log(`🔍 JOIN DEBUG: Received joinRoom data:`, JSON.stringify(data));
+      const { roomName, userId, username, language, experienceLevel, jobDescription, jobProfile, role } = data;
       // Prevent duplicate join room calls (API abuse protection)
       const joinKey = `${roomName}-${userId}`;
       const lastJoinTime = joinRoomDebounce.get(joinKey);
@@ -139,9 +141,23 @@ function initializeSocket(server) {
           roomTimers[roomName] = { 
             languageId: language, 
             experience: experienceLevel,
-            assessmentMode: false,
+            assessmentMode: true,  // Enable assessment mode for LHIS depth questions
             parameterSession: true
           };
+          
+          // Initialize LHIS for parameter-based sessions to enable depth questions
+          try {
+            console.log(`🎯 LHIS: Initializing parameter-based assessment for ${roomName}`);
+            await livingAIInterviewer.initializeParameterAssessment(
+              roomName, 
+              userId, 
+              language, 
+              experienceLevel
+            );
+            console.log(`✅ LHIS: Parameter assessment initialized for ${roomName}`);
+          } catch (error) {
+            console.log(`⚠️ LHIS: Parameter assessment initialization failed (non-blocking): ${error.message}`);
+          }
           
           // No need to fetch AI questions - parameter system will load database problems
           return;

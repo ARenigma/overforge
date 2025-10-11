@@ -1031,11 +1031,50 @@ export default function RoomPage({ params }: { params: { id: string } }) {
         jobProfile: jobProfileParam,
         role: roleParam || "candidate",
       });
+
+      // Also join assessment room for LHIS functionality
+      console.log("🔍 About to emit joinAssessmentRoom for:", roomId);
+      socket.emit("joinAssessmentRoom", {
+        sessionId: roomId,
+        candidateId: user.id,
+        role: roleParam || "candidate"
+      });
+      console.log("📡 Also joining assessment room for LHIS:", roomId);
     } else {
       console.log("⚠️  joinRoom already called, skipping duplicate");
     }
 
     // Socket event listeners
+    socket.on("assessmentRoomJoined", (data) => {
+      console.log("✅ Assessment room joined successfully:", data);
+    });
+
+    // Debug listeners for chat messages (temporary - should be handled by chat panel)
+    socket.on("debugMessage", (message) => {
+      console.log("🐛 Main Page: Received debugMessage:", message);
+    });
+
+    // Listen to only ONE event to prevent duplicates - use newMessage as primary
+    socket.on("newMessage", (message) => {
+      console.log("📩 Main Page: Received newMessage:", message);
+      // Directly add to messages state with strict deduplication
+      setMessages((prev) => {
+        const exists = prev.some(m => m.id === message.id);
+        if (!exists) {
+          console.log("✅ Main Page: Adding message to state:", message.id);
+          // Auto-open chat panel when new message arrives
+          if (!showChat) {
+            console.log("🎯 Main Page: Auto-opening chat panel for new message");
+            setShowChat(true);
+          }
+          return [...prev, message];
+        } else {
+          console.log("⚠️ Main Page: Duplicate message ignored:", message.id);
+          return prev;
+        }
+      });
+    });
+
     socket.on("connect", () => {
       console.log("Socket connected");
 
@@ -1046,6 +1085,16 @@ export default function RoomPage({ params }: { params: { id: string } }) {
           username: user.username,
           role: userRole || "candidate", // Provide a default role
         });
+        
+        // Also join assessment room for LHIS functionality
+        console.log("🔍 Connect: About to emit joinAssessmentRoom for:", roomId);
+        socket.emit("joinAssessmentRoom", {
+          sessionId: roomId,
+          candidateId: user.id,
+          role: userRole || "candidate"
+        });
+        console.log("📡 Connect: Also joining assessment room for LHIS:", roomId);
+        
         joinRoomCalled.current = true;
       }
     });
@@ -1270,6 +1319,17 @@ export default function RoomPage({ params }: { params: { id: string } }) {
         userId: user?.id,
         language: selectedLanguage,
       });
+      
+      // LHIS Integration: Always emit assessment code change if code is substantial
+      if (value.trim().length >= 200) {
+        socket.emit('assessmentCodeChange', {
+          sessionId: roomId,
+          questionId: activeQuestionId,
+          code: value,
+          language: selectedLanguage
+        });
+        console.log(`📝 LHIS: Assessment code change emitted (${value.length} chars)`);
+      }
     }
   };
 
@@ -2088,7 +2148,7 @@ export default function RoomPage({ params }: { params: { id: string } }) {
 
                 {/* Chat Panel (conditionally rendered on the right) */}
                 {showChat && (
-                  <div className="h-full flex flex-col border-l border-gray-200" style={{ width: '50%' }}>
+                  <div className="h-full flex flex-col border-l border-gray-200" style={{ width: '50%' }} data-chat-panel>
                     <div className="bg-white h-full flex flex-col">
                       <EnhancedChatPanel
                         roomId={roomId}

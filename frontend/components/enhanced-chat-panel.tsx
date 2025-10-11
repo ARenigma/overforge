@@ -153,14 +153,13 @@ export function EnhancedChatPanel({ roomId, socket, onClose, isResizable = false
 
   // Listen for socket messages
   useEffect(() => {
+    console.log("🔧 Enhanced Chat Panel: useEffect triggered. Socket:", !!socket, "RoomId:", roomId);
     if (socket) {
       console.log("🔧 Enhanced Chat Panel: Setting up socket listeners for roomId:", roomId)
+      console.log("🔧 Enhanced Chat Panel: Socket connected:", socket.connected);
       
-      // Listen for new messages (including counter questions from AI)
-      socket.on("newMessage", (message: Message) => {
-        console.log("📩 Enhanced Chat Panel: Received newMessage:", message);
-        setMessages((prev) => [...prev, message])
-      })
+      // Socket listeners removed - messages now handled via externalMessages prop to prevent duplicates
+      console.log("ℹ️ Enhanced Chat Panel: Socket listeners disabled - using externalMessages prop for cost optimization");
 
       // Chat messages are now handled via externalMessages prop from room page
       // to avoid conflicts with room page socket listeners
@@ -175,9 +174,9 @@ export function EnhancedChatPanel({ roomId, socket, onClose, isResizable = false
         console.error("❌ Enhanced Chat Panel: Socket error:", error)
       })
 
-      // Cleanup
+      // Cleanup (minimal since most listeners are disabled)
       return () => {
-        socket.off("newMessage")
+        console.log("🧹 Enhanced Chat Panel: Cleaning up socket listeners");
         socket.off("disconnect")
         socket.off("error")
       }
@@ -258,6 +257,9 @@ export function EnhancedChatPanel({ roomId, socket, onClose, isResizable = false
 
   // Update messages when externalMessages changes
   useEffect(() => {
+    console.log("🔄 Enhanced Chat Panel: externalMessages changed, count:", (externalMessages || []).length);
+    console.log("🔄 Enhanced Chat Panel: externalMessages:", externalMessages);
+    
     const converted = (externalMessages || []).map(msg => ({
       id: msg.id,
       userId: msg.userId,
@@ -271,6 +273,7 @@ export function EnhancedChatPanel({ roomId, socket, onClose, isResizable = false
       threadingStatus: msg.threadingStatus
     }))
     
+    console.log("🔄 Enhanced Chat Panel: Setting converted messages, count:", converted.length);
     setMessages(converted)
   }, [externalMessages])
 
