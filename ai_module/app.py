@@ -1315,6 +1315,53 @@ async def test_all_providers():
     results = await ai_manager.test_all_providers()
     return results
 
+class ChatRequest(BaseModel):
+    message: str
+    provider: Optional[str] = None  # "mistral" or "codestral"
+
+@app.post("/chat")
+async def chat_endpoint(request: ChatRequest):
+    """Simple chat endpoint to test Mistral/Codestral API."""
+    try:
+        print(f"💬 Chat request received: {request.message[:100]}...")
+        print(f"   Provider: {request.provider or 'default (from config)'}")
+        
+        # Use the specified provider or default from config
+        provider = request.provider or AIConfig.PRIMARY_AI_PROVIDER
+        
+        if provider not in ["mistral", "codestral"]:
+            provider = "mistral"  # Default to mistral if invalid
+        
+        # Generate response using AI manager
+        result = await ai_manager.generate_response(
+            prompt=request.message,
+            preferred_provider=provider
+        )
+        
+        if result["success"]:
+            return {
+                "success": True,
+                "response": result["content"],
+                "provider": result.get("provider", provider),
+                "model": result.get("model", AIConfig.MISTRAL_MODEL if provider == "mistral" else "codestral-2501"),
+                "usage": result.get("usage", {})
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.get("error", "Unknown error"),
+                "provider": provider,
+                "attempted_providers": result.get("attempted_providers", [])
+            }
+            
+    except Exception as e:
+        print(f"❌ Chat endpoint error: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "provider": request.provider or "unknown"
+        }
+
 @app.get("/provider-status")
 async def get_provider_status():
     """Get current status of all providers."""

@@ -16,7 +16,7 @@ const { io } = require('socket.io-client');
 
 // Configuration
 const BACKEND_URL = 'http://localhost:5001';
-const AI_MODULE_URL = 'http://localhost:8001';
+const AI_MODULE_URL = 'http://localhost:9001';
 const FRONTEND_URL = 'http://localhost:3000';
 
 // Test Configuration
