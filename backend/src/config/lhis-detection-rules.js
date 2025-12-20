@@ -5,7 +5,7 @@
 const parameterDetectionConfig = {
   // Code length requirements for parameter detection
   codeThresholds: {
-    minimumCharacters: 200,        // Minimum characters before triggering parameter detection
+    minimumCharacters: 150,        // Minimum characters before triggering parameter detection (reduced from 200 for better responsiveness)
     minimumMeaningfulLines: 5,     // Minimum non-empty, non-comment lines
     maximumCodeLength: 50000       // Maximum code length for processing
   },

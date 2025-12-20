@@ -405,6 +405,43 @@ class ApproachDetector {
       }
     }
 
+    // =================================================================
+    // DATA STRUCTURE IMPLEMENTATIONS
+    // =================================================================
+
+    // Stack Data Structure
+    if (this.containsPatterns(codeNormalized, ['stack', 'push', 'pop', 'peek'])) {
+      if (this.containsPatterns(codeNormalized, ['class', 'stack']) || 
+          this.containsPatterns(codeNormalized, ['public', 'void', 'push']) ||
+          this.containsPatterns(codeNormalized, ['def', 'push']) ||
+          this.containsPatterns(codeNormalized, ['function', 'push'])) {
+        approaches.push({
+          type: 'stack_implementation',
+          confidence: 0.95,
+          details: {
+            patterns: ['LIFO structure', 'push/pop operations', 'error handling'],
+            characteristics: ['Last In First Out', 'O(1) operations', 'can use array or linked list'],
+            complexity: 'O(1) push/pop/peek'
+          },
+          problemType: 'data_structure'
+        });
+      }
+    }
+
+    // Queue Data Structure
+    if (this.containsPatterns(codeNormalized, ['queue', 'enqueue', 'dequeue'])) {
+      approaches.push({
+        type: 'queue_implementation',
+        confidence: 0.93,
+        details: {
+          patterns: ['FIFO structure', 'enqueue/dequeue operations'],
+          characteristics: ['First In First Out', 'O(1) operations'],
+          complexity: 'O(1) enqueue/dequeue'
+        },
+        problemType: 'data_structure'
+      });
+    }
+
     // Return the highest confidence approach, or unknown if none found
     if (approaches.length === 0) {
       return {
