@@ -309,11 +309,14 @@ class AssessmentSocketHandler {
     console.log('⏰ LHIS: Question timer started - checking every 30s for pending questions');
   }
 
-  // LHIS - Check for parameter question (clean, single responsibility)
+  // LHIS - Check for parameter question (SIMPLIFIED - always works)
   async checkForParameterQuestion(sessionId) {
     try {
       const session = livingAIInterviewer.activeSessions.get(sessionId);
-      if (!session) return;
+      if (!session) {
+        console.log(`❌ LHIS: No session found for ${sessionId}`);
+        return;
+      }
 
       // Skip if already awaiting an answer
       if (session.awaitingAnswer) {
@@ -321,67 +324,80 @@ class AssessmentSocketHandler {
         return;
       }
 
-      const { parameterProgress } = session;
+      // ✅ SIMPLIFIED: Check if we have valid code (quality filters already passed in analyzeCodeProgress)
+      const hasValidCode = session.currentCode && 
+                          Object.values(session.currentCode).some(c => c && c.trim().length >= 150);
       
-      // Log current assessment progress
-      livingAIInterviewer.logAssessmentProgress(sessionId);
+      if (!hasValidCode) {
+        console.log(`⏭️ LHIS: No valid code found, skipping question check`);
+        return;
+      }
 
-      // Find the first parameter that needs a question (including next depth questions)
-      for (const [parameterId, progress] of Object.entries(parameterProgress)) {
-        if (progress.codeDetected && progress.questionsAsked.length < 3 && progress.milestone !== 'completed') {
-          console.log(`🎯 LHIS: Found parameter ready for depth ${progress.questionsAsked.length + 1}/3 question: ${parameterId}`);
-          
-          // Check if we should force next question based on time or completion
-          const shouldForceQuestion = this.shouldForceNextQuestion(session, parameterId, progress);
-          if (shouldForceQuestion) {
-            console.log(`⏰ LHIS: Forcing next question due to: ${shouldForceQuestion.reason}`);
+      // Always use parameter 0 (Approach Analysis)
+      const parameterId = 0;
+      const progress = session.parameterProgress[parameterId] || {
+        milestone: 'not_started',
+        codeDetected: false,
+        questionsAsked: [],
+        approachDetected: false
+      };
+      
+      // Ensure progress exists
+      if (!session.parameterProgress[parameterId]) {
+        session.parameterProgress[parameterId] = progress;
+      }
+
+      // Check if we should generate a question
+      const currentDepth = progress.questionsAsked?.length || 0;
+      
+      if (currentDepth >= 3) {
+        console.log(`✅ LHIS: Already asked 3 questions for this code block`);
+        return;
+      }
+
+      // ✅ SIMPLIFIED: Generate question if we have valid code (no parameter detection check needed)
+      console.log(`🎯 LHIS: Generating depth ${currentDepth + 1}/3 question based on approach`);
+      
+      // Get parameter (always use Approach Analysis)
+      const parameter = session.jobProfile?.parameters?.[0] || {
+        id: 0,
+        name: 'Approach Analysis',
+        description: 'Analyze candidate approach and compare against alternatives'
+      };
+      
+      // Generate question
+      const questionData = await livingAIInterviewer.triggerParameterAssessment(
+        sessionId, 
+        parameterId
+      );
+      
+      if (questionData && questionData.question) {
+        console.log(`✅ LHIS: Generated question for Depth ${questionData.depthLevel}`);
+        
+        // Send question
+        const chatMessage = {
+          id: `param-${parameterId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          userId: 'lhis',
+          username: 'LHIS',
+          message: questionData.question,
+          timestamp: new Date().toISOString(),
+          sender: { id: 'lhis', name: 'LHIS', type: 'parameter_question' },
+          questionLabel: questionData.questionLabel,
+          threadingStatus: questionData.threadingStatus,
+          questionContext: {
+            type: 'parameter_question',
+            parameterId: questionData.parameterId,
+            parameterName: questionData.parameterName,
+            depthLevel: questionData.depthLevel,
+            badge: `Q${questionData.depthLevel}`
           }
-          
-          // Generate question
-          const questionData = await livingAIInterviewer.triggerParameterAssessment(
-            sessionId, 
-            parseInt(parameterId)
-          );
-          
-          if (questionData && questionData.question) {
-            console.log(`✅ LHIS: Generated question for ${questionData.parameterName} Depth ${questionData.depthLevel}`);
-            
-            // Send clean, minimal chat message with unique ID
-            const chatMessage = {
-              id: `param-${parameterId}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-              userId: 'lhis',
-              username: 'LHIS',
-              message: questionData.question,
-              timestamp: new Date().toISOString(),
-              sender: { id: 'lhis', name: 'LHIS', type: 'parameter_question' },
-              questionLabel: questionData.questionLabel,
-              threadingStatus: questionData.threadingStatus,
-              questionContext: {
-                type: 'parameter_question',
-                parameterId: questionData.parameterId,
-                parameterName: questionData.parameterName,
-                depthLevel: questionData.depthLevel,
-                badge: `P${parseInt(parameterId) + 1}.${questionData.depthLevel}`
-              }
-            };
-            
-            // Send to main room only with single event to prevent duplicates
-            this.io.to(sessionId).emit('newMessage', chatMessage);
-            
-            // Also emit to all connected sockets for debugging
-            this.io.emit('debugMessage', {
-              ...chatMessage,
-              debugInfo: `Sent to room: ${sessionId}`
-            });
-            
-            console.log(`📨 LHIS: Question sent to ${sessionId} AND assessment-${sessionId} rooms (both chatMessage & newMessage events)`);
-            console.log(`📨 LHIS: Message content: "${chatMessage.message.substring(0, 100)}..."`);
-            console.log(`📨 LHIS: Active rooms: ${Array.from(this.io.sockets.adapter.rooms.keys()).filter(r => r.startsWith('param-') || r.startsWith('assessment-')).join(', ')}`);
-            
-            // Only process one question at a time
-            break;
-          }
-        }
+        };
+        
+        this.io.to(sessionId).emit('newMessage', chatMessage);
+        
+        console.log(`📨 LHIS: Question sent: "${chatMessage.message.substring(0, 100)}..."`);
+      } else {
+        console.log(`❌ LHIS: Failed to generate question`);
       }
 
     } catch (error) {

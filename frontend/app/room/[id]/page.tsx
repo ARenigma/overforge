@@ -1320,8 +1320,8 @@ export default function RoomPage({ params }: { params: { id: string } }) {
         language: selectedLanguage,
       });
       
-      // LHIS Integration: Always emit assessment code change if code is substantial
-      if (value.trim().length >= 200) {
+      // LHIS Integration: Always emit assessment code change if code is substantial (>= 150 chars)
+      if (value.trim().length >= 150) {
         socket.emit('assessmentCodeChange', {
           sessionId: roomId,
           questionId: activeQuestionId,

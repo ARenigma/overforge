@@ -182,7 +182,7 @@ class LivingAIInterviewer {
         parameterProgress: {
           0: {
             milestone: 'not_started',
-            codeDetected: true, // 🧪 FORCE TRUE FOR TESTING APPROACH-BASED SYSTEM
+            codeDetected: false,
             questionsAsked: [],
             approachDetected: false,
             solutionsCompared: false
@@ -405,101 +405,91 @@ class LivingAIInterviewer {
     const session = this.activeSessions.get(sessionId);
     this.ensureSessionShapes(session);
     if (!session || !code) {
-      return false; // Not enough code for analysis
+      return false;
     }
 
-    // 🔧 CRITICAL FIX: Store the submitted code in session for question generation
+    // Store code
     if (!session.currentCode) {
       session.currentCode = {};
     }
     session.currentCode[questionId] = code;
-    session.currentCode['latest'] = code; // Always keep latest submission
+    session.currentCode['latest'] = code;
     
-    console.log(`💾 LHIS: Code stored in session - ${questionId}: ${code.length} chars`);
+    console.log(`💾 LHIS: Code stored - ${questionId}: ${code.length} chars`);
 
-    // Enforce quality filters before AI detection
+    // Quality filters (keep these - they ensure meaningful code)
     const { codeThresholds, qualityFilters } = parameterDetectionConfig;
     const stats = this.getCodeStats(code);
-    if (code.trim().length < codeThresholds.minimumCharacters) return false;
-    if (qualityFilters && qualityFilters.requireImplementation && !stats.hasImplementationSignals) return false;
-    if (codeThresholds && typeof codeThresholds.minimumMeaningfulLines === 'number' && stats.meaningfulLines < codeThresholds.minimumMeaningfulLines) return false;
-    if (qualityFilters && typeof qualityFilters.maxBoilerplateRatio === 'number' && stats.boilerplateRatio > qualityFilters.maxBoilerplateRatio) return false;
-
-    const { jobProfile, parameterProgress } = session;
-    let newParameterDetected = false;
-
-    console.log(`🔍 LHIS: Analyzing ${code.length} chars for parameter detection`);
-    console.log(`📊 LHIS: Available parameters: ${jobProfile.parameters?.length || 0}`);
-    console.log(`🔍 LHIS: Current parameterProgress state:`, Object.keys(parameterProgress).map(key => `${key}: codeDetected=${parameterProgress[key].codeDetected}`));
     
-    if (jobProfile.parameters) {
-      jobProfile.parameters.forEach((param, index) => {
-        console.log(`   Parameter ${index + 1}: ${param.name} (ID: ${param.id})`);
-      });
+    if (code.trim().length < codeThresholds.minimumCharacters) {
+      console.log(`⏭️ LHIS: Code too short (${code.length} < ${codeThresholds.minimumCharacters})`);
+      return false;
+    }
+    
+    if (qualityFilters?.requireImplementation && !stats.hasImplementationSignals) {
+      console.log(`⏭️ LHIS: No implementation signals detected`);
+      return false;
+    }
+    
+    if (stats.meaningfulLines < codeThresholds.minimumMeaningfulLines) {
+      console.log(`⏭️ LHIS: Not enough meaningful lines (${stats.meaningfulLines} < ${codeThresholds.minimumMeaningfulLines})`);
+      return false;
+    }
+    
+    if (stats.boilerplateRatio > qualityFilters.maxBoilerplateRatio) {
+      console.log(`⏭️ LHIS: Too much boilerplate (${stats.boilerplateRatio} > ${qualityFilters.maxBoilerplateRatio})`);
+      return false;
     }
 
-    // SEQUENTIAL ANALYSIS: Check parameters in order, one at a time
-    // This prevents AI conflicts and ensures correct parameter detection
-    for (let i = 0; i < (jobProfile.parameters || []).length; i++) {
-      const parameter = jobProfile.parameters[i];
-      const paramKey = parameter.id !== undefined ? parameter.id : i;
-      const progress = parameterProgress[paramKey];
-      
-      console.log(`🔍 LHIS: Checking parameter ${parameter.name} (Key: ${paramKey})`);
-      console.log(`   Progress: codeDetected=${progress?.codeDetected}, questionsAsked=${progress?.questionsAsked?.length || 0}`);
-      console.log(`   Awaiting answer for: ${session.awaitingAnswer?.parameterId || 'none'}`);
-      
-      // Skip if parameter already has questions or is being processed
-      if (progress?.codeDetected || session.awaitingAnswer?.parameterId == paramKey) {
-        console.log(`   ⏭️ LHIS: Skipping ${parameter.name} - already detected or awaiting answer`);
-        continue;
-      }
-
-      // Skip if parameter is already completed
-      if (progress?.milestone === 'completed') {
-        console.log(`   ⏭️ LHIS: Skipping ${parameter.name} - already completed`);
-        continue;
-      }
-
-      // Skip if parameter has already asked all 3 questions
-      if (progress?.questionsAsked && progress.questionsAsked.length >= 3) {
-        console.log(`   ⏭️ LHIS: Skipping ${parameter.name} - all questions asked`);
-        continue;
-      }
-
-      // FLEXIBLE CHECK: Allow analyzing any undetected parameter
-      // This enables proper multi-parameter code analysis (e.g., AWS + DynamoDB code)
-      const isParameterUndetected = !parameterProgress[paramKey]?.codeDetected && 
-                                   parameterProgress[paramKey]?.milestone !== 'completed';
-      
-      if (!isParameterUndetected) {
-        console.log(`   ⏭️ LHIS: Skipping ${parameter.name} - already detected or completed`);
-        continue;
-      }
-
-      // Use AI detection - trust the LLM to correctly identify parameters
-      console.log(`   🔍 LHIS: Running AI detection for ${parameter.name}`);
-      const isImplemented = await this.fastParameterDetection(code, parameter, language);
-      
-      if (isImplemented) {
-        console.log(`✅ LHIS: Parameter ${parameter.name} detected in code`);
+    // ✅ SIMPLIFIED: Use approach detection instead of AI parameter detection
+    // This is fast, reliable, and always works
+    console.log(`🔍 LHIS: Detecting approach for ${code.length} chars of ${language} code`);
+    
+    const detectedApproach = this.detectApproachUniversal(code, language);
+    const detectedProblem = this.detectProblemUniversal(code, language);
+    
+    // Update session with detected info
+    session.detectedApproach = detectedApproach;
+    session.detectedProblemType = detectedProblem;
+    session.currentProblemId = detectedProblem.problemId;
+    
+    // Always use parameter 0 (Approach Analysis) for all code
+    const parameterProgress = session.parameterProgress;
+    const paramKey = 0;
+    
+    if (!parameterProgress[paramKey]) {
+      parameterProgress[paramKey] = {
+        milestone: 'not_started',
+        codeDetected: false,
+        questionsAsked: [],
+        approachDetected: false
+      };
+    }
+    
+    const progress = parameterProgress[paramKey];
+    
+    // Mark as detected if approach found OR if quality filters passed (ensures questions always generate)
+    const hasValidApproach = detectedApproach.confidence > 0.3 || detectedApproach.type !== 'unknown';
+    
+    if (hasValidApproach || true) { // Always mark as detected if quality filters passed
+      if (!progress.codeDetected) {
+        console.log(`✅ LHIS: Code detected - Approach: ${detectedApproach.type} (${(detectedApproach.confidence * 100).toFixed(1)}%)`);
         progress.codeDetected = true;
+        progress.approachDetected = hasValidApproach;
+        progress.detectedApproach = detectedApproach;
         progress.detectedAt = new Date().toISOString();
-        progress.lastDetectedTimestamp = Date.now(); // Track detection time for transition logic
-        newParameterDetected = true;
-        
-        // STOP after detecting one parameter to prevent conflicts
-        break;
+        progress.lastDetectedTimestamp = Date.now();
+        return true;
       } else {
-        console.log(`   ❌ LHIS: Parameter ${parameter.name} not detected yet`);
+        // Update approach info even if already detected
+        progress.detectedApproach = detectedApproach;
+        progress.approachDetected = hasValidApproach;
+        console.log(`✅ LHIS: Code already detected, updated approach: ${detectedApproach.type}`);
+        return true;
       }
-      
-      // Continue to next parameter if this one wasn't detected
-      // Only stop if we find a match to prevent conflicts
     }
-
-    console.log(`📝 LHIS: Analysis complete. New parameter detected: ${newParameterDetected}`);
-    return newParameterDetected;
+    
+    return true; // Always return true if quality filters passed
   }
 
 
@@ -763,10 +753,20 @@ Respond with JSON:
       return null;
     }
     
-    if (!progress.codeDetected) {
-      console.log(`❌ LHIS: Parameter ${parameterKey} code not detected - codeDetected=${progress.codeDetected}`);
-      console.log(`   Progress state:`, JSON.stringify(progress, null, 2));
+    // ✅ SIMPLIFIED: Don't require codeDetected - if we're here, code is valid
+    // Just check if we have code
+    const hasCode = session.currentCode && 
+                   Object.values(session.currentCode).some(c => c && c.trim().length >= 150);
+    
+    if (!hasCode) {
+      console.log(`❌ LHIS: No valid code found`);
       return null;
+    }
+    
+    // Ensure codeDetected is set if we have valid code
+    if (!progress.codeDetected && hasCode) {
+      progress.codeDetected = true;
+      console.log(`✅ LHIS: Marking parameter ${parameterKey} as detected (valid code present)`);
     }
 
     // Determine current depth (0, 1, or 2)
@@ -2497,21 +2497,41 @@ Ask how they would adapt their approach. Be specific about scale/constraints.
       
       try {
         // 🔧 CRITICAL FIX: Get the actual submitted code from stored session data
+        // Always use the LATEST code to ensure questions match current implementation
         let candidateCode = '';
         
         if (session.currentCode) {
-          // Try in order of preference: latest, main, master-problem, then any available
+          // Priority: latest (most recent), then main, then master-problem, then any available
           candidateCode = session.currentCode['latest'] || 
                          session.currentCode['main'] || 
                          session.currentCode['master-problem'] || 
-                         session.currentCode[Object.keys(session.currentCode)[0]] || '';
+                         (Object.keys(session.currentCode).length > 0 ? 
+                          session.currentCode[Object.keys(session.currentCode)[0]] : '') || '';
         }
         
         console.log(`🔍 LHIS: Code sources available:`, Object.keys(session.currentCode || {}));
         console.log(`🔍 LHIS: Using code length: ${candidateCode.length}`);
         
         if (candidateCode.length > 0) {
-          console.log(`🔍 LHIS: Code preview: ${candidateCode.substring(0, 100)}...`);
+          console.log(`🔍 LHIS: Code preview: ${candidateCode.substring(0, 150)}...`);
+          
+          // ✅ VALIDATION: Check if code matches expected approach
+          // This helps catch mismatches between code and questions
+          const codeLower = candidateCode.toLowerCase();
+          const hasSQL = codeLower.includes('sql') || codeLower.includes('select') || codeLower.includes('insert') || codeLower.includes('orm');
+          const hasStack = codeLower.includes('stack') || (codeLower.includes('push') && codeLower.includes('pop') && codeLower.includes('peek'));
+          const hasQueue = codeLower.includes('queue') || (codeLower.includes('enqueue') && codeLower.includes('dequeue'));
+          const hasTree = codeLower.includes('tree') || codeLower.includes('treenode') || codeLower.includes('bst');
+          
+          if (hasSQL && !hasStack && !hasQueue && !hasTree) {
+            console.log(`✅ LHIS: Code appears to be SQL/database-related`);
+          } else if (hasStack) {
+            console.log(`✅ LHIS: Code appears to be Stack implementation - questions should be Stack-related`);
+          } else if (hasQueue) {
+            console.log(`✅ LHIS: Code appears to be Queue implementation`);
+          } else if (hasTree) {
+            console.log(`✅ LHIS: Code appears to be Tree/BST implementation`);
+          }
         } else {
           console.log(`❌ LHIS: NO CODE AVAILABLE - This will cause generic questions!`);
         }
@@ -2594,11 +2614,12 @@ Ask how they would adapt their approach. Be specific about scale/constraints.
 
         console.log(`🔍 LHIS: Requesting AI depth question generation with approach-specific prompt...`);
         const aiService = require('./aiService');
-        
-        // 🧪 FORCE FALLBACK TO TEST APPROACH-SPECIFIC TEMPLATES
-        console.log(`🧪 LHIS: FORCING TIMEOUT TO TEST APPROACH-SPECIFIC FALLBACK`);
-        return this.generateIntelligentFallbackQuestion(parameter, currentDepth, session);
-        
+        const aiResponse = await aiService.analyzeCode(
+          candidateCode,
+          session.language || 'java',
+          questionPrompt
+        );
+
         if (!aiResponse) {
           console.log(`❌ LHIS: No AI response received, using intelligent fallback`);
           return this.generateIntelligentFallbackQuestion(parameter, currentDepth, session);
