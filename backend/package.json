@@ -12,7 +12,11 @@
     "docker:stop": "cd docker-environments && ./manage.sh stop",
     "docker:status": "cd docker-environments && ./manage.sh status",
     "docker:logs": "cd docker-environments && ./manage.sh logs",
-    "test": "jest",
+    "test": "jest --passWithNoTests",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint \"src/**/*.js\" \"__tests__/**/*.js\"",
+    "lint:fix": "eslint \"src/**/*.js\" \"__tests__/**/*.js\" --fix",
     "seed:solutions:dry": "node scripts/seed-problem-solutions.js --dry-run --limit 10",
     "seed:solutions": "node scripts/seed-problem-solutions.js --limit 50",
     "migrate": "sequelize-cli db:migrate",
@@ -43,9 +47,11 @@
     "uuid": "^9.0.1"
   },
   "devDependencies": {
+    "eslint": "^8.57.1",
     "jest": "^29.6.2",
     "nodemon": "^3.0.1",
-    "sequelize-cli": "^6.6.3"
+    "sequelize-cli": "^6.6.3",
+    "supertest": "^7.0.0"
   },
   "keywords": [
     "interview",
