@@ -1,9 +1,8 @@
+# ─────── Existing ───────
 # Node
 node_modules/
 build/
 dist/
-.env
-.env.*
 
 # Python
 __pycache__/
@@ -24,4 +23,55 @@ docker-compose.override.yml
 
 # Misc
 .idea/
-.vscode/ 
+.vscode/
+
+# ─────── NEW: Env & secrets (PR #1) ───────
+# Local env files — never commit, only commit .env.example
+.env
+.env.*
+!.env.example
+
+# AI / API key files dropped in repo roots
+*_key.txt
+*_api_key.txt
+openrouter_key.txt
+mistral_key.txt
+codestral_key.txt
+anthropic_key.txt
+openai_key.txt
+secrets/
+*.pem
+*.key
+*.crt
+
+# ─────── NEW: Test & coverage outputs (PR #1) ───────
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+.playwright/
+.pnp.*
+
+# ─────── NEW: Build artefacts (PR #1) ───────
+.next/
+out/
+.turbo/
+.tsbuildinfo
+*.tsbuildinfo
+.eslintcache
+.cache/
+.npm/
+.yarn/
+
+# ─────── NEW: Cursor / agent scratch (PR #1) ───────
+.specstory/history/
+.cursor/
+.aider*
+
+# ─────── NEW: Editor / OS extras (PR #1) ───────
+*.swp
+*.swo
+*~
+.AppleDouble
+.AppleDesktop
+Desktop.ini
