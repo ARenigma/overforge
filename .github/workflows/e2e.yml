@@ -1,0 +1,161 @@
+name: E2E (Playwright)
+
+# E2E is expensive (boots full stack + runs browsers). Only run on PRs, not on every push.
+# Cancel in-progress runs when a new push lands on the same PR.
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: # allow manual run from Actions tab
+
+jobs:
+  e2e:
+    name: E2E (Playwright, chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      BACKEND_URL: http://localhost:5001
+      AI_MODULE_URL: http://localhost:9001
+      FRONTEND_URL: http://localhost:3000
+      SUPABASE_URL: 'https://test.supabase.co'
+      SUPABASE_SERVICE_ROLE_KEY: 'e2e-test-service-role-key'
+      SUPABASE_ANON_KEY: 'e2e-test-anon-key'
+      NEXT_PUBLIC_SUPABASE_URL: 'https://test.supabase.co'
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: 'e2e-test-anon-key'
+      JWT_SECRET: 'e2e-test-secret'
+      AI_MODULE_PORT: '9001'
+      DISABLE_DOCKER: 'true'
+      NODE_ENV: test
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: overforge_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ─────── 1. Install deps ───────
+      - name: Install backend deps
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Install AI module deps
+        working-directory: ai_module
+        run: pip install -r requirements.txt
+
+      # ─────── 2. Boot services in background ───────
+      - name: Start backend
+        working-directory: backend
+        run: |
+          cp ../backend/.env.example .env
+          # override with test-safe values
+          sed -i 's|https://your-project.supabase.co|https://test.supabase.co|g' .env
+          sed -i 's|your-service-role-key-here|e2e-test-service-role-key|g' .env
+          sed -i 's|your-anon-key-here|e2e-test-anon-key|g' .env
+          sed -i 's|change-me-in-production|e2e-test-secret|g' .env
+          # Boot with no docker + no socket bind issues
+          nohup node src/app.js > /tmp/backend.log 2>&1 &
+          echo "backend PID: $!"
+
+      - name: Start AI module
+        working-directory: ai_module
+        run: |
+          cp .env.example .env 2>/dev/null || true
+          # No real API keys — AI module will fail live requests but health endpoint should still respond
+          nohup python -m uvicorn app:app --host 0.0.0.0 --port 9001 --log-level warning > /tmp/ai.log 2>&1 &
+          echo "ai PID: $!"
+
+      - name: Build + start frontend
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: 'http://localhost:5001'
+          NEXT_PUBLIC_SOCKET_URL: 'http://localhost:5001'
+          NEXT_PUBLIC_SUPABASE_URL: 'https://test.supabase.co'
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: 'e2e-test-anon-key'
+        run: |
+          npm run build
+          nohup npm start > /tmp/frontend.log 2>&1 &
+          echo "frontend PID: $!"
+
+      - name: Wait for services
+        run: |
+          echo "Waiting for backend..."
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:5001/health >/dev/null 2>&1; then
+              echo "✅ backend up after ${i}s"; break
+            fi
+            sleep 1
+          done
+          echo "Waiting for AI module..."
+          for i in $(seq 1 20); do
+            if curl -fsS http://localhost:9001/docs >/dev/null 2>&1 || curl -fsS http://localhost:9001/openapi.json >/dev/null 2>&1; then
+              echo "✅ AI module up after ${i}s"; break
+            fi
+            sleep 1
+          done
+          echo "Waiting for frontend..."
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3000 >/dev/null 2>&1; then
+              echo "✅ frontend up after ${i}s"; break
+            fi
+            sleep 1
+          done
+
+      # ─────── 3. Run Playwright ───────
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright (chromium only in CI for speed)
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_BASE_URL: 'http://localhost:3000'
+          BACKEND_URL: 'http://localhost:5001'
+          AI_MODULE_URL: 'http://localhost:9001'
+        run: |
+          npx playwright test \
+            --project=chromium \
+            --reporter=github,html \
+            --output=playwright-report \
+            e2e/smoke.spec.ts e2e/api.spec.ts e2e/room.spec.ts
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Dump service logs on failure
+        if: failure()
+        run: |
+          echo "=== backend.log (last 100) ==="; tail -100 /tmp/backend.log || true
+          echo "=== ai.log (last 100) ==="; tail -100 /tmp/ai.log || true
+          echo "=== frontend.log (last 100) ==="; tail -100 /tmp/frontend.log || true
