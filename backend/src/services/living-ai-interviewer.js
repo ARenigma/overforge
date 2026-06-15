@@ -320,9 +320,8 @@ class LivingAIInterviewer {
         // Conversation threading system
         conversationThreads: new Map(),
         lastParameterCompletedAt: null,
-        lastUserResponse: null,
 
-        
+
         // 🧵 CONVERSATION THREADING SYSTEM
         conversationNarrative: [], // Timeline of conversation flow for natural references
         topicProgression: [], // Track how topics build on each other
@@ -471,6 +470,7 @@ class LivingAIInterviewer {
     // Mark as detected if approach found OR if quality filters passed (ensures questions always generate)
     const hasValidApproach = detectedApproach.confidence > 0.3 || detectedApproach.type !== 'unknown';
     
+    // eslint-disable-next-line no-constant-condition -- intentional: always enter; progress.approachDetected still records hasValidApproach. TODO(refactor): drop the `|| true` hack.
     if (hasValidApproach || true) { // Always mark as detected if quality filters passed
       if (!progress.codeDetected) {
         console.log(`✅ LHIS: Code detected - Approach: ${detectedApproach.type} (${(detectedApproach.confidence * 100).toFixed(1)}%)`);
@@ -946,8 +946,8 @@ Respond with JSON:
         // Generic contextual fallback that works with ANY code
         return `${starter}. Can you explain your current approach to ${paramName.toLowerCase()} and what key principles you're keeping in mind as you build this solution?`;
 
-      case 1: // Depth 2 - Implementation Details
-        const implementationStarter = hasCode ? 
+      case 1: { // Depth 2 - Implementation Details
+        const implementationStarter = hasCode ?
           `${starter}, let's dive deeper into the implementation details` : 
           `Let's explore the implementation details of your ${paramName.toLowerCase()} solution`;
           
@@ -977,9 +977,10 @@ Respond with JSON:
         
         // Generic depth 2 fallback
         return `${implementationStarter}. What specific technical details are you focusing on? How are you ensuring your solution handles edge cases effectively?`;
+      }
 
-      case 2: // Depth 3 - Optimization & Best Practices
-        const optimizationStarter = hasCode ? 
+      case 2: { // Depth 3 - Optimization & Best Practices
+        const optimizationStarter = hasCode ?
           `${starter}, thinking about optimization and production readiness` : 
           `Considering ${paramName.toLowerCase()} optimization`;
           
@@ -1005,6 +1006,7 @@ Respond with JSON:
         
         // Generic depth 3 fallback
         return `${optimizationStarter}. What advanced techniques and best practices would you implement for ${paramName.toLowerCase()}? How would you enhance scalability and performance?`;
+      }
 
       default:
         return baseQuestion;
@@ -1864,7 +1866,7 @@ Respond as a human interviewer would - be natural, helpful, and contextually app
       
       // Data structures (multi-language)
       usesDataStructures: /\b(list|array|vector|map|dict|set|queue|stack|collection)\b/i.test(code) ||
-                         /[\[\]{}]/g.test(code),
+                         /[[\]{}]/g.test(code),
       
       // Error handling patterns
       hasErrorHandling: /\b(try|catch|except|finally|throw|raise|error|exception)\b/i.test(code),
