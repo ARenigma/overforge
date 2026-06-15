@@ -1,0 +1,14 @@
+node_modules/
+.next/
+build/
+dist/
+coverage/
+playwright-report/
+test-results/
+out/
+*.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+*.md
+*.mdx
