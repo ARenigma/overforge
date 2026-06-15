@@ -1,8 +1,14 @@
+from .ai_manager import AIManager
 from .mistral_provider import MistralProvider
 from .ollama_provider import OllamaProvider
-from .ai_manager import AIManager
-from .openrouter_provider import openrouter_provider, OpenRouterProvider
- 
-__all__ = ["MistralProvider", "OllamaProvider", "AIManager", "openrouter_provider", "OpenRouterProvider"]
+from .openrouter_provider import OpenRouterProvider, openrouter_provider
 
-# Providers module for AI integrations 
+__all__ = [
+    "AIManager",
+    "MistralProvider",
+    "OllamaProvider",
+    "OpenRouterProvider",
+    "openrouter_provider",
+]
+
+# Providers module for AI integrations

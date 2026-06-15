@@ -1,5 +1,5 @@
 // Mocks must be defined before requiring the module under test
-let capturedPrompts = [];
+const capturedPrompts = [];
 
 jest.mock('../problemSolutionsService', () => ({
   fetchActiveApproachesByProblemId: jest.fn(async (problemId) => {

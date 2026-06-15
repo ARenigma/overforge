@@ -237,7 +237,7 @@ router.post('/create-session', authenticateSupabase, async (req, res) => {
     // First, check available problems for this combination
     let coreProblems = [];
     if (coreLanguage) {
-        let { data, error } = await supabase
+        const { data, error } = await supabase
         .from('master_problems')
         .select('id, title, description, difficulty_level, time_estimate, framework')
         .eq('category', 'core_language')
@@ -251,7 +251,7 @@ router.post('/create-session', authenticateSupabase, async (req, res) => {
 
     let frameworkProblems = [];
     if (coreFramework && frameworkLanguage) {
-      let { data, error } = await supabase
+      const { data, error } = await supabase
         .from('master_problems')
         .select('id, title, description, difficulty_level, time_estimate, framework')
         .eq('category', 'core_language')

@@ -835,8 +835,8 @@ Respond with JSON:
     let enhancedQuestion = generatedQuestion;
     
     // Add threading status when conversation memory is being used
-    let threadingStatus = 'active'; // 'active', 'error', 'offline'
-    let hasThreading = conversationCallback || session.conversationThreads?.size > 0;
+    const threadingStatus = 'active'; // 'active', 'error', 'offline'
+    const hasThreading = conversationCallback || session.conversationThreads?.size > 0;
     if (hasThreading) {
       console.log(`🧵 LHIS: Adding conversation threading status`);
     }
