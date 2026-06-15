@@ -29,3 +29,4 @@ docker-compose.override.yml
 ai_module/simple_api_test.py
 repomix-output.xml
 .specstory/history/
+specstory.md
