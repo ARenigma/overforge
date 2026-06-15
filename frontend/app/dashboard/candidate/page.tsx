@@ -59,6 +59,12 @@ function CandidateDashboard() {
     fetchPublicSessions()
   }, [])
 
+  // Redirect unauthenticated users on the client only — calling router.push during
+  // render breaks static prerendering ("location is not defined" on the server).
+  useEffect(() => {
+    if (!user) router.push('/')
+  }, [user, router])
+
   const fetchPublicSessions = async () => {
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/sessions/public/browse`, {
@@ -192,7 +198,6 @@ function CandidateDashboard() {
   const levels = [...new Set(publicSessions.map(s => s.experienceLevel))]
 
   if (!user) {
-    router.push('/')
     return null
   }
 

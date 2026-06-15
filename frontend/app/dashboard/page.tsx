@@ -98,7 +98,8 @@ export default function DashboardPage() {
   }
 
   if (!user) {
-    router.push('/auth/login')
+    // Redirect is handled by the auth effect above; avoid router.push during
+    // render (breaks static prerendering with "location is not defined").
     return null
   }
 
