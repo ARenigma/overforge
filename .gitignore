@@ -25,3 +25,7 @@ docker-compose.override.yml
 # Misc
 .idea/
 .vscode/ 
+# Secrets / conversation dumps that should never be in VCS
+ai_module/simple_api_test.py
+repomix-output.xml
+.specstory/history/
