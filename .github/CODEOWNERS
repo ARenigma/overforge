@@ -1,0 +1,18 @@
+# CODEOWNERS — auto-assign reviewers on PRs.
+# Add GitHub usernames below. The last match wins per line.
+
+# Default: no owner (anyone can review)
+/*                                  @ARenigma
+
+# AI module changes need explicit review (touches the LLM brain)
+/ai_module/                        @ARenigma
+
+# Backend / LHIS is the heart of the platform
+/backend/src/services/living-ai-interviewer.js   @ARenigma
+/backend/src/sockets/                              @ARenigma
+/backend/src/services/problemSolutionsService.js   @ARenigma
+
+# CI / infra
+/.github/                          @ARenigma
+/.husky/                           @ARenigma
+/package.json                      @ARenigma
