@@ -1,8 +1,3 @@
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
 # Pre-commit: fast gates only. Full regression runs on pre-push + in CI.
-# - Prettier on staged files
-# - ESLint --fix on staged JS/TS (per-service)
-# - ruff check --fix on staged Python
+# Prettier + ESLint --fix on staged JS/TS, ruff --fix on staged Python.
 npx lint-staged

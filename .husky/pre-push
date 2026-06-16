@@ -1,28 +1,26 @@
-#!/usr/bin/env sh
-. "$(dirname -- "$0")/_/husky.sh"
-
 echo ""
 echo "╔══════════════════════════════════════════════╗"
 echo "║  pre-push: regression gates (medium)         ║"
 echo "╚══════════════════════════════════════════════╝"
 echo ""
 
+# npm workspace: a single root install hoists backend + frontend deps.
+[ -d node_modules ] || npm ci --no-audit --no-fund >/dev/null 2>&1 || true
+
 # ─────── Backend: jest unit tests ───────
 if [ -d backend/src/services/__tests__ ]; then
   echo "▶ backend: jest"
-  (cd backend && [ -d node_modules ] || npm ci --no-audit --no-fund) >/dev/null 2>&1 || true
-  (cd backend && npm test -- --silent --passWithNoTests) || {
+  npm test --workspace=backend -- --silent --passWithNoTests || {
     echo "❌ backend jest failed — fix before push"; exit 1;
   }
 else
   echo "⏭  backend: no __tests__/ dir, skipping"
 fi
 
-# ─────── Frontend: typecheck + lint ───────
+# ─────── Frontend: typecheck ───────
 if [ -d frontend ]; then
-  echo "▶ frontend: tsc --noEmit + next lint"
-  (cd frontend && [ -d node_modules ] || npm ci --no-audit --no-fund) >/dev/null 2>&1 || true
-  (cd frontend && npx --no-install tsc --noEmit -p tsconfig.json) || {
+  echo "▶ frontend: tsc --noEmit"
+  npm run typecheck --workspace=frontend || {
     echo "❌ frontend typecheck failed"; exit 1;
   }
 fi

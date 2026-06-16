@@ -9,7 +9,12 @@
  */
 module.exports = {
   testEnvironment: 'node',
+  setupFiles: ['<rootDir>/jest.setup.js'],
   modulePathIgnorePatterns: ['<rootDir>/docker-environments/'],
   testPathIgnorePatterns: ['/node_modules/', '<rootDir>/docker-environments/'],
   clearMocks: true,
+  // Imported service modules open sockets/timers at load that aren't torn down,
+  // so Jest lingers after tests pass. Force exit keeps the hook + CI prompt.
+  // TODO(test-hardening): close these handles and drop forceExit.
+  forceExit: true,
 };
