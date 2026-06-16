@@ -1,13 +1,12 @@
 # GitLab CI/CD for Overforge
 #
-# Mirrors the green local pipeline (lint + tests + build) translated from the
-# GitHub Actions workflows. Designed to be lean on the free tier's 400 CI
-# minutes/month: jobs cache node_modules/pip, the pipeline only runs on `main`
-# and merge requests (not every branch push), and the heavy Playwright E2E is
-# manual-only.
+# Mirrors the green local pipeline (lint + tests + build). The repo is an npm
+# workspace (root package-lock.json covers backend + frontend), so every Node
+# job installs once at the root with `npm ci` and runs per-workspace scripts.
 #
-# Service hosts: in GitLab CI a `services:` container is reachable by its image
-# alias — Postgres is at host `postgres`.
+# Lean for the free tier's 400 CI minutes/month: the npm download cache is reused
+# across jobs, the pipeline runs only on `main` and merge requests, and the heavy
+# Playwright E2E is manual-only. Postgres is reachable at host `postgres`.
 
 stages:
   - hygiene
@@ -15,8 +14,6 @@ stages:
   - test
   - build
 
-# Run on merge requests and on main only — avoids burning minutes on every
-# work-in-progress branch push, and prevents duplicate branch+MR pipelines.
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
@@ -24,8 +21,19 @@ workflow:
     - if: '$CI_COMMIT_TAG'
 
 default:
+  interruptible: true
+
+# Shared Node setup: workspace install at root, npm cache reused across jobs.
+.node:
   image: node:20
-  interruptible: true # cancel superseded runs to save minutes
+  variables:
+    npm_config_cache: '$CI_PROJECT_DIR/.npm'
+  cache:
+    key:
+      files: [package-lock.json]
+    paths: [.npm/]
+  before_script:
+    - npm ci --prefer-offline --no-audit --no-fund
 
 # ─────────────────────── 1. Hygiene: no secrets / .env ───────────────────────
 hygiene:
@@ -57,17 +65,11 @@ gitleaks:
 
 # ─────────────────────── 2. Lint ───────────────────────
 lint-node:
+  extends: .node
   stage: lint
-  cache:
-    - key:
-        files: [backend/package-lock.json]
-      paths: [backend/node_modules]
-    - key:
-        files: [frontend/package-lock.json]
-      paths: [frontend/node_modules]
   script:
-    - cd backend && npm ci --no-audit --no-fund && npm run lint && cd ..
-    - cd frontend && npm ci --no-audit --no-fund && npm run lint && cd ..
+    - npm run lint --workspace=backend
+    - npm run lint --workspace=frontend
 
 lint-ruff:
   stage: lint
@@ -80,11 +82,13 @@ lint-ruff:
 
 # ─────────────────────── 3. Tests ───────────────────────
 test-backend:
+  extends: .node
   stage: test
   services:
     - name: postgres:16-alpine
       alias: postgres
   variables:
+    npm_config_cache: '$CI_PROJECT_DIR/.npm'
     POSTGRES_USER: postgres
     POSTGRES_PASSWORD: postgres
     POSTGRES_DB: overforge_test
@@ -100,14 +104,8 @@ test-backend:
     DB_NAME: overforge_test
     JWT_SECRET: 'ci-test-secret'
     AI_MODULE_URL: 'http://localhost:9001'
-  cache:
-    key:
-      files: [backend/package-lock.json]
-    paths: [backend/node_modules]
   script:
-    - cd backend
-    - npm ci --no-audit --no-fund
-    - npm test -- --ci --coverage --maxWorkers=2
+    - npm test --workspace=backend -- --ci --coverage --maxWorkers=2
   coverage: '/All files[^|]*\|[^|]*\s+([\d.]+)/'
 
 ai-smoke:
@@ -121,20 +119,16 @@ ai-smoke:
 
 # ─────────────────────── 4. Build ───────────────────────
 build-frontend:
+  extends: .node
   stage: build
   variables:
+    npm_config_cache: '$CI_PROJECT_DIR/.npm'
     NEXT_PUBLIC_API_URL: 'http://localhost:5001'
     NEXT_PUBLIC_SOCKET_URL: 'http://localhost:5001'
     NEXT_PUBLIC_SUPABASE_URL: 'https://test.supabase.co'
     NEXT_PUBLIC_SUPABASE_ANON_KEY: 'test-anon-key'
-  cache:
-    key:
-      files: [frontend/package-lock.json]
-    paths: [frontend/node_modules]
   script:
-    - cd frontend
-    - npm ci --no-audit --no-fund
-    - npm run build
+    - npm run build --workspace=frontend
   artifacts:
     paths: [frontend/.next]
     expire_in: 3 days
@@ -150,11 +144,11 @@ e2e-playwright:
     NEXT_PUBLIC_API_URL: 'http://localhost:5001'
     NEXT_PUBLIC_SUPABASE_URL: 'https://test.supabase.co'
     NEXT_PUBLIC_SUPABASE_ANON_KEY: 'e2e-test-anon-key'
-  script:
-    - cd frontend
+  before_script:
     - npm ci --no-audit --no-fund
-    - npm run build
-    - npx playwright test --project=chromium --reporter=line e2e/smoke.spec.ts e2e/api.spec.ts e2e/room.spec.ts
+  script:
+    - npm run build --workspace=frontend
+    - npm run test:e2e --workspace=frontend -- --project=chromium --reporter=line e2e/smoke.spec.ts e2e/api.spec.ts e2e/room.spec.ts
   artifacts:
     when: always
     paths: [frontend/playwright-report]
