@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { buildSslConfig } = require('./db-ssl.cjs');
 
 module.exports = {
   development: {
@@ -25,10 +26,9 @@ module.exports = {
     port: parseInt(process.env.DB_PORT, 10),
     dialect: "postgres",
     dialectOptions: {
-      ssl: {
-        require: true,
-        rejectUnauthorized: false 
-      }
+      // Secure by default (verifies the server cert). Provide DB_SSL_CA for a
+      // managed-DB CA bundle, or set DB_SSL_REJECT_UNAUTHORIZED=false to opt out.
+      ssl: buildSslConfig()
     }
   }
-}; 
+};
