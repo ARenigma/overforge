@@ -34,11 +34,13 @@ jest.mock('../problemSolutionsService', () => ({
 jest.mock('../aiService', () => ({
   performAIAnalysis: jest.fn(async (prompt) => {
     mockCapturedPrompts.push(prompt);
-    if (typeof prompt === 'string' && /KNOWN APPROACHES FOR THIS PROBLEM/i.test(prompt)) {
-      return { question: 'Why this approach versus the alternatives for this problem?' };
-    }
     // Parameter detection style response
     return { analysis: { detected: true, confidence: 92, reasoning: 'Heuristic detection passed.' } };
+  }),
+  // generateAIDepthQuestion sends the approach-specific (comparative) prompt here (3rd arg).
+  analyzeCode: jest.fn(async (code, language, prompt) => {
+    mockCapturedPrompts.push(prompt);
+    return 'Why this approach versus the alternatives for this problem?';
   })
 }));
 
@@ -51,11 +53,7 @@ function makeCode(base, repeatChars) {
   return (base + '\n' + filler);
 }
 
-// QUARANTINED (2026-06): same comparative-context test/source drift as
-// lhis-flow-comparative.test.js — the suite seeds the problem id but the source now
-// uses dynamic problem detection, so "comparative context" assertions fail. Re-enable
-// once the comparative flow is reconciled in the test-hardening phase.
-describe.skip('LHIS E2E - core languages and depth questions (reject-oriented)', () => {
+describe('LHIS E2E - core languages and depth questions (reject-oriented)', () => {
   beforeEach(() => {
     mockCapturedPrompts = [];
   });
@@ -66,6 +64,12 @@ describe.skip('LHIS E2E - core languages and depth questions (reject-oriented)',
     const instance = LivingAIInterviewer; // singleton
     instance.setSocketIO({ to: () => ({ emit: () => {} }) });
     instance.setStorageFunction(() => {});
+
+    // Source derives the problem id dynamically from code; pin it to a known seeded
+    // problem (id 6, not the 99 general-coding fallback) so comparative context is built.
+    const detectSpy = jest.spyOn(instance, 'detectProblemUniversal').mockReturnValue({
+      problemType: 'two-pointer', problemId: 6, confidence: 0.95, category: 'arrays'
+    });
 
     const jobProfile = {
       title: 'Core Engineer',
@@ -180,6 +184,7 @@ describe.skip('LHIS E2E - core languages and depth questions (reject-oriented)',
 
     timeoutSpy.mockRestore();
     threadingStub.mockRestore();
+    detectSpy.mockRestore();
   });
 });
 

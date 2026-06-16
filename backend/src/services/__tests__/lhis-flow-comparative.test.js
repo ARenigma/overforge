@@ -30,24 +30,20 @@ jest.mock('../problemSolutionsService', () => ({
 jest.mock('../aiService', () => ({
   performAIAnalysis: jest.fn(async (prompt) => {
     capturedPrompts.push(prompt);
-    // If prompt includes our comparative context marker, return a question
-    if (typeof prompt === 'string' && /KNOWN APPROACHES FOR THIS PROBLEM/i.test(prompt)) {
-      return { question: 'Why two-pointer over a hashmap approach in this case?' };
-    }
-    // Otherwise, return a detection object for parameter detection
+    // Used by the parameter-detection path.
     return { analysis: { detected: true, confidence: 90, reasoning: 'Two-pointer pattern detected.' } };
+  }),
+  // generateAIDepthQuestion sends the approach-specific (comparative) prompt here,
+  // as the 3rd argument.
+  analyzeCode: jest.fn(async (code, language, prompt) => {
+    capturedPrompts.push(prompt);
+    return 'Why a two-pointer approach over a hash map in this case?';
   })
 }));
 
 const LivingAIInterviewer = require('../living-ai-interviewer');
 
-// QUARANTINED (2026-06): test/source drift. The test seeds session.currentProblemId,
-// but living-ai-interviewer.js now resolves the problem via detectedProblem.problemId
-// (dynamic problem detection), so the comparative-approach context is never built and
-// the assertion fails. These suites had been crashing at import (Supabase realtime had
-// no WebSocket under Node), so the drift went unnoticed. Re-enable once the comparative
-// flow is reconciled in the test-hardening phase.
-describe.skip('LHIS flow - comparative questioning using stored approaches', () => {
+describe('LHIS flow - comparative questioning using stored approaches', () => {
   test('from code analysis to depth question with comparative context', async () => {
     // Prevent open handle from internal timeouts in Promise.race
     const timeoutSpy = jest.spyOn(global, 'setTimeout').mockImplementation(() => 0);
@@ -65,6 +61,13 @@ describe.skip('LHIS flow - comparative questioning using stored approaches', () 
     // Stub IO and storage to avoid emissions during test
     instance.setSocketIO({ to: () => ({ emit: () => {} }) });
     instance.setStorageFunction(() => {});
+
+    // The source derives the problem id dynamically from the candidate's code via
+    // detectProblemUniversal; pin it to a known seeded problem (id 6, not the 99
+    // general-coding fallback) so the comparative approach context is built.
+    const detectSpy = jest.spyOn(instance, 'detectProblemUniversal').mockReturnValue({
+      problemType: 'two-pointer', problemId: 6, confidence: 0.95, category: 'arrays'
+    });
 
     // Prepare session
     const parameterProgress = instance.initializeParameterProgress(jobProfile.parameters);
@@ -84,6 +87,10 @@ describe.skip('LHIS flow - comparative questioning using stored approaches', () 
       ,candidatePersonality: { communicationStyle: 'concise', technicalDepth: 'surface' }
     });
 
+    // Comparative approach context is injected at depth 1 (Trade-offs & Alternatives),
+    // not the first question (depth 0). Seed one prior question so the next one is depth 1.
+    parameterProgress[0].questionsAsked.push('depth-0-question');
+
     // Provide enough code to exceed any reasonable threshold
     const code = ('function solve(arr){ let i=0,j=arr.length-1; while(i<j){ /* ... */ i++; j--; } return arr; }\n').repeat(6);
 
@@ -102,6 +109,7 @@ describe.skip('LHIS flow - comparative questioning using stored approaches', () 
 
     timeoutSpy.mockRestore();
     threadingStub.mockRestore();
+    detectSpy.mockRestore();
   });
 });
 
