@@ -758,7 +758,7 @@ ${analysisInfo.endpoints?.slice(0, 8).map(ep => `   ${ep.method} ${ep.path} - ${
       
       let serverStatus = 'Starting...';
       let analysisInfo = null;
-      let webInterface = 'http://localhost:8002'; // External port mapping
+      const webInterface = 'http://localhost:8002'; // External port mapping
       
       if (testResult.stdout && !testResult.stdout.includes('Server not ready')) {
         try {
@@ -873,7 +873,7 @@ ${analysisInfo.endpoints?.slice(0, 8).map(ep => `   ${ep.method} ${ep.path} - ${
       
       let serverStatus = 'Starting...';
       let analysisInfo = null;
-      let webInterface = 'http://localhost:8003';
+      const webInterface = 'http://localhost:8003';
       
       if (testResult.stdout && !testResult.stdout.includes('Server not ready')) {
         try {
@@ -983,7 +983,7 @@ ${analysisInfo.endpoints?.slice(0, 8).map(ep => `   ${ep.method} ${ep.path} - ${
       
       let serverStatus = 'Starting...';
       let analysisInfo = null;
-      let webInterface = 'http://localhost:3003';
+      const webInterface = 'http://localhost:3003';
       
       if (testResult.stdout && !testResult.stdout.includes('Server not ready')) {
         try {
@@ -1183,7 +1183,7 @@ ${analysisInfo.endpoints?.slice(0, 8).map(ep => `   ${ep.method} ${ep.path} - ${
       
       let serverStatus = 'Starting...';
       let analysisInfo = null;
-      let webInterface = 'http://localhost:8004';
+      const webInterface = 'http://localhost:8004';
       
       if (testResult.stdout && !testResult.stdout.includes('Server not ready')) {
         try {

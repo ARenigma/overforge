@@ -5,3 +5,7 @@ requests
 mistralai
 python-dotenv
 httpx>=0.24.0
+
+# Dev tools (for lint, format, test)
+# Install with: pip install -r requirements-dev.txt
+-r requirements-dev.txt

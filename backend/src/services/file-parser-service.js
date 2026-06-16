@@ -76,23 +76,25 @@ class FileParserService {
       
       // Extract text based on file type
       switch (validation.fileType) {
-        case 'pdf':
+        case 'pdf': {
           const pdfResult = await this.extractFromPDF(file.buffer);
           extractedText = pdfResult.text;
           extractionMethod = 'pdf_parse';
           break;
-          
+        }
+
         case 'txt':
           extractedText = await this.extractFromText(file.buffer);
           extractionMethod = 'direct_text';
           break;
-          
-        case 'docx':
+
+        case 'docx': {
           const docxResult = await this.extractFromDOCX(file.buffer);
           extractedText = docxResult.text;
           extractionMethod = 'mammoth_docx';
           break;
-          
+        }
+
         default:
           throw new Error(`Unsupported file type: ${validation.fileType}`);
       }
@@ -228,6 +230,7 @@ class FileParserService {
       // Remove excessive whitespace
       .replace(/\s+/g, ' ')
       // Remove control characters except newlines and tabs
+      // eslint-disable-next-line no-control-regex -- intentional: stripping control chars from parsed document text
       .replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, '')
       // Normalize line breaks
       .replace(/\r\n/g, '\n')

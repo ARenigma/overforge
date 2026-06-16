@@ -1,0 +1,19 @@
+# GitGuardian configuration
+# https://docs.gitguardian.com/ggshield-docs/reference/config
+#
+# The paths below contain ONLY dummy, non-functional values used by CI:
+#   - .github/workflows/** : test fixtures such as JWT_SECRET: 'ci-test-secret'
+#     and SUPABASE_*_KEY: 'test-anon-key' injected so jobs can boot without real
+#     credentials. These are not secrets and are safe in plaintext.
+#   - **/.env.example       : documented env-var shapes with empty/placeholder
+#     values (e.g. OPENROUTER_API_KEY=, your-anon-key-here). No real values.
+#
+# Real secrets never live in the repo (enforced by the gitleaks workflow and the
+# husky pre-commit/pre-push hooks); they are provided at runtime via untracked
+# .env files. See SECURITY.md.
+version: 2
+
+secret:
+  ignored-paths:
+    - '.github/workflows/**'
+    - '**/.env.example'

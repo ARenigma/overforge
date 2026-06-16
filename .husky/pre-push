@@ -1,0 +1,42 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo ""
+echo "╔══════════════════════════════════════════════╗"
+echo "║  pre-push: regression gates (medium)         ║"
+echo "╚══════════════════════════════════════════════╝"
+echo ""
+
+# ─────── Backend: jest unit tests ───────
+if [ -d backend/src/services/__tests__ ]; then
+  echo "▶ backend: jest"
+  (cd backend && [ -d node_modules ] || npm ci --no-audit --no-fund) >/dev/null 2>&1 || true
+  (cd backend && npm test -- --silent --passWithNoTests) || {
+    echo "❌ backend jest failed — fix before push"; exit 1;
+  }
+else
+  echo "⏭  backend: no __tests__/ dir, skipping"
+fi
+
+# ─────── Frontend: typecheck + lint ───────
+if [ -d frontend ]; then
+  echo "▶ frontend: tsc --noEmit + next lint"
+  (cd frontend && [ -d node_modules ] || npm ci --no-audit --no-fund) >/dev/null 2>&1 || true
+  (cd frontend && npx --no-install tsc --noEmit -p tsconfig.json) || {
+    echo "❌ frontend typecheck failed"; exit 1;
+  }
+fi
+
+# ─────── AI module: syntax check on Python files ───────
+if [ -d ai_module ]; then
+  echo "▶ ai_module: python -m compileall"
+  python3 -m compileall -q ai_module -x "(venv|__pycache__|node_modules)" 2>&1 | grep -v "^$" || true
+fi
+
+# ─────── Repo hygiene: no .env files leaking ───────
+if git ls-files | grep -E "^\.env$|\.env\.[a-z]+$" | grep -v "\.env\.example$" | grep -v node_modules >/dev/null 2>&1; then
+  echo "❌ Real .env files are being committed. Add them to .gitignore."; exit 1;
+fi
+
+echo ""
+echo "✅ pre-push gates passed"

@@ -190,26 +190,28 @@ router.get('/export/:type', async (req, res) => {
     let filename;
     
     switch (type) {
-      case 'users':
+      case 'users': {
         const { data: users, error: usersError } = await supabase
           .from('users')
           .select('*');
-        
+
         if (usersError) throw usersError;
         data = users;
         filename = 'users_export.json';
         break;
-        
-      case 'sessions':
+      }
+
+      case 'sessions': {
         const { data: sessions, error: sessionsError } = await supabase
           .from('assessment_sessions')
           .select('*');
-        
+
         if (sessionsError) throw sessionsError;
         data = sessions;
         filename = 'sessions_export.json';
         break;
-        
+      }
+
       default:
         return res.status(400).json({ error: 'Invalid export type' });
     }
