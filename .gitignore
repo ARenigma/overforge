@@ -15,6 +15,14 @@ venv/
 !.env.example
 openrouter_key.txt
 
+# Local secrets (tokens/credentials) — never commit
+env.rtf
+*.rtf
+.secrets/
+*.token
+*_token
+glpat-*
+
 # Build outputs
 build/
 dist/
