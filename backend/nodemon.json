@@ -1,9 +1,0 @@
-{
-  "watch": ["src"],
-  "ext": "js,json",
-  "ignore": [
-    "src/tests/*",
-    "docker-environments/*"
-  ],
-  "exec": "node src/app.js"
-} 
