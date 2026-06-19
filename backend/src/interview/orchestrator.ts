@@ -288,6 +288,7 @@ export async function finishAndScore(interviewId: string): Promise<void> {
   await updateInterview(interviewId, {
     evaluation_score: scorecard,
     status: 'scored',
+    phase: 'done',
   });
 
   await appendEvent(interviewId, 'score', { scorecard });
