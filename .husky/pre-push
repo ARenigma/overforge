@@ -7,14 +7,16 @@ echo ""
 # npm workspace: a single root install hoists backend + frontend deps.
 [ -d node_modules ] || npm ci --no-audit --no-fund >/dev/null 2>&1 || true
 
-# ─────── Backend: jest unit tests ───────
-if [ -d backend/src/services/__tests__ ]; then
+# ─────── Backend: typecheck + jest ───────
+if [ -d backend ]; then
+  echo "▶ backend: tsc --noEmit"
+  npm run typecheck --workspace=backend || {
+    echo "❌ backend typecheck failed"; exit 1;
+  }
   echo "▶ backend: jest"
   npm test --workspace=backend -- --silent --passWithNoTests || {
     echo "❌ backend jest failed — fix before push"; exit 1;
   }
-else
-  echo "⏭  backend: no __tests__/ dir, skipping"
 fi
 
 # ─────── Frontend: typecheck ───────
@@ -23,12 +25,6 @@ if [ -d frontend ]; then
   npm run typecheck --workspace=frontend || {
     echo "❌ frontend typecheck failed"; exit 1;
   }
-fi
-
-# ─────── AI module: syntax check on Python files ───────
-if [ -d ai_module ]; then
-  echo "▶ ai_module: python -m compileall"
-  python3 -m compileall -q ai_module -x "(venv|__pycache__|node_modules)" 2>&1 | grep -v "^$" || true
 fi
 
 # ─────── Repo hygiene: no .env files leaking ───────

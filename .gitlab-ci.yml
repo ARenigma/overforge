@@ -70,6 +70,7 @@ lint-node:
   script:
     - npm run lint --workspace=backend
     - npm run lint --workspace=frontend
+    - npm run typecheck --workspace=backend
 
 # ─────────────────────── 3. Tests ───────────────────────
 test-backend:

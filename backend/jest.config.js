@@ -9,6 +9,11 @@
  */
 module.exports = {
   testEnvironment: 'node',
+  // ts-jest transpiles the TypeScript interview core; plain .js tests still run natively.
+  transform: {
+    '^.+\\.ts$': ['ts-jest', { tsconfig: '<rootDir>/tsconfig.json' }],
+  },
+  moduleFileExtensions: ['ts', 'js', 'json', 'node'],
   setupFiles: ['<rootDir>/jest.setup.js'],
   modulePathIgnorePatterns: ['<rootDir>/docker-environments/'],
   testPathIgnorePatterns: ['/node_modules/', '<rootDir>/docker-environments/'],
