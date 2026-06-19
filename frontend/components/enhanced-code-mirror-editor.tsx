@@ -169,12 +169,6 @@ export function EnhancedCodeMirrorEditor({
     
     // Only update if the content actually differs
     if (currentContent !== value) {
-      console.log("🔄 Editor content update:", {
-        from: currentContent.substring(0, 50) + "...",
-        to: value.substring(0, 50) + "...",
-        isRecreating: isRecreatingRef.current
-      })
-
       viewRef.current.dispatch({
         changes: {
           from: 0,

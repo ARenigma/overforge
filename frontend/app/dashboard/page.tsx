@@ -1,21 +1,25 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { SignOutButton } from "./_components/sign-out-button";
+import { NewInterviewDialog } from "./_components/new-interview-dialog";
+import { ScorecardDialog } from "./_components/scorecard-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { CalendarClock, Plus, User } from "lucide-react";
+import { CalendarClock, User } from "lucide-react";
+import { type Scorecard } from "@/lib/api";
 
 interface Interview {
   id: string;
   candidate_email: string | null;
   status: string;
   created_at: string;
+  evaluation_score: Scorecard | null;
 }
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "border-[#2A2E37] text-[#9AA1AC] bg-transparent",
   active: "border-[#2F6BFF]/40 text-[#2F6BFF] bg-[#2F6BFF]/10",
   completed: "border-[#34D399]/40 text-[#34D399] bg-[#34D399]/10",
+  scored: "border-[#34D399]/40 text-[#34D399] bg-[#34D399]/10",
   cancelled: "border-[#F2555A]/40 text-[#F2555A] bg-[#F2555A]/10",
 };
 
@@ -47,7 +51,7 @@ export default async function DashboardPage() {
 
   const { data: interviews } = await supabase
     .from("interviews")
-    .select("id, candidate_email, status, created_at")
+    .select("id, candidate_email, status, created_at, evaluation_score")
     .order("created_at", { ascending: false });
 
   const rows = (interviews ?? []) as Interview[];
@@ -84,14 +88,7 @@ export default async function DashboardPage() {
             </p>
           </div>
 
-          {/* Placeholder — create flow comes in a later milestone */}
-          <Button
-            disabled
-            className="h-9 bg-[#2F6BFF] hover:bg-[#2F6BFF]/90 text-white text-sm gap-2 disabled:opacity-40 cursor-not-allowed"
-          >
-            <Plus className="w-4 h-4" />
-            New interview
-          </Button>
+          <NewInterviewDialog />
         </div>
 
         {/* Interview list */}
@@ -106,7 +103,7 @@ export default async function DashboardPage() {
         ) : (
           <div className="border border-[#2A2E37] rounded-xl overflow-hidden">
             {/* Table header */}
-            <div className="grid grid-cols-[1fr_160px_120px] gap-4 px-5 py-3 bg-[#1C1F25] border-b border-[#2A2E37]">
+            <div className="grid grid-cols-[1fr_160px_120px_auto] gap-4 px-5 py-3 bg-[#1C1F25] border-b border-[#2A2E37]">
               <span className="text-[10px] uppercase tracking-widest text-[#9AA1AC] font-medium">
                 Candidate
               </span>
@@ -116,6 +113,9 @@ export default async function DashboardPage() {
               <span className="text-[10px] uppercase tracking-widest text-[#9AA1AC] font-medium">
                 Status
               </span>
+              <span className="text-[10px] uppercase tracking-widest text-[#9AA1AC] font-medium">
+                Actions
+              </span>
             </div>
 
             {/* Rows */}
@@ -124,7 +124,7 @@ export default async function DashboardPage() {
                 <li
                   key={interview.id}
                   className={[
-                    "grid grid-cols-[1fr_160px_120px] gap-4 px-5 py-3.5 items-center",
+                    "grid grid-cols-[1fr_160px_120px_auto] gap-4 px-5 py-3.5 items-center",
                     idx < rows.length - 1 ? "border-b border-[#2A2E37]" : "",
                     "hover:bg-[#1C1F25]/60 transition-colors",
                   ].join(" ")}
@@ -143,6 +143,14 @@ export default async function DashboardPage() {
                   >
                     {interview.status}
                   </Badge>
+                  <div className="flex items-center">
+                    {interview.evaluation_score && (
+                      <ScorecardDialog
+                        interviewId={interview.id}
+                        scorecard={interview.evaluation_score}
+                      />
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
