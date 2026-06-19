@@ -70,15 +70,7 @@ lint-node:
   script:
     - npm run lint --workspace=backend
     - npm run lint --workspace=frontend
-
-lint-ruff:
-  stage: lint
-  image: python:3.11-slim
-  script:
-    - pip install --quiet ruff
-    - cd ai_module
-    - ruff check .
-    - ruff format --check .
+    - npm run typecheck --workspace=backend
 
 # ─────────────────────── 3. Tests ───────────────────────
 test-backend:
@@ -103,19 +95,9 @@ test-backend:
     DB_PASSWORD: postgres
     DB_NAME: overforge_test
     JWT_SECRET: 'ci-test-secret'
-    AI_MODULE_URL: 'http://localhost:9001'
   script:
     - npm test --workspace=backend -- --ci --coverage --maxWorkers=2
   coverage: '/All files[^|]*\|[^|]*\s+([\d.]+)/'
-
-ai-smoke:
-  stage: test
-  image: python:3.11-slim
-  script:
-    - cd ai_module
-    - pip install --quiet -r requirements.txt -r requirements-dev.txt
-    - python -m compileall -q . -x "(venv|__pycache__)"
-    - python -c "import app; print('OK - app imports cleanly')" || echo "⚠️ app import needs secrets in real runs; expected here"
 
 # ─────────────────────── 4. Build ───────────────────────
 build-frontend:

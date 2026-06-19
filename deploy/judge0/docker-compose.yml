@@ -1,0 +1,49 @@
+# Service 2 — self-hosted Judge0 execution kernel (Oracle VPS).
+# Run-and-capture sandbox the backend calls via src/execution/judge0.ts.
+#
+# Prereqgs on the VPS (see README.md): Docker + privileged containers + isolate's
+# cgroup requirements. The server listens on 2358; the backend reaches it on the
+# internal network as http://judge0-server:2358 (not exposed publicly — only the
+# Core API talks to it).
+services:
+  judge0-server:
+    image: judge0/judge0:1.13.1
+    container_name: judge0-server
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    ports:
+      - '127.0.0.1:2358:2358' # bind to localhost only; reverse-proxy/Core API reaches it internally
+    privileged: true
+    depends_on:
+      - judge0-db
+      - judge0-redis
+    restart: always
+
+  judge0-workers:
+    image: judge0/judge0:1.13.1
+    container_name: judge0-workers
+    command: ['./scripts/workers']
+    volumes:
+      - ./judge0.conf:/judge0.conf:ro
+    privileged: true
+    depends_on:
+      - judge0-db
+      - judge0-redis
+    restart: always
+
+  judge0-db:
+    image: postgres:16-alpine
+    container_name: judge0-db
+    env_file: judge0.conf
+    volumes:
+      - judge0-db-data:/var/lib/postgresql/data
+    restart: always
+
+  judge0-redis:
+    image: redis:7-alpine
+    container_name: judge0-redis
+    command: ['redis-server', '--appendonly', 'no', '--requirepass', '${REDIS_PASSWORD}']
+    restart: always
+
+volumes:
+  judge0-db-data:
