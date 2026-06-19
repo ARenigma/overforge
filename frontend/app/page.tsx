@@ -4,63 +4,74 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { UserCheck, Users } from "lucide-react"
-import { useAuth } from "@/hooks/useAuth"
+import { createClient } from "@/lib/supabase/client"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { DotGridBackground } from "@/components/dot-grid-background"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import type { User } from "@supabase/supabase-js"
 
 export default function HomePage() {
-  const { user, loading, logout } = useAuth()
+  const [user, setUser] = useState<User | null>(null)
+  const [loading, setLoading] = useState(true)
   const router = useRouter()
   const [showStrikethrough, setShowStrikethrough] = useState(false)
   const [showSeconds, setShowSeconds] = useState(false)
 
+  useEffect(() => {
+    const supabase = createClient()
+
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user)
+      setLoading(false)
+    })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
   // Animation effect for strikethrough and "seconds" emergence
   useEffect(() => {
-    console.log("HomePage mounted, router available:", !!router)
-    
     const timer1 = setTimeout(() => {
       setShowStrikethrough(true)
-    }, 800) // Start strikethrough after 0.8 seconds
+    }, 800)
 
     const timer2 = setTimeout(() => {
       setShowSeconds(true)
-    }, 1400) // Show "seconds" after strikethrough completes
+    }, 1400)
 
     return () => {
       clearTimeout(timer1)
       clearTimeout(timer2)
     }
-  }, [router])
+  }, [])
 
-  // Button handlers
   const handleStartPracticing = () => {
     if (user) {
-      // User is logged in, redirect to candidate dashboard
-      router.push('/dashboard/candidate')
+      router.push('/dashboard')
     } else {
-      // User not logged in, redirect to signup
-      router.push('/auth?mode=signup&role=candidate')
+      router.push('/auth?mode=signup')
     }
   }
 
   const handleStartInterviewing = () => {
     if (user) {
-      // User is logged in, check role and redirect appropriately
-      if (user.role === 'interviewer') {
-        router.push('/dashboard/interviewer')
-      } else {
-        // If user is a candidate but clicked interviewer button, redirect to candidate dashboard
-        router.push('/dashboard/candidate')
-      }
+      router.push('/dashboard')
     } else {
-      // User not logged in, redirect to signup
-      router.push('/auth?mode=signup&role=interviewer')
+      router.push('/auth?mode=signup')
     }
   }
 
   const handleSignIn = () => {
     router.push('/auth')
+  }
+
+  const handleSignOut = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    setUser(null)
   }
 
   if (loading) {
@@ -82,21 +93,21 @@ export default function HomePage() {
             <div className="flex items-center gap-2">
               <span className="text-2xl text-foreground">Over</span><span className="text-2xl text-orange-500 font-bold">Forge</span>
             </div>
-            
+
             <div className="flex items-center gap-4">
               <ThemeToggle />
               {user && (
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground">
-                    Welcome, {user.firstName}
+                    Welcome, {user.email}
                   </span>
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
                     size="sm"
-                    onClick={logout}
+                    onClick={handleSignOut}
                     className="flex items-center justify-center"
                   >
-                    Logout
+                    Sign out
                   </Button>
                 </div>
               )}
@@ -105,7 +116,7 @@ export default function HomePage() {
         </div>
       </header>
 
-      {/* Main Content - Centered and Aligned with Grid */}
+      {/* Main Content */}
       <main className="flex items-center justify-center min-h-screen px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-4xl mx-auto relative z-10">
           {/* Hero Title */}
@@ -130,11 +141,11 @@ export default function HomePage() {
                 <p className="text-muted-foreground mb-4">
                   Practice coding interviews with AI-powered feedback and real-time assistance.
                 </p>
-                <Button 
+                <Button
                   className="w-full bg-blue-600 hover:bg-blue-700"
                   onClick={handleStartPracticing}
                 >
-                  {user ? 'Go to Practice Dashboard' : 'Start Practicing'}
+                  {user ? 'Go to Dashboard' : 'Start Practicing'}
                 </Button>
               </CardContent>
             </Card>
@@ -150,16 +161,11 @@ export default function HomePage() {
                 <p className="text-muted-foreground mb-4">
                   Conduct efficient technical interviews with AI-assisted evaluation tools.
                 </p>
-                {user && user.role !== 'interviewer' && (
-                  <p className="text-xs text-amber-600 mb-2 bg-amber-50 p-2 rounded">
-                    Note: You're logged in as a candidate. Click to access your dashboard.
-                  </p>
-                )}
-                <Button 
+                <Button
                   className="w-full bg-green-600 hover:bg-green-700"
                   onClick={handleStartInterviewing}
                 >
-                  {user ? (user.role === 'interviewer' ? 'Go to Interview Dashboard' : 'Go to My Dashboard') : 'Start Interviewing'}
+                  {user ? 'Go to Dashboard' : 'Start Interviewing'}
                 </Button>
               </CardContent>
             </Card>
@@ -169,8 +175,8 @@ export default function HomePage() {
             <p className="text-muted-foreground mb-4">
               Already have an account?
             </p>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={handleSignIn}
               className="border-orange-500 text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-950"
             >
@@ -179,18 +185,6 @@ export default function HomePage() {
           </div>
         </div>
       </main>
-
-      {/* CSS Animation for Glow Effect */}
-      <style jsx>{`
-        @keyframes glow {
-          from {
-            box-shadow: 0 0 5px rgba(249, 115, 22, 0.4), 0 0 10px rgba(249, 115, 22, 0.3), 0 0 15px rgba(249, 115, 22, 0.2);
-          }
-          to {
-            box-shadow: 0 0 10px rgba(249, 115, 22, 0.6), 0 0 20px rgba(249, 115, 22, 0.4), 0 0 30px rgba(249, 115, 22, 0.3);
-          }
-        }
-      `}</style>
 
       {/* Footer */}
       <footer className="bg-muted py-8">

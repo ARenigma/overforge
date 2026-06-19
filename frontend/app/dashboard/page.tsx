@@ -1,284 +1,154 @@
-"use client"
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { SignOutButton } from "./_components/sign-out-button";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { CalendarClock, Plus, User } from "lucide-react";
 
-import React, { useState } from 'react'
-import { useRouter } from "next/navigation"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { 
-  Users, 
-  Settings, 
-  BarChart3, 
-  Calendar,
-  Clock,
-  Target,
-  ArrowRight,
-  Code,
-  Database,
-  Cloud,
-  CheckCircle,
-  User,
-  LogOut
-} from "lucide-react"
-import { Input } from "@/components/ui/input"
-import DashboardLayout from "@/components/dashboard-layout"
-import { useSupabaseAuth } from "@/context/SupabaseAuthContext"
-import { DotGridBackground } from "@/components/dot-grid-background"
-import ParameterSelectionInterface from "@/components/ParameterSelectionInterface"
-
-interface DashboardData {
-  stats: {
-    totalUsers: number
-    activeProjects: number
-    revenue: number
-    growth: number
-  }
-  recentActivity: Array<{
-    id: string
-    type: string
-    description: string
-    timestamp: string
-    status: "success" | "pending" | "error"
-  }>
-  projects: Array<{
-    id: string
-    name: string
-    status: string
-    progress: number
-    team: number
-  }>
+interface Interview {
+  id: string;
+  candidate_email: string | null;
+  status: string;
+  created_at: string;
 }
 
-export default function DashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState("")
-  const router = useRouter()
-  const { user, token, loading: authLoading } = useSupabaseAuth()
-  const [activeTab, setActiveTab] = useState("start-interview")
+const STATUS_STYLES: Record<string, string> = {
+  pending: "border-[#2A2E37] text-[#9AA1AC] bg-transparent",
+  active: "border-[#2F6BFF]/40 text-[#2F6BFF] bg-[#2F6BFF]/10",
+  completed: "border-[#34D399]/40 text-[#34D399] bg-[#34D399]/10",
+  cancelled: "border-[#F2555A]/40 text-[#F2555A] bg-[#F2555A]/10",
+};
 
-  // Add debugging logs
-  React.useEffect(() => {
-    console.log('Dashboard - Auth state:', { user, token, authLoading })
-    if (!authLoading && !user) {
-      console.log('Dashboard - No user found, redirecting to login')
-      router.push('/auth/login')
-      return
-    }
-    if (user && token) {
-      console.log('Dashboard - User authenticated')
-      setIsLoading(false)
-    }
-  }, [user, token, authLoading, router])
+function statusStyle(status: string) {
+  return (
+    STATUS_STYLES[status.toLowerCase()] ??
+    "border-[#2A2E37] text-[#9AA1AC] bg-transparent"
+  );
+}
 
-  const handleStartInterview = () => {
-    router.push('/parameter-selection')
-  }
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
 
-  const handleManageProfiles = () => {
-    router.push('/admin-panel')
-  }
+export default async function DashboardPage() {
+  const supabase = await createClient();
 
-  const handleSignOut = () => {
-    router.push('/auth/login')
-  }
-
-  if (authLoading || isLoading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <DotGridBackground />
-          <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading dashboard...</p>
-        </div>
-      </div>
-    )
-  }
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
-    // Redirect is handled by the auth effect above; avoid router.push during
-    // render (breaks static prerendering with "location is not defined").
-    return null
+    redirect("/auth");
   }
 
-  const filteredProjects =
-    data?.projects.filter((project) => project.name.toLowerCase().includes(searchTerm.toLowerCase())) || []
+  const { data: interviews } = await supabase
+    .from("interviews")
+    .select("id, candidate_email, status, created_at")
+    .order("created_at", { ascending: false });
+
+  const rows = (interviews ?? []) as Interview[];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      <DotGridBackground />
-      
-      <div className="relative z-10 container mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+    <div className="min-h-screen bg-[#0A0B0D] text-[#EAECEF]">
+      {/* Header */}
+      <header className="border-b border-[#2A2E37] bg-[#141619]">
+        <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="text-base font-medium text-[#EAECEF]">Over</span>
+            <span className="text-base font-bold text-[#2F6BFF] -ml-2">Forge</span>
+
+            <span className="text-[#2A2E37] mx-1">·</span>
+
+            <div className="flex items-center gap-1.5 text-sm text-[#9AA1AC]">
+              <User className="w-3.5 h-3.5" />
+              <span className="truncate max-w-[220px]">{user.email}</span>
+            </div>
+          </div>
+
+          <SignOutButton />
+        </div>
+      </header>
+
+      {/* Main */}
+      <main className="max-w-5xl mx-auto px-6 py-10">
+        {/* Section heading */}
+        <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Interview Dashboard</h1>
-            <p className="text-gray-600">Dual-Problem Assessment System</p>
+            <h1 className="text-lg font-semibold text-[#EAECEF]">Your interviews</h1>
+            <p className="text-sm text-[#9AA1AC] mt-0.5">
+              All sessions where you are the interviewer
+            </p>
           </div>
-          {user && (
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg border">
-                <User className="w-4 h-4 text-gray-500" />
-                <span className="text-sm font-medium">{user.firstName || user.email}</span>
-                <Badge variant="secondary">{user.role || 'user'}</Badge>
-              </div>
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={handleSignOut}
-                className="flex items-center gap-2"
-              >
-                <LogOut className="w-4 h-4" />
-                Sign Out
-            </Button>
-          </div>
-          )}
+
+          {/* Placeholder — create flow comes in a later milestone */}
+          <Button
+            disabled
+            className="h-9 bg-[#2F6BFF] hover:bg-[#2F6BFF]/90 text-white text-sm gap-2 disabled:opacity-40 cursor-not-allowed"
+          >
+            <Plus className="w-4 h-4" />
+            New interview
+          </Button>
         </div>
 
-        {/* System Overview Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <Card className="bg-white/70 backdrop-blur-sm border-blue-200">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <Code className="w-6 h-6 text-blue-600" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-gray-900">Core Language</h3>
-                  <p className="text-sm text-gray-600">Programming fundamentals</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Interview list */}
+        {rows.length === 0 ? (
+          <div className="border border-dashed border-[#2A2E37] rounded-xl py-16 flex flex-col items-center gap-3 text-center">
+            <CalendarClock className="w-8 h-8 text-[#2A2E37]" />
+            <p className="text-sm font-medium text-[#9AA1AC]">No interviews yet</p>
+            <p className="text-xs text-[#9AA1AC]/60 max-w-xs">
+              When you create interview sessions they will appear here.
+            </p>
+          </div>
+        ) : (
+          <div className="border border-[#2A2E37] rounded-xl overflow-hidden">
+            {/* Table header */}
+            <div className="grid grid-cols-[1fr_160px_120px] gap-4 px-5 py-3 bg-[#1C1F25] border-b border-[#2A2E37]">
+              <span className="text-[10px] uppercase tracking-widest text-[#9AA1AC] font-medium">
+                Candidate
+              </span>
+              <span className="text-[10px] uppercase tracking-widest text-[#9AA1AC] font-medium">
+                Created
+              </span>
+              <span className="text-[10px] uppercase tracking-widest text-[#9AA1AC] font-medium">
+                Status
+              </span>
+            </div>
 
-          <Card className="bg-white/70 backdrop-blur-sm border-green-200">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                  <Database className="w-6 h-6 text-green-600" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-gray-900">Tech Stack</h3>
-                  <p className="text-sm text-gray-600">Platform & frameworks</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-white/70 backdrop-blur-sm border-purple-200">
-            <CardContent className="p-6">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                  <Target className="w-6 h-6 text-purple-600" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-gray-900">Dual Assessment</h3>
-                  <p className="text-sm text-gray-600">Comprehensive evaluation</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Main Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 bg-white/70 backdrop-blur-sm">
-            <TabsTrigger value="start-interview" className="flex items-center gap-2">
-              <Target className="w-4 h-4" />
-              Start Interview
-            </TabsTrigger>
-            <TabsTrigger value="recent-sessions" className="flex items-center gap-2">
-              <Clock className="w-4 h-4" />
-              Recent Sessions
-            </TabsTrigger>
-            <TabsTrigger value="settings" className="flex items-center gap-2">
-              <Settings className="w-4 h-4" />
-              Settings
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="start-interview" className="space-y-6">
-            <Card className="bg-white/90 backdrop-blur-sm">
-                  <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="w-6 h-6 text-blue-600" />
-                  New Interview Session
-                </CardTitle>
-                    <CardDescription>
-                  Configure assessment parameters and create a new dual-problem interview session
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                <ParameterSelectionInterface />
-                  </CardContent>
-                </Card>
-          </TabsContent>
-
-          <TabsContent value="recent-sessions" className="space-y-6">
-            <Card className="bg-white/90 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Clock className="w-6 h-6 text-green-600" />
-                  Recent Interview Sessions
-                </CardTitle>
-                <CardDescription>
-                  View and manage your recent interview sessions
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8 text-gray-500">
-                  <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p>No recent sessions found</p>
-                  <p className="text-sm">Start a new interview to see sessions here</p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="settings" className="space-y-6">
-            <Card className="bg-white/90 backdrop-blur-sm">
-                <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Settings className="w-6 h-6 text-purple-600" />
-                  System Settings
-                </CardTitle>
-                <CardDescription>
-                  Configure dashboard and interview preferences
-                </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 border rounded-lg">
-                    <div>
-                      <h4 className="font-medium">Assessment Mode</h4>
-                      <p className="text-sm text-gray-600">Current: Dual-Problem System</p>
-                    </div>
-                    <Badge variant="secondary">Active</Badge>
-                      </div>
-                  
-                  <div className="flex items-center justify-between p-4 border rounded-lg">
-                    <div>
-                      <h4 className="font-medium">Session Duration</h4>
-                      <p className="text-sm text-gray-600">Default: 60 minutes</p>
-                    </div>
-                    <Button variant="outline" size="sm">Configure</Button>
-                  </div>
-                  
-                  <div className="flex items-center justify-between p-4 border rounded-lg">
-                    <div>
-                      <h4 className="font-medium">Auto-Save</h4>
-                      <p className="text-sm text-gray-600">Save progress automatically</p>
-                    </div>
-                    <CheckCircle className="w-5 h-5 text-green-600" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-          </TabsContent>
-        </Tabs>
-      </div>
+            {/* Rows */}
+            <ul>
+              {rows.map((interview, idx) => (
+                <li
+                  key={interview.id}
+                  className={[
+                    "grid grid-cols-[1fr_160px_120px] gap-4 px-5 py-3.5 items-center",
+                    idx < rows.length - 1 ? "border-b border-[#2A2E37]" : "",
+                    "hover:bg-[#1C1F25]/60 transition-colors",
+                  ].join(" ")}
+                >
+                  <span className="text-sm text-[#EAECEF] truncate">
+                    {interview.candidate_email ?? (
+                      <span className="text-[#9AA1AC] italic">No candidate yet</span>
+                    )}
+                  </span>
+                  <span className="text-sm text-[#9AA1AC]">
+                    {formatDate(interview.created_at)}
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className={`text-xs w-fit capitalize ${statusStyle(interview.status)}`}
+                  >
+                    {interview.status}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </main>
     </div>
-  )
+  );
 }
