@@ -17,38 +17,47 @@ const LINKS = [
 
 export function PillNav() {
   const [open, setOpen] = React.useState(false);
+  const [hovered, setHovered] = React.useState<string | null>(null);
 
   return (
     <header className="fixed inset-x-0 top-4 z-50 flex justify-center px-4">
       <nav
         aria-label="Primary"
-        className={cn(
-          'flex w-full max-w-3xl items-center justify-between gap-2 rounded-full',
-          'border border-border/80 bg-card/70 px-2 py-2 pl-4 backdrop-blur-xl',
-          'supports-[backdrop-filter]:bg-card/60'
-        )}
+        className="flex items-center gap-1 rounded-full border border-border/70 bg-card/70 py-1.5 pl-3 pr-1.5 backdrop-blur-xl supports-[backdrop-filter]:bg-card/60"
       >
-        <Link href="/" className="shrink-0" aria-label="Overforge home">
+        <Link href="/" className="mr-1 shrink-0" aria-label="Overforge home">
           <Wordmark />
         </Link>
 
-        <div className="hidden items-center gap-1 md:flex">
+        {/* Desktop links with a snappy sliding highlight (Supabase-style) */}
+        <div className="relative hidden items-center md:flex" onMouseLeave={() => setHovered(null)}>
           {LINKS.map((l) => (
             <a
               key={l.href}
               href={l.href}
-              className="rounded-full px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              onMouseEnter={() => setHovered(l.href)}
+              className={cn(
+                'relative rounded-full px-3 py-1.5 text-sm transition-colors duration-150',
+                hovered === l.href ? 'text-foreground' : 'text-muted-foreground'
+              )}
             >
+              {hovered === l.href && (
+                <motion.span
+                  layoutId="nav-highlight"
+                  className="absolute inset-0 -z-10 rounded-full bg-accent"
+                  transition={{ type: 'spring', stiffness: 520, damping: 34, mass: 0.6 }}
+                />
+              )}
               {l.label}
             </a>
           ))}
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 pl-1">
           <ThemeToggle />
           <Link
             href="/auth"
-            className="hidden rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-transform hover:opacity-90 active:scale-[0.98] sm:inline-flex"
+            className="hidden h-9 items-center rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98] sm:inline-flex"
           >
             Sign in
           </Link>
@@ -57,7 +66,7 @@ export function PillNav() {
             aria-label={open ? 'Close menu' : 'Open menu'}
             aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground md:hidden"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground md:hidden"
           >
             {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </button>
@@ -67,11 +76,11 @@ export function PillNav() {
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
+            initial={{ opacity: 0, y: -8, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.98 }}
             transition={{ duration: DUR.fast, ease: EASE }}
-            className="absolute top-16 w-[calc(100%-2rem)] max-w-3xl rounded-2xl border border-border bg-card p-2 backdrop-blur-xl md:hidden"
+            className="absolute top-16 w-[calc(100%-2rem)] max-w-sm origin-top rounded-2xl border border-border bg-card p-2 backdrop-blur-xl md:hidden"
           >
             {LINKS.map((l) => (
               <a

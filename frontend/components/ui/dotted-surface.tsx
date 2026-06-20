@@ -57,9 +57,9 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
 
     const material = new THREE.PointsMaterial({
       color: new THREE.Color(brandAccentCss(container)),
-      size: 7,
+      size: 8,
       transparent: true,
-      opacity: 0.5,
+      opacity: 0.7,
       sizeAttenuation: true,
     });
     matRef.current = material;
