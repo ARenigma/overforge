@@ -78,6 +78,7 @@
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "thememirror": "^2.0.1",
+    "three": "^0.184.0",
     "tw-animate-css": "^1.3.3",
     "vaul": "^0.9.6",
     "zod": "^3.25.49"
@@ -88,6 +89,7 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/three": "^0.184.1",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "autoprefixer": "^10.4.21",
