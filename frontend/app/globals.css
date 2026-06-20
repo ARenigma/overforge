@@ -21,8 +21,8 @@
     --primary: 153 58% 36%;
     --primary-foreground: 0 0% 100%;
 
-    /* Light mode surfaces + text */
-    --background: 0 0% 100%;
+    /* Light mode surfaces + text — off-white page so white cards/borders read */
+    --background: 210 20% 98%;
     --foreground: 224 14% 6%;
     --card: 0 0% 100%;
     --card-foreground: 224 14% 6%;
@@ -37,8 +37,8 @@
     --destructive: 358 70% 52%;
     --destructive-foreground: 0 0% 100%;
     --warning: 36 92% 45%;
-    --border: 240 6% 90%;
-    --input: 240 6% 90%;
+    --border: 220 13% 87%;
+    --input: 220 13% 87%;
     --radius: 0.5rem;
 
     /* Derived from the brand accent — do not give these their own green */
@@ -102,6 +102,23 @@
     --sidebar-accent-foreground: 0 0% 92%;
     --sidebar-border: 225 7% 15%;
   }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
 }
 
 @layer base {

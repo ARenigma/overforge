@@ -3,7 +3,7 @@
 import * as React from 'react';
 import * as THREE from 'three';
 import { useTheme } from '@/components/theme-provider';
-import { brandAccentCss } from '@/lib/brand';
+import { dotColorCss } from '@/lib/brand';
 import { cn } from '@/lib/utils';
 
 type DottedSurfaceProps = Omit<React.ComponentProps<'div'>, 'ref'>;
@@ -56,10 +56,10 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
 
     const material = new THREE.PointsMaterial({
-      color: new THREE.Color(brandAccentCss(container)),
-      size: 8,
+      color: new THREE.Color(dotColorCss(container)),
+      size: 7,
       transparent: true,
-      opacity: 0.7,
+      opacity: 0.32,
       sizeAttenuation: true,
     });
     matRef.current = material;
@@ -114,7 +114,7 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
   // Re-tint to the active theme's --primary without rebuilding the scene.
   React.useEffect(() => {
     if (matRef.current && containerRef.current) {
-      matRef.current.color.set(brandAccentCss(containerRef.current));
+      matRef.current.color.set(dotColorCss(containerRef.current));
     }
   }, [resolvedTheme]);
 
