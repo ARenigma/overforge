@@ -13,6 +13,7 @@ stages:
   - lint
   - test
   - build
+  - deploy
 
 workflow:
   rules:
@@ -57,7 +58,7 @@ gitleaks:
   stage: hygiene
   image:
     name: zricethezav/gitleaks:latest
-    entrypoint: [""]
+    entrypoint: ['']
   variables:
     GIT_DEPTH: 0
   script:
@@ -135,3 +136,22 @@ e2e-playwright:
     when: always
     paths: [frontend/playwright-report]
     expire_in: 7 days
+
+# ─────────────────────── 5. Deploy frontend → Vercel (private repo, no git link) ───
+# Runs on main once VERCEL_TOKEN (masked) is set in CI/CD variables. The Vercel project
+# already holds the NEXT_PUBLIC_* vars, so the remote build embeds them. Vercel never
+# accesses the repo — CI ships the frontend/ dir using the token + project/org IDs.
+deploy-frontend:
+  stage: deploy
+  image: node:20
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $VERCEL_TOKEN'
+  variables:
+    VERCEL_ORG_ID: 'team_3gHsyR3zCdpVWtnv3r0SJ5Vq'
+    VERCEL_PROJECT_ID: 'prj_l87xKr7EHmwof8lhSHquhXlPEL5B'
+  script:
+    - cd frontend
+    - npx --yes vercel@latest deploy --prod --yes --token="$VERCEL_TOKEN"
+  environment:
+    name: production
+    url: https://overforge.vercel.app
