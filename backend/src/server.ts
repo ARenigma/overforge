@@ -5,7 +5,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { interviewsRouter } from './http/interviews';
-import { LANGUAGE_IDS } from './execution/judge0';
+import { SUPPORTED_LANGUAGES } from './execution/piston';
 import { drainOutbox } from './notify/outbox';
 import { makeOutboxStore } from './db/interviews';
 import { createEmailSender } from './notify/resend';
@@ -35,8 +35,7 @@ app.get('/health', (_req, res) => {
 // ─────────────────────── Languages ───────────────────────
 
 app.get('/api/languages', (_req, res) => {
-  const languages = Object.entries(LANGUAGE_IDS).map(([name, id]) => ({ name, id }));
-  res.json({ languages });
+  res.json({ languages: SUPPORTED_LANGUAGES });
 });
 
 // ─────────────────────── Interview routes ───────────────────────

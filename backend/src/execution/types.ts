@@ -1,4 +1,4 @@
-// Contract for the sandboxed code-execution kernel (Service 2 = self-hosted Judge0).
+// Contract for the sandboxed code-execution kernel (Service 2 = self-hosted Piston).
 // The backend calls run-and-capture; no live web preview in M1.
 
 export interface RunRequest {
@@ -15,7 +15,7 @@ export interface RunResult {
   stdout: string;
   stderr: string;
   compileOutput: string;
-  /** Judge0 status, e.g. 'Accepted', 'Runtime Error (NZEC)', 'Compilation Error'. */
+  /** Execution status, e.g. 'Accepted', 'Runtime Error', 'Compilation Error'. */
   status: string;
   exitCode: number | null;
   timeMs: number | null;

@@ -18,7 +18,7 @@ import {
   makeOutboxStore,
   Interview,
 } from '../db/interviews';
-import { createJudge0Kernel } from '../execution/judge0';
+import { createPistonKernel } from '../execution/piston';
 import { RunRequest, RunResult } from '../execution/types';
 import { scoreInterview, CodeRunSummary } from '../scoring/scorer';
 import { drainOutbox } from '../notify/outbox';
@@ -33,13 +33,10 @@ export function getOracle(): Oracle {
   return new DeterministicOracle();
 }
 
-// ─────────────────────── Judge0 kernel factory ───────────────────────
+// ─────────────────────── Execution kernel factory (Piston) ───────────────────────
 
-function getJudge0Kernel() {
-  return createJudge0Kernel({
-    baseUrl: process.env.JUDGE0_URL ?? '',
-    authToken: process.env.JUDGE0_AUTH_TOKEN,
-  });
+function getExecutionKernel() {
+  return createPistonKernel({ baseUrl: process.env.PISTON_URL ?? '' });
 }
 
 // ─────────────────────── Token TTL ───────────────────────
@@ -234,7 +231,7 @@ export async function recordRun(
 ): Promise<RunResult> {
   const interview = requireInterview(await getById(interviewId), interviewId);
 
-  const kernel = getJudge0Kernel();
+  const kernel = getExecutionKernel();
   const result = await kernel.run(req);
 
   await appendCodeRun(interviewId, result);
