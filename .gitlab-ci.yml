@@ -168,7 +168,7 @@ deploy-backend:
   before_script:
     - apk add --no-cache openssh-client rsync curl
     - mkdir -p ~/.ssh && chmod 700 ~/.ssh
-    - cp "$BEEF_SSH_KEY" ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+    - echo "$BEEF_SSH_KEY" | base64 -d > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
     - printf 'Host beef\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/id_ed25519\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$BEEF_HOST" "$BEEF_USER" > ~/.ssh/config
   script:
     - rsync -az --delete --exclude node_modules --exclude '.env*' backend/ beef:overforge/backend/
