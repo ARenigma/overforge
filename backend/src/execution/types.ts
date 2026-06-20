@@ -1,4 +1,4 @@
-// Contract for the sandboxed code-execution kernel (Service 2 = self-hosted Piston).
+// Contract for the sandboxed code-execution kernel (Docker-per-run, ARM-native).
 // The backend calls run-and-capture; no live web preview in M1.
 
 export interface RunRequest {

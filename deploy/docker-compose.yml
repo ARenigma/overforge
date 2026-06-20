@@ -1,7 +1,10 @@
 # Overforge backend stack on the Oracle VPS (beef, ARM64).
 #   caddy   — public TLS reverse proxy (auto-cert via sslip.io)
 #   backend — Core API & Orchestration (the TS service)
-#   piston  — sandboxed code execution kernel (Service 2)
+#
+# Code execution is Docker-per-run: the backend spawns ephemeral, locked-down
+# containers on the HOST daemon via the mounted socket (see backend/src/execution/docker.ts).
+# No separate execution service. Language images are pre-pulled by deploy/pull-runtimes.sh.
 #
 # Runtime secrets live in ./backend.env on the host (NOT in git). The backend image
 # comes from the GitLab registry in CI ($BACKEND_IMAGE); for a manual/first deploy
@@ -32,24 +35,16 @@ services:
     environment:
       NODE_ENV: production
       PORT: '5001'
-      PISTON_URL: http://piston:2000
     expose:
       - '5001'
-    depends_on:
-      - piston
-
-  piston:
-    image: ghcr.io/engineer-man/piston:latest
-    restart: unless-stopped
-    privileged: true # piston's sandbox needs cgroup/namespace privileges
-    tmpfs:
-      - /tmp:exec
+    # Docker-out-of-Docker: the (trusted) backend drives the host daemon to run
+    # candidate code in jailed sub-containers. group_add 111 = host 'docker' gid,
+    # letting the non-root 'node' user read the 660 root:docker socket.
+    group_add:
+      - '111'
     volumes:
-      - piston_packages:/piston/packages
-    ports:
-      - '127.0.0.1:2000:2000' # localhost only — for the host-side language provisioner; backend reaches it via the compose network
+      - /var/run/docker.sock:/var/run/docker.sock
 
 volumes:
   caddy_data: {}
   caddy_config: {}
-  piston_packages: {}

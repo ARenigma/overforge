@@ -5,7 +5,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { interviewsRouter } from './http/interviews';
-import { SUPPORTED_LANGUAGES } from './execution/piston';
+import { SUPPORTED_LANGUAGES } from './execution/docker';
 import { drainOutbox } from './notify/outbox';
 import { makeOutboxStore } from './db/interviews';
 import { createEmailSender } from './notify/resend';
@@ -22,7 +22,7 @@ app.use(
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
-  }),
+  })
 );
 app.use(express.json({ limit: '2mb' }));
 

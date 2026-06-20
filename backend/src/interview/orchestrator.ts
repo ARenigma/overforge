@@ -18,7 +18,7 @@ import {
   makeOutboxStore,
   Interview,
 } from '../db/interviews';
-import { createPistonKernel } from '../execution/piston';
+import { createDockerKernel } from '../execution/docker';
 import { RunRequest, RunResult } from '../execution/types';
 import { scoreInterview, CodeRunSummary } from '../scoring/scorer';
 import { drainOutbox } from '../notify/outbox';
@@ -33,10 +33,10 @@ export function getOracle(): Oracle {
   return new DeterministicOracle();
 }
 
-// ─────────────────────── Execution kernel factory (Piston) ───────────────────────
+// ─────────────────────── Execution kernel factory (Docker-per-run) ───────────────────────
 
 function getExecutionKernel() {
-  return createPistonKernel({ baseUrl: process.env.PISTON_URL ?? '' });
+  return createDockerKernel();
 }
 
 // ─────────────────────── Token TTL ───────────────────────
@@ -61,7 +61,7 @@ async function persistTransition(
   newCtx: InterviewContext,
   effect: Effect,
   utterance: Utterance | null,
-  candidateAnswer?: string,
+  candidateAnswer?: string
 ): Promise<void> {
   const transcript: TranscriptTurn[] = interview.transcript ?? [];
 
@@ -86,7 +86,10 @@ async function persistTransition(
   });
 
   if (utterance && utterance.text) {
-    await appendEvent(interview.id, 'utterance', { text: utterance.text, expects: utterance.expects });
+    await appendEvent(interview.id, 'utterance', {
+      text: utterance.text,
+      expects: utterance.expects,
+    });
   }
 }
 
@@ -128,7 +131,7 @@ export interface BeginResult {
 
 export async function begin(
   interviewId: string,
-  opts: { tncAccepted: boolean },
+  opts: { tncAccepted: boolean }
 ): Promise<BeginResult> {
   if (!opts.tncAccepted) {
     throw Object.assign(new Error('T&C must be accepted to begin'), { status: 400 });
@@ -137,7 +140,9 @@ export async function begin(
   const interview = requireInterview(await getById(interviewId), interviewId);
 
   if (interview.status !== 'invited') {
-    throw Object.assign(new Error('Interview already started or not in invited state'), { status: 409 });
+    throw Object.assign(new Error('Interview already started or not in invited state'), {
+      status: 409,
+    });
   }
 
   const ctx = interview.fsm_state as InterviewContext;
@@ -163,10 +168,7 @@ export interface AnswerResult {
   state: InterviewContext;
 }
 
-export async function submitAnswer(
-  interviewId: string,
-  answer: string,
-): Promise<AnswerResult> {
+export async function submitAnswer(interviewId: string, answer: string): Promise<AnswerResult> {
   const interview = requireInterview(await getById(interviewId), interviewId);
 
   if (interview.status !== 'in_progress') {
@@ -225,10 +227,7 @@ export async function submitAnswer(
   return { utterance, phase: newCtx.phase, state: newCtx };
 }
 
-export async function recordRun(
-  interviewId: string,
-  req: RunRequest,
-): Promise<RunResult> {
+export async function recordRun(interviewId: string, req: RunRequest): Promise<RunResult> {
   const interview = requireInterview(await getById(interviewId), interviewId);
 
   const kernel = getExecutionKernel();
@@ -279,7 +278,7 @@ export async function finishAndScore(interviewId: string): Promise<void> {
       codeRuns,
       finalCode: interview.code_snapshot || undefined,
     },
-    minimaxClient,
+    minimaxClient
   );
 
   await updateInterview(interviewId, {
