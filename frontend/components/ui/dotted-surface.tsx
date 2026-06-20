@@ -122,7 +122,7 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
     <div
       ref={containerRef}
       aria-hidden="true"
-      className={cn('pointer-events-none fixed inset-0 -z-10', className)}
+      className={cn('pointer-events-none absolute inset-0', className)}
       {...props}
     />
   );
