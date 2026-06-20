@@ -1,41 +1,35 @@
-import type React from "react"
-import type { Metadata } from "next"
-import { Inter } from "next/font/google"
-import "./globals.css"
-import { ThemeProvider } from "@/components/theme-provider"
-import { Toaster } from "@/components/ui/toaster"
-
-// Configure Inter font with proper fallbacks
-const inter = Inter({
-  subsets: ["latin"],
-  display: 'swap',
-  fallback: ['system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
-  variable: '--font-inter'
-})
+import type React from 'react';
+import type { Metadata } from 'next';
+import { GeistSans } from 'geist/font/sans';
+import { GeistMono } from 'geist/font/mono';
+import './globals.css';
+import { ThemeProvider } from '@/components/theme-provider';
+import { Toaster } from '@/components/ui/toaster';
 
 export const metadata: Metadata = {
-  title: "Overforge - Live Technical Interviews",
-  description: "Advanced coding interview platform with real-time collaboration",
-}
+  title: 'Overforge — Live technical interviews',
+  description: 'AI-led oral and coding interviews in a sandboxed IDE, with deterministic scoring.',
+};
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.variable} font-sans antialiased`}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${GeistSans.variable} ${GeistMono.variable}`}
+    >
+      <body className="font-sans antialiased">
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
+          defaultTheme="dark"
           enableSystem
           disableTransitionOnChange
+          storageKey="overforge-theme"
         >
           {children}
           <Toaster />
         </ThemeProvider>
       </body>
     </html>
-  )
+  );
 }
