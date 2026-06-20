@@ -1,0 +1,55 @@
+# Overforge backend stack on the Oracle VPS (beef, ARM64).
+#   caddy   — public TLS reverse proxy (auto-cert via sslip.io)
+#   backend — Core API & Orchestration (the TS service)
+#   piston  — sandboxed code execution kernel (Service 2)
+#
+# Runtime secrets live in ./backend.env on the host (NOT in git). The backend image
+# comes from the GitLab registry in CI ($BACKEND_IMAGE); for a manual/first deploy
+# it builds from ../backend.
+name: overforge
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+
+  backend:
+    image: ${BACKEND_IMAGE:-overforge-backend:latest}
+    build:
+      context: ../backend
+    restart: unless-stopped
+    env_file:
+      - ./backend.env
+    environment:
+      NODE_ENV: production
+      PORT: '5001'
+      PISTON_URL: http://piston:2000
+    expose:
+      - '5001'
+    depends_on:
+      - piston
+
+  piston:
+    image: ghcr.io/engineer-man/piston:latest
+    restart: unless-stopped
+    privileged: true # piston's sandbox needs cgroup/namespace privileges
+    tmpfs:
+      - /tmp:exec
+    volumes:
+      - piston_packages:/piston/packages
+    ports:
+      - '127.0.0.1:2000:2000' # localhost only — for the host-side language provisioner; backend reaches it via the compose network
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}
+  piston_packages: {}

@@ -1,0 +1,7 @@
+# Public API endpoint. sslip.io maps <ip>.sslip.io → the IP, so Caddy can fetch a
+# real Let's Encrypt cert automatically. Swap this hostname for a real domain later
+# (point its A record at the VPS and change this one line).
+140.245.14.50.sslip.io {
+	encode zstd gzip
+	reverse_proxy backend:5001
+}
