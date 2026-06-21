@@ -8,7 +8,7 @@ import { fadeUp, staggerContainer } from '@/lib/motion';
 
 function PythonIcon() {
   return (
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+    <svg width="44" height="44" viewBox="0 0 28 28" fill="none" aria-hidden="true">
       <path
         d="M14 2C10.13 2 7.5 3.84 7.5 6.5V9h6.5v1H5.5C3.02 10 1 12.02 1 14.5s2.02 4.5 4.5 4.5H7v2.5C7 24.16 9.63 26 13.5 26s6.5-1.84 6.5-4.5V19h-6.5v-1h8.5C24.02 18 26 15.98 26 13.5S24.02 9 21.5 9H20V6.5C20 3.84 17.37 2 14 2z"
         className="fill-[#3776AB]"
@@ -27,7 +27,7 @@ function PythonIcon() {
 
 function JavaScriptIcon() {
   return (
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+    <svg width="44" height="44" viewBox="0 0 28 28" fill="none" aria-hidden="true">
       <rect width="28" height="28" rx="3" className="fill-[#F7DF1E]" />
       <path
         d="M8.5 20.5c.6 1 1.4 1.7 2.8 1.7 1.2 0 2-.6 2-1.4 0-1-.8-1.3-2.1-1.9l-.7-.3c-2.1-.9-3.5-2-3.5-4.4 0-2.2 1.7-3.8 4.3-3.8 1.9 0 3.2.66 4.2 2.4l-2.3 1.5c-.5-.9-1-.97-1.9-.97-.83 0-1.37.52-1.37 1.2 0 .84.53 1.18 1.75 1.7l.7.3c2.47 1.06 3.9 2.14 3.9 4.57 0 2.62-2.06 4.02-4.82 4.02-2.7 0-4.44-1.29-5.3-2.97l2.37-1.37z"
@@ -43,7 +43,7 @@ function JavaScriptIcon() {
 
 function GoIcon() {
   return (
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+    <svg width="44" height="44" viewBox="0 0 28 28" fill="none" aria-hidden="true">
       <path
         d="M3 11.5c-.08 0-.1-.04-.06-.1l.42-.54c.04-.06.13-.1.21-.1h14.6c.08 0 .1.05.06.12l-.34.52c-.04.07-.13.12-.2.12L3 11.5z"
         fill="#00ACD7"
@@ -70,7 +70,7 @@ function GoIcon() {
 
 function RustIcon() {
   return (
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+    <svg width="44" height="44" viewBox="0 0 28 28" fill="none" aria-hidden="true">
       <path
         d="M14 2a12 12 0 1 0 0 24A12 12 0 0 0 14 2zm0 1.5a10.5 10.5 0 1 1 0 21 10.5 10.5 0 0 1 0-21z"
         className="fill-foreground"
@@ -90,7 +90,7 @@ function RustIcon() {
 
 function CppIcon() {
   return (
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+    <svg width="44" height="44" viewBox="0 0 28 28" fill="none" aria-hidden="true">
       <path d="M14 2L3.46 7.5v13L14 26l10.54-5.5v-13L14 2z" fill="#00599C" />
       <path d="M14 2L3.46 7.5v13L14 26V2z" fill="#004482" />
       <path
@@ -107,7 +107,7 @@ function CppIcon() {
 
 function JavaIcon() {
   return (
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+    <svg width="44" height="44" viewBox="0 0 28 28" fill="none" aria-hidden="true">
       <path
         d="M10.5 20.3s-.96.56.68.75c1.98.22 3 .19 5.2-.22 0 0 .58.36 1.38.67-4.9 2.1-11.1-.12-7.26-1.2z"
         fill="#5382A1"
@@ -146,7 +146,7 @@ function JavaIcon() {
 
 function RubyIcon() {
   return (
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+    <svg width="44" height="44" viewBox="0 0 28 28" fill="none" aria-hidden="true">
       <path d="M5.5 19.5l2-10 8-6 8 2-2 10-8 7-8-3z" fill="#CC342D" />
       <path d="M5.5 19.5l4.5-4.5L8 24l-2.5-4.5z" fill="#A31D1D" />
       <path d="M8 24l2-8.5 8.5-1-2.5 9-8 .5z" fill="#C73A2E" />
@@ -160,7 +160,7 @@ function RubyIcon() {
 
 function TypeScriptIcon() {
   return (
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+    <svg width="44" height="44" viewBox="0 0 28 28" fill="none" aria-hidden="true">
       <rect width="28" height="28" rx="3" fill="#3178C6" />
       <path d="M15.5 14.75H18v-2.25h-7v2.25h2.5V22H15.5v-7.25z" fill="white" />
       <path
@@ -194,7 +194,7 @@ export function LanguageMatrix() {
         initial="hidden"
         whileInView="show"
         viewport={{ once: true, margin: '-80px' }}
-        className="mt-12 grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8"
+        className="mt-12 grid grid-cols-2 gap-6 sm:grid-cols-4 lg:grid-cols-8"
       >
         {LANGUAGES.map((lang) => {
           const { Icon } = lang;
@@ -202,9 +202,9 @@ export function LanguageMatrix() {
             <motion.div
               key={lang.name}
               variants={fadeUp}
-              className="group flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-4 py-6 transition-all duration-200 hover:border-primary/50 hover:-translate-y-1 hover:bg-card/80 cursor-default select-none"
+              className="group flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-4 py-8 transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30 cursor-default select-none"
             >
-              <div className="flex h-10 w-10 items-center justify-center">
+              <div className="flex h-11 w-11 items-center justify-center">
                 <Icon />
               </div>
               <div className="flex flex-col items-center gap-0.5">

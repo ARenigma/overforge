@@ -124,7 +124,7 @@ function Card({
     <motion.div
       variants={fadeUp}
       className={cn(
-        'group flex flex-col rounded-xl border border-border bg-card p-5 transition-colors hover:border-primary/30',
+        'group flex flex-col rounded-xl border border-border bg-card p-6 transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30',
         className
       )}
     >
@@ -154,7 +154,7 @@ export function Bento() {
         viewport={{ once: true, margin: '-80px' }}
         className="mt-12"
       >
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Card
             icon={Mic}
             title="A spoken oral round"
@@ -170,7 +170,7 @@ export function Bento() {
             visual={<Scorecard />}
           />
         </div>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <Card
             icon={Code2}
             title="Sandboxed IDE"

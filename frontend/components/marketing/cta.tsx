@@ -4,7 +4,7 @@ import { Section } from './section';
 export function CTA() {
   return (
     <Section>
-      <div className="overflow-hidden rounded-2xl border border-border bg-card px-8 py-24 text-center sm:py-32">
+      <div className="overflow-hidden rounded-2xl border border-border bg-card px-8 py-24 text-center sm:py-28">
         <h2 className="text-balance text-3xl font-semibold tracking-tight sm:text-4xl">
           <span className="text-foreground">Start screening</span>{' '}
           <span className="text-muted-foreground">in minutes.</span>

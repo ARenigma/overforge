@@ -62,7 +62,7 @@ export function StartInSeconds() {
             initial="hidden"
             whileInView="show"
             viewport={{ once: true, margin: '-80px' }}
-            className="mt-10 space-y-6"
+            className="mt-12 space-y-6"
           >
             {STEPS.map((s) => (
               <motion.div key={s.n} variants={fadeUp} className="border-t border-border pt-5">

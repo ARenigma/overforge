@@ -6,7 +6,7 @@ import { fadeUp } from '@/lib/motion';
 /** Static IDE mock — token-driven, non-interactive. Intentionally wider than standard Section. */
 export function EditorShowcase() {
   return (
-    <section className="mx-auto w-full max-w-[1280px] px-6 py-24 sm:py-32" id="editor">
+    <section className="mx-auto w-full max-w-[1280px] px-6 py-24 sm:py-28" id="editor">
       <div className="text-center">
         <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
           Stay in flow. <span className="text-muted-foreground">A real IDE, sandboxed.</span>

@@ -11,7 +11,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { cn } from '@/lib/utils';
 import { fadeUp, staggerContainer } from '@/lib/motion';
-import { Github, Gitlab, Linkedin, Mail, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Mail, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 type AuthMode = 'signin' | 'signup' | 'magic';
 
@@ -20,32 +20,63 @@ const OAUTH_PROVIDERS = [
     id: 'google' as const,
     label: 'Google',
     icon: (
-      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
         <path
-          fill="currentColor"
+          fill="#4285F4"
           d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
         />
         <path
-          fill="currentColor"
+          fill="#34A853"
           d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
         />
         <path
-          fill="currentColor"
+          fill="#FBBC05"
           d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
         />
         <path
-          fill="currentColor"
+          fill="#EA4335"
           d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
         />
       </svg>
     ),
   },
-  { id: 'github' as const, label: 'GitHub', icon: <Github className="w-4 h-4 shrink-0" /> },
-  { id: 'gitlab' as const, label: 'GitLab', icon: <Gitlab className="w-4 h-4 shrink-0" /> },
+  {
+    id: 'github' as const,
+    label: 'GitHub',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
+        <path
+          fill="currentColor"
+          d="M12 2C6.477 2 2 6.484 2 12.021c0 4.428 2.865 8.184 6.839 9.504.5.092.682-.217.682-.482 0-.237-.009-.868-.013-1.703-2.782.605-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482C19.138 20.2 22 16.447 22 12.021 22 6.484 17.523 2 12 2z"
+        />
+      </svg>
+    ),
+  },
+  {
+    id: 'gitlab' as const,
+    label: 'GitLab',
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
+        <path fill="#E24329" d="M12 21.636 7.29 7.137h9.42z" />
+        <path fill="#FC6D26" d="M12 21.636 2.31 7.137h4.98z" />
+        <path fill="#FCA326" d="M7.29 7.137 5.42 1.5a.432.432 0 0 0-.822 0L2.31 7.137z" />
+        <path fill="#FC6D26" d="M12 21.636 21.69 7.137h-4.98z" />
+        <path fill="#FCA326" d="M16.71 7.137 18.58 1.5a.432.432 0 0 1 .822 0l2.288 5.637z" />
+      </svg>
+    ),
+  },
   {
     id: 'linkedin_oidc' as const,
     label: 'LinkedIn',
-    icon: <Linkedin className="w-4 h-4 shrink-0" />,
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
+        <rect width="24" height="24" rx="3" fill="#0A66C2" />
+        <path
+          fill="#ffffff"
+          d="M7.75 9.5h-2.5v8.5h2.5V9.5zm-1.25-4a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm10.25 4c-1.38 0-2.25.75-2.5 1.25V9.5h-2.5v8.5h2.5v-4.5c0-1.1.9-2 2-2s2 .9 2 2V18h2.5v-5c0-2.21-1.57-3.5-3.5-3.5z"
+        />
+      </svg>
+    ),
   },
 ] as const;
 
@@ -159,7 +190,7 @@ export default function AuthPage() {
             aria-label="Authentication method"
             className="flex rounded-lg bg-muted p-1 mb-6 gap-1"
           >
-            {(['signin', 'signup', 'magic'] as const).map((m) => (
+            {(['signin', 'magic'] as const).map((m) => (
               <button
                 key={m}
                 role="tab"

@@ -2,16 +2,16 @@
 
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, ChevronDown } from 'lucide-react';
 import { fadeUp, staggerContainer } from '@/lib/motion';
 import { HeroBackdrop } from '@/components/marketing/hero-backdrop';
 
 export function Hero() {
   return (
-    <section className="relative isolate flex min-h-[92vh] flex-col items-center justify-center overflow-hidden px-6 py-32 text-center">
+    <section className="relative isolate flex h-screen min-h-screen flex-col items-center justify-center overflow-hidden px-6 text-center">
       <HeroBackdrop />
       {/* Fade the dots out at the bottom for a clean break into the next section */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-64 bg-gradient-to-b from-transparent to-background" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-b from-transparent to-background" />
 
       <motion.div
         variants={staggerContainer}
@@ -50,6 +50,17 @@ export function Hero() {
             See how it works
           </a>
         </motion.div>
+      </motion.div>
+
+      {/* Scroll cue */}
+      <motion.div
+        initial={{ opacity: 0, y: -4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 1.4, duration: 0.6 }}
+        className="absolute bottom-8 left-1/2 z-10 -translate-x-1/2"
+        aria-hidden="true"
+      >
+        <ChevronDown className="h-5 w-5 animate-bounce text-muted-foreground/40" />
       </motion.div>
     </section>
   );

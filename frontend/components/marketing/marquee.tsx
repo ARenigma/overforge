@@ -1,16 +1,16 @@
 'use client';
 
-// Placeholder testimonials in ReviewsMarquee — replace with real quotes before production.
+// Placeholder brand wordmarks — replace with real customer logos before production.
 
-const TECH = [
-  'Supabase',
-  'Docker',
-  'Vercel',
-  'Postgres',
-  'Resend',
-  'Next.js',
-  'MiniMax',
-  'GitHub',
+const BRANDS = [
+  'Northwind',
+  'Globex',
+  'Acme',
+  'Initech',
+  'Umbra',
+  'Hooli',
+  'Vertex',
+  'Lumen',
 ] as const;
 
 interface Review {
@@ -65,20 +65,20 @@ const REVIEWS: Review[] = [
   },
 ];
 
-/** Infinite CSS marquee strip for the "Built on" tech stack. */
+/** Infinite CSS marquee strip — "Trusted by high-growth teams". */
 export function Marquee() {
   return (
     <div className="border-y border-border">
       <div className="py-6">
-        <p className="mb-4 text-center text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-          Built on infrastructure you already trust
+        <p className="mb-5 text-center text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground/60">
+          Trusted by high-growth teams
         </p>
         <div className="overflow-hidden">
           <div className="flex w-max animate-marquee gap-16 whitespace-nowrap" aria-hidden="true">
-            {[...TECH, ...TECH].map((name, i) => (
+            {[...BRANDS, ...BRANDS].map((name, i) => (
               <span
                 key={i}
-                className="font-mono text-sm font-medium uppercase tracking-widest text-muted-foreground/60 transition-colors hover:text-muted-foreground"
+                className="font-mono text-sm font-semibold uppercase tracking-widest text-muted-foreground/40 transition-colors duration-200 hover:text-muted-foreground/70"
               >
                 {name}
               </span>
@@ -96,12 +96,15 @@ export function ReviewsMarquee() {
   return (
     <div className="overflow-hidden py-2">
       <div
-        className="flex w-max animate-marquee gap-4"
+        className="flex w-max animate-marquee gap-6"
         style={{ animationDuration: '40s' }}
         aria-hidden="true"
       >
         {doubled.map((r, i) => (
-          <div key={i} className="w-[300px] shrink-0 rounded-xl border border-border bg-card p-4">
+          <div
+            key={i}
+            className="w-[320px] shrink-0 rounded-xl border border-border bg-card p-6 transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30"
+          >
             <div className="flex items-center gap-3">
               <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-muted text-xs font-medium text-foreground">
                 {r.initials}
