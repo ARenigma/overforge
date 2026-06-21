@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { createClient } from '@/lib/supabase/client';
 import { createInterview } from '@/lib/api';
-import { Plus, Copy, Check, Loader2, ExternalLink } from 'lucide-react';
+import { Plus, Copy, Check, ExternalLink } from 'lucide-react';
 
 export function NewInterviewDialog() {
   const router = useRouter();
@@ -207,10 +207,11 @@ export function NewInterviewDialog() {
               </Button>
               <Button
                 type="submit"
-                disabled={submitting || !candidateEmail.trim()}
+                loading={submitting}
+                disabled={!candidateEmail.trim()}
                 className="flex-1 h-9 bg-primary text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98] text-sm disabled:opacity-50"
               >
-                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create & get link'}
+                Create &amp; get link
               </Button>
             </div>
           </form>

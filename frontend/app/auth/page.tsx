@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,7 +11,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { Reveal } from '@/components/marketing/reveal';
 import { cn } from '@/lib/utils';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 type AuthMode = 'signin' | 'signup';
 
@@ -183,8 +184,15 @@ export default function AuthPage() {
   const { title, subtitle } = HEADINGS[mode];
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
-      <Reveal className="w-full max-w-sm">
+    <div className="relative min-h-screen bg-background flex flex-col items-center justify-center px-4">
+      <Link
+        href="/"
+        className="absolute left-4 top-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back
+      </Link>
+      <Reveal className="w-full max-w-md">
         {/* Wordmark */}
         <div className="mb-8 flex justify-center">
           <Wordmark />
@@ -329,22 +337,16 @@ export default function AuthPage() {
             {/* Primary CTA */}
             <Button
               type="submit"
-              disabled={isAnyLoading}
+              loading={loading}
+              disabled={oauthLoading !== null}
               className={cn(
                 'w-full h-11 bg-primary text-primary-foreground font-medium',
                 'transition-opacity hover:opacity-90 active:scale-[0.98]',
                 'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card',
-                'disabled:opacity-60 disabled:cursor-not-allowed',
-                loading && 'animate-pulse'
+                'disabled:opacity-60 disabled:cursor-not-allowed'
               )}
             >
-              {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" aria-label="Loading" />
-              ) : mode === 'signin' ? (
-                'Sign In'
-              ) : (
-                'Create Account'
-              )}
+              {mode === 'signin' ? 'Sign In' : 'Create Account'}
             </Button>
           </form>
         </div>

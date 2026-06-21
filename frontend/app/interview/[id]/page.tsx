@@ -22,7 +22,7 @@ import {
   type InterviewPhase,
   type RunResult,
 } from '@/lib/api';
-import { AlertCircle, Play, Send, Loader2, CheckCircle } from 'lucide-react';
+import { AlertCircle, ArrowUp, CheckCircle, Clock, Loader2, Play } from 'lucide-react';
 import { Wordmark } from '@/components/marketing/wordmark';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -55,6 +55,12 @@ const PHASE_LABELS: Record<InterviewPhase, string> = {
 };
 
 const PHASE_ORDER: InterviewPhase[] = ['greeting', 'oral', 'handoff', 'coding', 'wrap_up', 'done'];
+
+function formatTime(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -124,6 +130,10 @@ export default function InterviewPage() {
   // Responsive: stack the split-pane vertically on small screens
   const [isMobile, setIsMobile] = useState(false);
 
+  // Elapsed session timer (count-up) + live editor cursor position
+  const [elapsed, setElapsed] = useState(0);
+  const [cursor, setCursor] = useState({ line: 1, col: 1 });
+
   // Whether /finish has been called (idempotent guard)
   const finishCalledRef = useRef(false);
 
@@ -143,6 +153,13 @@ export default function InterviewPage() {
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
   }, []);
+
+  // Count-up session timer — runs once the interview is underway
+  useEffect(() => {
+    if (stage !== 'interview') return;
+    const id = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [stage]);
 
   // Auto-call /finish when phase reaches done
   useEffect(() => {
@@ -279,7 +296,13 @@ export default function InterviewPage() {
       {/* Minimal top strip */}
       <header className="h-11 border-b border-border bg-card flex items-center justify-between px-4 shrink-0">
         <Wordmark className="scale-90 origin-left" />
-        <PhaseBadge phase={phase} />
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1.5 font-mono text-xs tabular-nums text-muted-foreground">
+            <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+            {formatTime(elapsed)}
+          </span>
+          <PhaseBadge phase={phase} />
+        </div>
       </header>
 
       {/* Phase progress — fills as the interview advances greeting → done */}
@@ -312,7 +335,7 @@ export default function InterviewPage() {
           <ResizablePanel defaultSize={55} minSize={30}>
             <div className="h-full flex flex-col overflow-hidden bg-background">
               {/* Code toolbar — language selector + Run pill */}
-              <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-card shrink-0">
+              <div className="flex h-10 items-center gap-2 px-3 border-b border-border bg-card shrink-0">
                 <Select value={language} onValueChange={(v) => setLanguage(v as Language)}>
                   <SelectTrigger className="h-7 w-36 text-xs bg-muted border-border text-foreground focus:ring-ring font-mono">
                     <SelectValue />
@@ -333,15 +356,11 @@ export default function InterviewPage() {
                 <Button
                   size="sm"
                   onClick={handleRunCode}
-                  disabled={running}
+                  loading={running}
                   className="h-7 px-4 text-xs rounded-md bg-primary/10 border border-primary/40 text-primary hover:bg-primary/20 transition-colors focus-visible:ring-ring gap-1.5 font-mono"
                   variant="outline"
                 >
-                  {running ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                  )}
+                  {!running && <Play className="w-3.5 h-3.5 fill-current" />}
                   RUN
                 </Button>
               </div>
@@ -351,6 +370,7 @@ export default function InterviewPage() {
                 <EnhancedCodeMirrorEditor
                   value={code}
                   onCodeChangeAction={setCode}
+                  onCursorPositionChangeAction={(line, col) => setCursor({ line, col })}
                   language={language}
                   onExecuteAction={handleRunCode}
                   isExecuting={running}
@@ -410,6 +430,18 @@ export default function InterviewPage() {
                   )
                 )}
               </div>
+
+              {/* Status bar — Replit-style */}
+              <div className="flex h-6 shrink-0 items-center gap-3 border-t border-border bg-card px-3 font-mono text-[10px] text-muted-foreground">
+                <span>
+                  Ln {cursor.line}, Col {cursor.col}
+                </span>
+                <span className="text-muted-foreground/40">·</span>
+                <span className="capitalize">{language}</span>
+                <span className="text-muted-foreground/40">·</span>
+                <span>Spaces: 4</span>
+                <span className="ml-auto">UTF-8</span>
+              </div>
             </div>
           </ResizablePanel>
 
@@ -420,9 +452,9 @@ export default function InterviewPage() {
           <ResizablePanel defaultSize={45} minSize={25}>
             <div className="h-full flex flex-col bg-card overflow-hidden">
               {/* Pane label */}
-              <div className="shrink-0 px-4 py-2 border-b border-border">
+              <div className="flex h-10 shrink-0 items-center border-b border-border px-4">
                 <span className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground">
-                  INTERVIEWER
+                  Interviewer
                 </span>
               </div>
 
@@ -446,7 +478,7 @@ export default function InterviewPage() {
                       >
                         {msg.role === 'ai' ? 'Interviewer' : 'You'}
                       </p>
-                      <p className="whitespace-pre-wrap">{msg.text}</p>
+                      <p className="whitespace-pre-wrap font-medium">{msg.text}</p>
                     </div>
                   </div>
                 ))}
@@ -463,32 +495,42 @@ export default function InterviewPage() {
                 <div ref={transcriptEndRef} />
               </div>
 
-              {/* Answer input area */}
+              {/* Answer input — Assistant Chat style: expanding textarea + inset send */}
               <div className="shrink-0 border-t border-border p-3">
-                <div className="flex gap-2">
+                <div className="relative border border-border bg-background transition-colors focus-within:border-primary/60 focus-within:ring-1 focus-within:ring-ring">
                   <textarea
                     value={answer}
-                    onChange={(e) => setAnswer(e.target.value)}
+                    onChange={(e) => {
+                      setAnswer(e.target.value);
+                      e.target.style.height = 'auto';
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+                    }}
                     onKeyDown={handleAnswerKeyDown}
                     disabled={aiThinking}
-                    placeholder="Type your answer… (Ctrl+Enter to send)"
-                    rows={3}
-                    className="flex-1 resize-none rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 text-sm px-3 py-2 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-ring disabled:opacity-50 transition-colors font-sans"
+                    placeholder="Type your answer…"
+                    rows={1}
+                    className="block max-h-40 min-h-[2.75rem] w-full resize-none bg-transparent px-3 py-3 pr-12 text-sm font-medium text-foreground placeholder:font-normal placeholder:text-muted-foreground/50 focus:outline-none disabled:opacity-50"
                   />
-                  <Button
+                  <button
+                    type="button"
                     onClick={handleSendAnswer}
                     disabled={aiThinking || !answer.trim()}
-                    className="self-end h-9 w-9 p-0 rounded-md bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98] transition-opacity focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:opacity-50"
-                    size="icon"
                     aria-label="Send answer"
+                    className="absolute bottom-2 right-2 grid h-7 w-7 place-items-center bg-primary text-primary-foreground transition-opacity hover:opacity-90 active:scale-95 disabled:opacity-40"
                   >
                     {aiThinking ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
-                      <Send className="w-4 h-4" />
+                      <ArrowUp className="h-3.5 w-3.5" />
                     )}
-                  </Button>
+                  </button>
                 </div>
+                <p className="mt-1.5 px-0.5 text-[10px] text-muted-foreground/60">
+                  <kbd className="border border-border bg-muted px-1 py-px font-mono text-[9px] text-muted-foreground">
+                    ⌘ ↵
+                  </kbd>{' '}
+                  to send
+                </p>
               </div>
             </div>
           </ResizablePanel>

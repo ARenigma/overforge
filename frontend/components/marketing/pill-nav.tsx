@@ -19,7 +19,7 @@ export function PillNav() {
     <header className="fixed inset-x-0 top-4 z-50 flex justify-center px-4">
       {/* ThemeToggle pinned to viewport's right edge, vertically centered with the nav */}
       <div className="pointer-events-none absolute inset-x-4 top-0 flex h-full items-center justify-end">
-        <div className="pointer-events-auto">
+        <div className="pointer-events-auto flex items-center border border-border/70 bg-card/70 p-1.5 backdrop-blur-xl supports-[backdrop-filter]:bg-card/60">
           <ThemeToggle />
         </div>
       </div>
