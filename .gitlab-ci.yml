@@ -118,12 +118,17 @@ build-frontend:
     when: on_success
 
 # ─────────────────────── Optional: E2E (manual — protects the 400-min budget) ───
+# Frontend Playwright suite. Playwright boots its OWN prod server via
+# PLAYWRIGHT_START_WEB_SERVER=true (`npm run start` against the built .next), so the
+# tests have a server to hit. api.spec.ts is intentionally excluded — it needs the
+# live backend + AI module, which this frontend-only job does not start.
 e2e-playwright:
   stage: build
   image: mcr.microsoft.com/playwright:v1.49.0-jammy
   when: manual
   allow_failure: true
   variables:
+    PLAYWRIGHT_START_WEB_SERVER: 'true'
     NEXT_PUBLIC_API_URL: 'http://localhost:5001'
     NEXT_PUBLIC_SUPABASE_URL: 'https://test.supabase.co'
     NEXT_PUBLIC_SUPABASE_ANON_KEY: 'e2e-test-anon-key'
@@ -131,7 +136,7 @@ e2e-playwright:
     - npm ci --no-audit --no-fund
   script:
     - npm run build --workspace=frontend
-    - npm run test:e2e --workspace=frontend -- --project=chromium --reporter=line e2e/smoke.spec.ts e2e/api.spec.ts e2e/room.spec.ts
+    - npm run test:e2e --workspace=frontend -- --project=chromium --reporter=line e2e/smoke.spec.ts e2e/auth.spec.ts e2e/room.spec.ts e2e/interview-flow.spec.ts
   artifacts:
     when: always
     paths: [frontend/playwright-report]
