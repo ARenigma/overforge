@@ -7,7 +7,6 @@ import { StartInSeconds } from '@/components/marketing/start-in-seconds';
 import { EditorShowcase } from '@/components/marketing/editor-showcase';
 import { Bento } from '@/components/marketing/bento';
 import { Security } from '@/components/marketing/security';
-import { Pricing } from '@/components/marketing/pricing';
 import { Reviews } from '@/components/marketing/reviews';
 import { CTA } from '@/components/marketing/cta';
 import { Footer } from '@/components/marketing/footer';
@@ -25,7 +24,6 @@ export default function LandingPage() {
       <EditorShowcase />
       <Bento />
       <Security />
-      <Pricing />
       <Reviews />
       <CTA />
       <SectionDivider />

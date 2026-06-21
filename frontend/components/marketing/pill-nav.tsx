@@ -9,7 +9,7 @@ import { Wordmark } from '@/components/marketing/wordmark';
 const LINKS = [
   { label: 'Product', href: '#product' },
   { label: 'How it works', href: '#how' },
-  { label: 'Pricing', href: '#pricing' },
+  { label: 'Pricing', href: '/pricing' },
 ] as const;
 
 export function PillNav() {

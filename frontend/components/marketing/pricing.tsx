@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { Check } from 'lucide-react';
-import { Section, SectionHeading } from './section';
 import { Reveal } from '@/components/marketing/reveal';
 import { cn } from '@/lib/utils';
 
@@ -17,33 +16,43 @@ interface Tier {
   highlighted: boolean;
 }
 
-const TIERS: Tier[] = [
+export const PRICING_TIERS: Tier[] = [
   {
-    name: 'Starter',
+    name: 'Free',
     price: '$0',
     period: '/forever',
-    desc: 'For trying Overforge',
-    features: ['5 interviews / month', 'All languages', 'Email scorecards'],
+    desc: 'For trying Overforge on a few candidates.',
+    features: ['5 interviews / month', 'All languages', 'Email scorecards', 'Community support'],
     cta: 'Start free',
     href: '/auth',
     highlighted: false,
   },
   {
-    name: 'Team',
+    name: 'Pro',
     price: '$49',
     period: '/month',
-    desc: 'For growing teams',
-    features: ['Unlimited interviews', 'Custom rubrics', 'SSO', 'Priority support'],
+    desc: 'For growing teams hiring every week.',
+    features: ['100 interviews / month', 'Custom rubrics', 'CSV + API export', 'Email support'],
     cta: 'Start free',
     href: '/auth',
     highlighted: true,
   },
   {
+    name: 'Team',
+    price: '$199',
+    period: '/month',
+    desc: 'For scaling orgs with many interviewers.',
+    features: ['Unlimited interviews', 'SSO', 'Audit logs', 'Priority support'],
+    cta: 'Start free',
+    href: '/auth',
+    highlighted: false,
+  },
+  {
     name: 'Enterprise',
     price: 'Custom',
     period: '',
-    desc: 'For high-volume hiring',
-    features: ['SAML / SCIM', 'Audit logs', 'Dedicated support', 'SLA'],
+    desc: 'For high-volume, compliance-heavy hiring.',
+    features: ['SAML / SCIM', 'Dedicated manager', '99.9% uptime SLA', 'Custom retention'],
     cta: 'Contact sales',
     href: '#',
     highlighted: false,
@@ -58,7 +67,6 @@ function PricingCard({ tier }: { tier: Tier }) {
         tier.highlighted ? 'border-primary ring-1 ring-primary/30' : 'border-border'
       )}
     >
-      {/* Name + badge */}
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium text-foreground">{tier.name}</span>
         {tier.highlighted && (
@@ -66,16 +74,13 @@ function PricingCard({ tier }: { tier: Tier }) {
         )}
       </div>
 
-      {/* Price */}
       <div className="mt-4 flex items-baseline gap-1">
         <span className="text-4xl font-semibold tracking-tight text-foreground">{tier.price}</span>
         {tier.period && <span className="text-sm text-muted-foreground">{tier.period}</span>}
       </div>
 
-      {/* Description */}
       <p className="mt-1.5 text-sm text-muted-foreground">{tier.desc}</p>
 
-      {/* Feature list */}
       <ul className="mt-6 flex flex-col gap-2.5">
         {tier.features.map((feature) => (
           <li key={feature} className="flex items-center gap-2.5 text-sm">
@@ -85,7 +90,6 @@ function PricingCard({ tier }: { tier: Tier }) {
         ))}
       </ul>
 
-      {/* CTA — pushed to bottom so cards align */}
       <div className="mt-auto pt-8">
         <Link
           href={tier.href}
@@ -103,20 +107,15 @@ function PricingCard({ tier }: { tier: Tier }) {
   );
 }
 
-export function Pricing() {
+/** The four pricing tier cards — composed by the dedicated /pricing page. */
+export function PricingTiers() {
   return (
-    <Section id="pricing">
-      <SectionHeading
-        lead="Simple, transparent pricing."
-        tail="Scale when you do."
-        sub="Start free. Upgrade when your hiring volume grows."
-        align="center"
-      />
-      <Reveal className="mt-12 grid gap-6 sm:grid-cols-3">
-        {TIERS.map((tier) => (
+    <div className="mx-auto max-w-5xl px-6">
+      <Reveal className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        {PRICING_TIERS.map((tier) => (
           <PricingCard key={tier.name} tier={tier} />
         ))}
       </Reveal>
-    </Section>
+    </div>
   );
 }
