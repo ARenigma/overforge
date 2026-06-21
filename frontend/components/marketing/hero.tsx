@@ -8,7 +8,7 @@ import { HeroBackdrop } from '@/components/marketing/hero-backdrop';
 
 export function Hero() {
   return (
-    <section className="relative isolate flex min-h-[92vh] flex-col items-center justify-center overflow-hidden px-6 text-center">
+    <section className="relative isolate flex min-h-[92vh] flex-col items-center justify-center overflow-hidden px-6 py-32 text-center">
       <HeroBackdrop />
       {/* Fade the dots out at the bottom for a clean break into the next section */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-64 bg-gradient-to-b from-transparent to-background" />
@@ -38,14 +38,14 @@ export function Hero() {
         <motion.div variants={fadeUp} className="mt-9 flex items-center justify-center gap-3">
           <Link
             href="/auth"
-            className="group inline-flex h-11 items-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98]"
+            className="group inline-flex h-11 items-center gap-1.5 rounded-full bg-primary px-8 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98]"
           >
             Start free
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           </Link>
           <a
             href="#how"
-            className="inline-flex h-11 items-center rounded-lg border border-border bg-card/50 px-5 text-sm font-medium text-foreground backdrop-blur transition-colors hover:bg-accent"
+            className="inline-flex h-11 items-center rounded-full border border-border bg-card/50 px-8 text-sm font-medium text-foreground backdrop-blur transition-colors hover:bg-accent"
           >
             See how it works
           </a>

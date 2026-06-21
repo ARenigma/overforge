@@ -65,24 +65,24 @@
     --primary: 153 61% 53%;
     --primary-foreground: 155 45% 8%;
 
-    /* Dark mode surfaces + text — deep void */
-    --background: 224 14% 5%;
+    /* Dark mode surfaces + text — neutral charcoal (Supabase pattern) */
+    --background: 0 0% 6%;
     --foreground: 0 0% 92%;
-    --card: 225 11% 8%;
+    --card: 0 0% 9%;
     --card-foreground: 0 0% 92%;
-    --popover: 225 11% 8%;
+    --popover: 0 0% 9%;
     --popover-foreground: 0 0% 92%;
-    --secondary: 228 9% 12%;
+    --secondary: 0 0% 13%;
     --secondary-foreground: 0 0% 92%;
-    --muted: 228 8% 13%;
-    --muted-foreground: 225 6% 60%;
-    --accent: 228 9% 14%;
+    --muted: 0 0% 13%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 0 0% 15%;
     --accent-foreground: 0 0% 92%;
     --destructive: 358 75% 59%;
     --destructive-foreground: 0 0% 98%;
     --warning: 36 96% 56%;
-    --border: 225 7% 15%;
-    --input: 225 7% 17%;
+    --border: 0 0% 18%;
+    --input: 0 0% 20%;
 
     /* Derived from the brand accent */
     --ring: var(--primary);

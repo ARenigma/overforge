@@ -1,22 +1,26 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { createClient } from "@/lib/supabase/client";
-import { Github, Gitlab, Linkedin, Mail, Eye, EyeOff, Loader2 } from "lucide-react";
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { createClient } from '@/lib/supabase/client';
+import { Wordmark } from '@/components/marketing/wordmark';
+import { cn } from '@/lib/utils';
+import { fadeUp, staggerContainer } from '@/lib/motion';
+import { Github, Gitlab, Linkedin, Mail, Eye, EyeOff, Loader2 } from 'lucide-react';
 
-type AuthMode = "signin" | "signup" | "magic";
+type AuthMode = 'signin' | 'signup' | 'magic';
 
 const OAUTH_PROVIDERS = [
   {
-    id: "google" as const,
-    label: "Google",
+    id: 'google' as const,
+    label: 'Google',
     icon: (
-      <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true">
+      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
         <path
           fill="currentColor"
           d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -36,24 +40,30 @@ const OAUTH_PROVIDERS = [
       </svg>
     ),
   },
-  { id: "github" as const, label: "GitHub", icon: <Github className="w-4 h-4" /> },
-  { id: "gitlab" as const, label: "GitLab", icon: <Gitlab className="w-4 h-4" /> },
+  { id: 'github' as const, label: 'GitHub', icon: <Github className="w-4 h-4 shrink-0" /> },
+  { id: 'gitlab' as const, label: 'GitLab', icon: <Gitlab className="w-4 h-4 shrink-0" /> },
   {
-    id: "linkedin_oidc" as const,
-    label: "LinkedIn",
-    icon: <Linkedin className="w-4 h-4" />,
+    id: 'linkedin_oidc' as const,
+    label: 'LinkedIn',
+    icon: <Linkedin className="w-4 h-4 shrink-0" />,
   },
 ] as const;
 
-type OAuthProvider = (typeof OAUTH_PROVIDERS)[number]["id"];
+type OAuthProvider = (typeof OAUTH_PROVIDERS)[number]['id'];
+
+const MODE_LABELS: Record<AuthMode, string> = {
+  signin: 'Sign In',
+  signup: 'Sign Up',
+  magic: 'Magic Link',
+};
 
 export default function AuthPage() {
   const router = useRouter();
   const supabase = createClient();
 
-  const [mode, setMode] = useState<AuthMode>("signin");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [mode, setMode] = useState<AuthMode>('signin');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<OAuthProvider | null>(null);
@@ -71,7 +81,7 @@ export default function AuthPage() {
     setLoading(true);
 
     try {
-      if (mode === "magic") {
+      if (mode === 'magic') {
         const { error } = await supabase.auth.signInWithOtp({
           email,
           options: {
@@ -79,11 +89,11 @@ export default function AuthPage() {
           },
         });
         if (error) throw error;
-        setInfo("Magic link sent — check your inbox.");
+        setInfo('Magic link sent — check your inbox.');
         return;
       }
 
-      if (mode === "signup") {
+      if (mode === 'signup') {
         const { error } = await supabase.auth.signUp({
           email,
           password,
@@ -92,17 +102,17 @@ export default function AuthPage() {
           },
         });
         if (error) throw error;
-        setInfo("Account created — check your email to confirm, then sign in.");
+        setInfo('Account created — check your email to confirm, then sign in.');
         return;
       }
 
       // signin
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
-      router.push("/dashboard");
+      router.push('/dashboard');
       router.refresh();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "An error occurred.");
+      setError(err instanceof Error ? err.message : 'An error occurred.');
     } finally {
       setLoading(false);
     }
@@ -121,59 +131,75 @@ export default function AuthPage() {
       if (error) throw error;
       // Browser will navigate; keep spinner until redirect fires.
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "OAuth error.");
+      setError(err instanceof Error ? err.message : 'OAuth error.');
       setOauthLoading(null);
     }
   }
 
-  return (
-    <div className="min-h-screen bg-[#0A0B0D] flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
-        {/* Logo */}
-        <div className="mb-8 text-center">
-          <span className="text-2xl font-medium text-[#EAECEF]">Over</span>
-          <span className="text-2xl font-bold text-[#2F6BFF]">Forge</span>
-        </div>
+  const isAnyLoading = loading || oauthLoading !== null;
 
-        {/* Card */}
-        <div className="bg-[#141619] border border-[#2A2E37] rounded-xl p-6 shadow-xl">
+  return (
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
+      <motion.div
+        variants={staggerContainer}
+        initial="hidden"
+        animate="show"
+        className="w-full max-w-sm"
+      >
+        {/* Wordmark */}
+        <motion.div variants={fadeUp} className="mb-8 flex justify-center">
+          <Wordmark />
+        </motion.div>
+
+        {/* Auth card */}
+        <motion.div variants={fadeUp} className="rounded-xl border border-border bg-card p-6">
           {/* Mode tabs */}
-          <div className="flex rounded-lg bg-[#0A0B0D] p-1 mb-6 gap-1">
-            {(["signin", "signup", "magic"] as const).map((m) => (
+          <div
+            role="tablist"
+            aria-label="Authentication method"
+            className="flex rounded-lg bg-muted p-1 mb-6 gap-1"
+          >
+            {(['signin', 'signup', 'magic'] as const).map((m) => (
               <button
                 key={m}
+                role="tab"
+                aria-selected={mode === m}
                 onClick={() => {
                   clearMessages();
                   setMode(m);
                 }}
-                className={[
-                  "flex-1 text-xs py-1.5 rounded-md font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2F6BFF]",
+                className={cn(
+                  'flex-1 text-xs py-1.5 rounded-md font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-muted',
                   mode === m
-                    ? "bg-[#1C1F25] text-[#EAECEF] shadow-sm"
-                    : "text-[#9AA1AC] hover:text-[#EAECEF]",
-                ].join(" ")}
+                    ? 'bg-card text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
               >
-                {m === "signin" ? "Sign In" : m === "signup" ? "Sign Up" : "Magic Link"}
+                {MODE_LABELS[m]}
               </button>
             ))}
           </div>
 
           {/* Feedback banners */}
           {error && (
-            <Alert className="mb-4 border-[#F2555A]/40 bg-[#F2555A]/10">
-              <AlertDescription className="text-[#F2555A] text-sm">{error}</AlertDescription>
+            <Alert className="mb-4 border-destructive/40 bg-destructive/10">
+              <AlertDescription className="text-destructive text-sm">{error}</AlertDescription>
             </Alert>
           )}
           {info && (
-            <Alert className="mb-4 border-[#34D399]/40 bg-[#34D399]/10">
-              <AlertDescription className="text-[#34D399] text-sm">{info}</AlertDescription>
+            <Alert className="mb-4 border-primary/40 bg-primary/10">
+              <AlertDescription className="text-primary text-sm">{info}</AlertDescription>
             </Alert>
           )}
 
           {/* Form */}
-          <form onSubmit={handleEmailAuth} className="space-y-4">
+          <form onSubmit={handleEmailAuth} className="space-y-4" noValidate>
+            {/* Email field */}
             <div className="space-y-1.5">
-              <Label htmlFor="email" className="text-[#9AA1AC] text-xs uppercase tracking-wide">
+              <Label
+                htmlFor="email"
+                className="font-mono text-xs uppercase tracking-wider text-muted-foreground"
+              >
                 Email
               </Label>
               <Input
@@ -184,32 +210,50 @@ export default function AuthPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="bg-[#0A0B0D] border-[#2A2E37] text-[#EAECEF] placeholder:text-[#9AA1AC]/50 focus-visible:ring-[#2F6BFF] focus-visible:border-[#2F6BFF] h-10"
+                disabled={isAnyLoading}
+                aria-describedby={error ? 'auth-error' : undefined}
+                className={cn(
+                  'h-10 bg-background border-border text-foreground placeholder:text-muted-foreground/50',
+                  'focus-visible:ring-ring focus-visible:border-ring',
+                  'disabled:opacity-60 disabled:cursor-not-allowed',
+                  loading && 'animate-pulse'
+                )}
               />
             </div>
 
-            {mode !== "magic" && (
+            {/* Password field (hidden in magic-link mode) */}
+            {mode !== 'magic' && (
               <div className="space-y-1.5">
-                <Label htmlFor="password" className="text-[#9AA1AC] text-xs uppercase tracking-wide">
+                <Label
+                  htmlFor="password"
+                  className="font-mono text-xs uppercase tracking-wider text-muted-foreground"
+                >
                   Password
                 </Label>
                 <div className="relative">
                   <Input
                     id="password"
-                    type={showPassword ? "text" : "password"}
-                    autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                     required
                     minLength={8}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="bg-[#0A0B0D] border-[#2A2E37] text-[#EAECEF] placeholder:text-[#9AA1AC]/50 focus-visible:ring-[#2F6BFF] focus-visible:border-[#2F6BFF] h-10 pr-10"
+                    disabled={isAnyLoading}
+                    className={cn(
+                      'h-10 bg-background border-border text-foreground placeholder:text-muted-foreground/50 pr-10',
+                      'focus-visible:ring-ring focus-visible:border-ring',
+                      'disabled:opacity-60 disabled:cursor-not-allowed',
+                      loading && 'animate-pulse'
+                    )}
                   />
                   <button
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9AA1AC] hover:text-[#EAECEF] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2F6BFF] rounded"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    disabled={isAnyLoading}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded disabled:pointer-events-none"
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -217,80 +261,101 @@ export default function AuthPage() {
               </div>
             )}
 
+            {/* Primary CTA — pill-shaped */}
             <Button
               type="submit"
-              disabled={loading}
-              className="w-full h-10 bg-[#2F6BFF] hover:bg-[#2F6BFF]/90 text-white font-medium focus-visible:ring-2 focus-visible:ring-[#2F6BFF] focus-visible:ring-offset-2 focus-visible:ring-offset-[#141619] disabled:opacity-60"
+              disabled={isAnyLoading}
+              className={cn(
+                'w-full h-11 rounded-full bg-primary text-primary-foreground font-medium',
+                'hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card',
+                'disabled:opacity-60 disabled:cursor-not-allowed transition-opacity',
+                loading && 'animate-pulse'
+              )}
             >
               {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : mode === "signin" ? (
-                "Sign In"
-              ) : mode === "signup" ? (
-                "Create Account"
+                <Loader2 className="w-4 h-4 animate-spin" aria-label="Loading" />
+              ) : mode === 'signin' ? (
+                'Sign In'
+              ) : mode === 'signup' ? (
+                'Create Account'
               ) : (
-                <>
-                  <Mail className="w-4 h-4 mr-2" />
+                <span className="flex items-center gap-2">
+                  <Mail className="w-4 h-4" aria-hidden="true" />
                   Send Magic Link
-                </>
+                </span>
               )}
             </Button>
           </form>
 
           {/* Divider */}
-          <div className="flex items-center my-5 gap-3">
-            <div className="flex-1 h-px bg-[#2A2E37]" />
-            <span className="text-[#9AA1AC] text-xs">or continue with</span>
-            <div className="flex-1 h-px bg-[#2A2E37]" />
+          <div className="flex items-center my-5 gap-3" role="separator" aria-hidden="true">
+            <div className="flex-1 h-px bg-border" />
+            <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+              or continue with
+            </span>
+            <div className="flex-1 h-px bg-border" />
           </div>
 
-          {/* OAuth buttons */}
+          {/* OAuth provider buttons */}
           <div className="grid grid-cols-2 gap-2">
             {OAUTH_PROVIDERS.map(({ id, label, icon }) => (
-              <Button
+              <button
                 key={id}
                 type="button"
-                variant="outline"
                 onClick={() => handleOAuth(id)}
-                disabled={oauthLoading !== null}
-                className="h-9 border-[#2A2E37] bg-[#1C1F25] text-[#9AA1AC] hover:text-[#EAECEF] hover:bg-[#2A2E37] hover:border-[#2A2E37] focus-visible:ring-2 focus-visible:ring-[#2F6BFF] text-xs font-medium disabled:opacity-50 gap-2"
+                disabled={isAnyLoading}
+                aria-label={`Continue with ${label}`}
+                className={cn(
+                  'h-9 flex items-center justify-center gap-2 rounded-lg border border-border bg-card',
+                  'text-xs font-medium text-muted-foreground',
+                  'hover:bg-muted hover:text-foreground hover:border-border',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card',
+                  'disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
+                  oauthLoading === id && 'animate-pulse'
+                )}
               >
                 {oauthLoading === id ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <Loader2 className="w-4 h-4 animate-spin" aria-label={`Connecting to ${label}`} />
                 ) : (
                   icon
                 )}
-                {label}
-              </Button>
+                <span>{label}</span>
+              </button>
             ))}
           </div>
-        </div>
+        </motion.div>
 
-        {/* Footer link */}
-        <p className="mt-4 text-center text-xs text-[#9AA1AC]">
-          {mode === "signup" ? (
+        {/* Footer toggle */}
+        <motion.p variants={fadeUp} className="mt-5 text-center text-xs text-muted-foreground">
+          {mode === 'signup' ? (
             <>
-              Already have an account?{" "}
+              Already have an account?{' '}
               <button
-                onClick={() => { clearMessages(); setMode("signin"); }}
-                className="text-[#2F6BFF] hover:underline focus:outline-none focus-visible:underline"
+                onClick={() => {
+                  clearMessages();
+                  setMode('signin');
+                }}
+                className="text-foreground hover:underline focus:outline-none focus-visible:underline underline-offset-2"
               >
                 Sign in
               </button>
             </>
           ) : (
             <>
-              No account yet?{" "}
+              No account yet?{' '}
               <button
-                onClick={() => { clearMessages(); setMode("signup"); }}
-                className="text-[#2F6BFF] hover:underline focus:outline-none focus-visible:underline"
+                onClick={() => {
+                  clearMessages();
+                  setMode('signup');
+                }}
+                className="text-foreground hover:underline focus:outline-none focus-visible:underline underline-offset-2"
               >
                 Sign up
               </button>
             </>
           )}
-        </p>
-      </div>
+        </motion.p>
+      </motion.div>
     </div>
   );
 }

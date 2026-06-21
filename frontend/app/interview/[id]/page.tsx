@@ -1,13 +1,19 @@
-"use client";
+'use client';
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { useParams, useSearchParams } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { EnhancedCodeMirrorEditor } from "@/components/enhanced-code-mirror-editor";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { useParams, useSearchParams } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { EnhancedCodeMirrorEditor } from '@/components/enhanced-code-mirror-editor';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   beginInterview,
   answerInterview,
@@ -15,47 +21,48 @@ import {
   finishInterview,
   type InterviewPhase,
   type RunResult,
-} from "@/lib/api";
-import { AlertCircle, Play, Send, Loader2, CheckCircle } from "lucide-react";
+} from '@/lib/api';
+import { AlertCircle, Play, Send, Loader2, CheckCircle } from 'lucide-react';
+import { Wordmark } from '@/components/marketing/wordmark';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Stage = "loading_token" | "consent" | "interview" | "done" | "error";
+type Stage = 'loading_token' | 'consent' | 'interview' | 'done' | 'error';
 
 interface Message {
-  role: "ai" | "candidate";
+  role: 'ai' | 'candidate';
   text: string;
 }
 
 const LANGUAGES = [
-  { value: "python", label: "Python" },
-  { value: "javascript", label: "JavaScript" },
-  { value: "typescript", label: "TypeScript" },
-  { value: "java", label: "Java" },
-  { value: "cpp", label: "C++" },
-  { value: "go", label: "Go" },
+  { value: 'python', label: 'Python' },
+  { value: 'javascript', label: 'JavaScript' },
+  { value: 'typescript', label: 'TypeScript' },
+  { value: 'java', label: 'Java' },
+  { value: 'cpp', label: 'C++' },
+  { value: 'go', label: 'Go' },
 ] as const;
 
-type Language = (typeof LANGUAGES)[number]["value"];
+type Language = (typeof LANGUAGES)[number]['value'];
 
 const PHASE_LABELS: Record<InterviewPhase, string> = {
-  greeting: "Greeting",
-  oral: "Oral Q&A",
-  handoff: "Transition",
-  coding: "Coding",
-  wrap_up: "Wrap-up",
-  done: "Done",
+  greeting: 'Greeting',
+  oral: 'Oral Q&A',
+  handoff: 'Transition',
+  coding: 'Coding',
+  wrap_up: 'Wrap-up',
+  done: 'Done',
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function ErrorCard({ message }: { message: string }) {
   return (
-    <div className="min-h-screen bg-[#0A0B0D] flex items-center justify-center px-4">
-      <div className="w-full max-w-md bg-[#141619] border border-[#F2555A]/40 rounded-xl p-8 text-center space-y-4">
-        <AlertCircle className="w-10 h-10 text-[#F2555A] mx-auto" />
-        <h2 className="text-base font-semibold text-[#EAECEF]">Something went wrong</h2>
-        <p className="text-sm text-[#9AA1AC]">{message}</p>
+    <div className="min-h-screen bg-background flex items-center justify-center px-4">
+      <div className="w-full max-w-md bg-card border border-destructive/40 rounded-xl p-8 text-center space-y-4">
+        <AlertCircle className="w-10 h-10 text-destructive mx-auto" />
+        <h2 className="text-base font-medium text-foreground">Something went wrong</h2>
+        <p className="text-sm text-muted-foreground">{message}</p>
       </div>
     </div>
   );
@@ -63,10 +70,10 @@ function ErrorCard({ message }: { message: string }) {
 
 function LoadingScreen({ text }: { text: string }) {
   return (
-    <div className="min-h-screen bg-[#0A0B0D] flex items-center justify-center px-4">
+    <div className="min-h-screen bg-background flex items-center justify-center px-4">
       <div className="flex flex-col items-center gap-3">
-        <Loader2 className="w-8 h-8 text-[#2F6BFF] animate-spin" />
-        <p className="text-sm text-[#9AA1AC]">{text}</p>
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+        <p className="text-sm text-muted-foreground">{text}</p>
       </div>
     </div>
   );
@@ -76,7 +83,7 @@ function PhaseBadge({ phase }: { phase: InterviewPhase }) {
   return (
     <Badge
       variant="outline"
-      className="text-[10px] uppercase tracking-widest border-[#2F6BFF]/40 text-[#2F6BFF] bg-[#2F6BFF]/10 px-2 py-0.5"
+      className="text-[10px] uppercase tracking-widest border-primary/40 text-primary bg-primary/10 px-2 py-0.5 font-mono"
     >
       {PHASE_LABELS[phase] ?? phase}
     </Badge>
@@ -90,27 +97,27 @@ export default function InterviewPage() {
   const searchParams = useSearchParams();
 
   const id = params.id;
-  const token = searchParams.get("t");
+  const token = searchParams.get('t');
 
-  const [stage, setStage] = useState<Stage>(token ? "consent" : "error");
+  const [stage, setStage] = useState<Stage>(token ? 'consent' : 'error');
   const [errorMsg, setErrorMsg] = useState<string>(
-    token ? "" : "Invalid or missing interview link."
+    token ? '' : 'Invalid or missing interview link.'
   );
 
   // Interview state
-  const [phase, setPhase] = useState<InterviewPhase>("greeting");
+  const [phase, setPhase] = useState<InterviewPhase>('greeting');
   const [messages, setMessages] = useState<Message[]>([]);
   const [aiThinking, setAiThinking] = useState(false);
 
   // Code pane
-  const [language, setLanguage] = useState<Language>("python");
-  const [code, setCode] = useState("");
+  const [language, setLanguage] = useState<Language>('python');
+  const [code, setCode] = useState('');
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<RunResult | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
 
   // Answer textarea
-  const [answer, setAnswer] = useState("");
+  const [answer, setAnswer] = useState('');
 
   // Whether /finish has been called (idempotent guard)
   const finishCalledRef = useRef(false);
@@ -120,12 +127,12 @@ export default function InterviewPage() {
 
   // Scroll to bottom whenever messages change
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, aiThinking]);
 
   // Auto-call /finish when phase reaches done
   useEffect(() => {
-    if (phase === "done" && !finishCalledRef.current && token) {
+    if (phase === 'done' && !finishCalledRef.current && token) {
       finishCalledRef.current = true;
       finishInterview(id, token).catch(() => {
         // Idempotent — ignore errors silently
@@ -137,41 +144,41 @@ export default function InterviewPage() {
 
   async function handleBegin() {
     if (!token) return;
-    setStage("loading_token");
+    setStage('loading_token');
     try {
       const res = await beginInterview(id, token);
       setPhase(res.phase);
-      setMessages([{ role: "ai", text: res.utterance.text }]);
-      if (res.phase === "done") {
-        setStage("done");
+      setMessages([{ role: 'ai', text: res.utterance.text }]);
+      if (res.phase === 'done') {
+        setStage('done');
       } else {
-        setStage("interview");
+        setStage('interview');
       }
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : "Failed to start interview.");
-      setStage("error");
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to start interview.');
+      setStage('error');
     }
   }
 
   async function handleSendAnswer() {
     if (!token || !answer.trim() || aiThinking) return;
     const text = answer.trim();
-    setAnswer("");
-    setMessages((prev) => [...prev, { role: "candidate", text }]);
+    setAnswer('');
+    setMessages((prev) => [...prev, { role: 'candidate', text }]);
     setAiThinking(true);
     try {
       const res = await answerInterview(id, token, text);
       setPhase(res.phase);
-      setMessages((prev) => [...prev, { role: "ai", text: res.utterance.text }]);
-      if (res.phase === "done") {
-        setStage("done");
+      setMessages((prev) => [...prev, { role: 'ai', text: res.utterance.text }]);
+      if (res.phase === 'done') {
+        setStage('done');
       }
     } catch (err: unknown) {
       setMessages((prev) => [
         ...prev,
         {
-          role: "ai",
-          text: `Error: ${err instanceof Error ? err.message : "Failed to send answer. Please try again."}`,
+          role: 'ai',
+          text: `Error: ${err instanceof Error ? err.message : 'Failed to send answer. Please try again.'}`,
         },
       ]);
     } finally {
@@ -188,14 +195,14 @@ export default function InterviewPage() {
       const result = await apiRunCode(id, token, language, code);
       setRunResult(result);
     } catch (err: unknown) {
-      setRunError(err instanceof Error ? err.message : "Code execution failed.");
+      setRunError(err instanceof Error ? err.message : 'Code execution failed.');
     } finally {
       setRunning(false);
     }
   }, [id, token, language, code, running]);
 
   function handleAnswerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       handleSendAnswer();
     }
@@ -203,46 +210,43 @@ export default function InterviewPage() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  if (stage === "error") {
+  if (stage === 'error') {
     return <ErrorCard message={errorMsg} />;
   }
 
-  if (stage === "loading_token") {
+  if (stage === 'loading_token') {
     return <LoadingScreen text="Starting your interview…" />;
   }
 
   // STAGE 1 — Consent
-  if (stage === "consent") {
+  if (stage === 'consent') {
     return (
-      <div className="min-h-screen bg-[#0A0B0D] flex items-center justify-center px-4">
-        <div className="w-full max-w-lg bg-[#141619] border border-[#2A2E37] rounded-xl p-8 space-y-6">
-          {/* Logo */}
-          <div className="text-center">
-            <span className="text-xl font-medium text-[#EAECEF]">Over</span>
-            <span className="text-xl font-bold text-[#2F6BFF]">Forge</span>
-            <p className="text-sm text-[#9AA1AC] mt-1">Technical Interview Platform</p>
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="w-full max-w-lg bg-card border border-border rounded-xl p-8 space-y-6">
+          {/* Wordmark */}
+          <div className="text-center flex flex-col items-center gap-1">
+            <Wordmark />
+            <p className="text-sm text-muted-foreground mt-1">Technical Interview Platform</p>
           </div>
 
           {/* T&C notice */}
-          <div className="bg-[#1C1F25] border border-[#2A2E37] rounded-lg p-4 space-y-3 text-sm text-[#9AA1AC] leading-relaxed">
-            <p className="font-medium text-[#EAECEF]">Before you begin</p>
+          <div className="bg-muted border border-border rounded-lg p-4 space-y-3 text-sm text-muted-foreground leading-relaxed">
+            <p className="font-medium text-foreground">Before you begin</p>
             <ul className="space-y-1.5 list-disc list-inside">
               <li>This session is being recorded for evaluation purposes.</li>
               <li>Your responses will be assessed by an AI interviewer.</li>
               <li>Do not share your session link with others.</li>
-              <li>
-                Attempting to use unauthorized resources may affect your evaluation.
-              </li>
+              <li>Attempting to use unauthorized resources may affect your evaluation.</li>
             </ul>
             <p>
-              By clicking <strong className="text-[#EAECEF]">I agree &amp; start</strong>, you
+              By clicking <strong className="text-foreground">I agree &amp; start</strong>, you
               confirm that you have read and accepted these terms.
             </p>
           </div>
 
           <Button
             onClick={handleBegin}
-            className="w-full h-10 bg-[#2F6BFF] hover:bg-[#2F6BFF]/90 text-white font-medium focus-visible:ring-2 focus-visible:ring-[#2F6BFF] focus-visible:ring-offset-2 focus-visible:ring-offset-[#141619]"
+            className="w-full h-11 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
           >
             I agree &amp; start
           </Button>
@@ -252,49 +256,47 @@ export default function InterviewPage() {
   }
 
   // STAGE 2 — Interview (split-pane) + Done state
-  const isDone = stage === "done" || phase === "done";
+  const isDone = stage === 'done' || phase === 'done';
 
   return (
-    <div className="h-screen bg-[#0A0B0D] text-[#EAECEF] flex flex-col overflow-hidden">
-      {/* Thin top bar */}
-      <header className="h-11 border-b border-[#2A2E37] bg-[#141619] flex items-center justify-between px-4 shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-[#EAECEF]">Over</span>
-          <span className="text-sm font-bold text-[#2F6BFF] -ml-1.5">Forge</span>
-        </div>
+    <div className="h-[100svh] bg-background text-foreground flex flex-col overflow-hidden">
+      {/* Minimal top strip */}
+      <header className="h-11 border-b border-border bg-card flex items-center justify-between px-4 shrink-0">
+        <Wordmark className="scale-90 origin-left" />
         <PhaseBadge phase={phase} />
       </header>
 
       {isDone ? (
         // Done state — full-width thank-you
         <div className="flex-1 flex items-center justify-center px-4">
-          <div className="w-full max-w-md bg-[#141619] border border-[#34D399]/40 rounded-xl p-8 text-center space-y-4">
-            <CheckCircle className="w-10 h-10 text-[#34D399] mx-auto" />
-            <h2 className="text-base font-semibold text-[#EAECEF]">Interview complete</h2>
-            <p className="text-sm text-[#9AA1AC]">
-              Thank you for completing this interview. Your responses have been submitted
-              and will be reviewed shortly.
+          <div className="w-full max-w-md bg-card border border-success/40 rounded-xl p-8 text-center space-y-4">
+            <CheckCircle className="w-10 h-10 text-success mx-auto" />
+            <h2 className="text-base font-medium text-foreground">Interview complete</h2>
+            <p className="text-sm text-muted-foreground">
+              Thank you for completing this interview. Your responses have been submitted and will
+              be reviewed shortly.
             </p>
           </div>
         </div>
       ) : (
-        // Split-pane interview layout
+        // Split-pane interview layout — editor + output | AI chat
         <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
-          {/* LEFT — code pane */}
+          {/* LEFT — editor + terminal console */}
           <ResizablePanel defaultSize={55} minSize={30}>
-            <div className="h-full flex flex-col overflow-hidden bg-[#0A0B0D]">
-              {/* Code toolbar */}
-              <div className="flex items-center gap-2 px-3 py-2 border-b border-[#2A2E37] bg-[#141619] shrink-0">
-                <Select
-                  value={language}
-                  onValueChange={(v) => setLanguage(v as Language)}
-                >
-                  <SelectTrigger className="h-7 w-36 text-xs bg-[#1C1F25] border-[#2A2E37] text-[#EAECEF] focus:ring-[#2F6BFF]">
+            <div className="h-full flex flex-col overflow-hidden bg-background">
+              {/* Code toolbar — language selector + Run pill */}
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-card shrink-0">
+                <Select value={language} onValueChange={(v) => setLanguage(v as Language)}>
+                  <SelectTrigger className="h-7 w-36 text-xs bg-muted border-border text-foreground focus:ring-ring font-mono">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-[#1C1F25] border-[#2A2E37] text-[#EAECEF]">
+                  <SelectContent className="bg-card border-border text-foreground">
                     {LANGUAGES.map((l) => (
-                      <SelectItem key={l.value} value={l.value} className="text-xs focus:bg-[#2A2E37]">
+                      <SelectItem
+                        key={l.value}
+                        value={l.value}
+                        className="text-xs focus:bg-muted font-mono"
+                      >
                         {l.label}
                       </SelectItem>
                     ))}
@@ -305,19 +307,19 @@ export default function InterviewPage() {
                   size="sm"
                   onClick={handleRunCode}
                   disabled={running}
-                  className="h-7 px-3 text-xs bg-[#34D399]/10 border border-[#34D399]/40 text-[#34D399] hover:bg-[#34D399]/20 focus-visible:ring-[#34D399] gap-1.5"
+                  className="h-7 px-4 text-xs rounded-full bg-primary/10 border border-primary/40 text-primary hover:bg-primary/20 focus-visible:ring-ring gap-1.5 font-mono"
                   variant="outline"
                 >
                   {running ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   ) : (
-                    <Play className="w-3.5 h-3.5" />
+                    <Play className="w-3.5 h-3.5 fill-current" />
                   )}
-                  Run
+                  RUN
                 </Button>
               </div>
 
-              {/* Editor (takes remaining vertical space) */}
+              {/* Editor — fills remaining vertical space */}
               <div className="flex-1 overflow-hidden">
                 <EnhancedCodeMirrorEditor
                   value={code}
@@ -328,20 +330,28 @@ export default function InterviewPage() {
                 />
               </div>
 
-              {/* Terminal output */}
-              <div className="shrink-0 h-[160px] border-t border-[#2A2E37] bg-[#0A0B0D] overflow-auto p-3 font-mono text-[11px]">
+              {/* Terminal output — fixed-height console strip */}
+              <div className="shrink-0 h-[180px] border-t border-border bg-background overflow-auto p-3 font-mono text-[11px]">
+                {/* Console header label */}
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground">
+                    OUTPUT
+                  </span>
+                  {running && <Loader2 className="w-3 h-3 animate-spin text-primary" />}
+                </div>
+
                 {runError && (
-                  <Alert className="mb-2 border-[#F2555A]/40 bg-[#F2555A]/10 py-2 px-3">
-                    <AlertDescription className="text-[#F2555A] text-xs">{runError}</AlertDescription>
+                  <Alert className="mb-2 border-destructive/40 bg-destructive/10 py-2 px-3">
+                    <AlertDescription className="text-destructive text-xs font-mono">
+                      {runError}
+                    </AlertDescription>
                   </Alert>
                 )}
                 {runResult ? (
                   <div className="space-y-1">
-                    <div className="flex items-center gap-3 text-[#9AA1AC] text-[10px] uppercase tracking-wider">
+                    <div className="flex items-center gap-3 text-muted-foreground text-[10px] uppercase tracking-wider font-mono">
                       <span
-                        className={
-                          runResult.exitCode === 0 ? "text-[#34D399]" : "text-[#F2555A]"
-                        }
+                        className={runResult.exitCode === 0 ? 'text-success' : 'text-destructive'}
                       >
                         {runResult.status}
                       </span>
@@ -349,55 +359,65 @@ export default function InterviewPage() {
                       <span>{Math.round(runResult.memoryKb / 1024)}KB</span>
                     </div>
                     {runResult.compileOutput && (
-                      <pre className="text-[#F2555A] whitespace-pre-wrap break-all">
+                      <pre className="text-destructive whitespace-pre-wrap break-all">
                         {runResult.compileOutput}
                       </pre>
                     )}
                     {runResult.stdout && (
-                      <pre className="text-[#EAECEF] whitespace-pre-wrap break-all">
+                      <pre className="text-foreground whitespace-pre-wrap break-all">
                         {runResult.stdout}
                       </pre>
                     )}
                     {runResult.stderr && (
-                      <pre className="text-[#F2555A] whitespace-pre-wrap break-all">
+                      <pre className="text-destructive whitespace-pre-wrap break-all">
                         {runResult.stderr}
                       </pre>
                     )}
                     {!runResult.stdout && !runResult.stderr && !runResult.compileOutput && (
-                      <span className="text-[#9AA1AC]">(no output)</span>
+                      <span className="text-muted-foreground">(no output)</span>
                     )}
                   </div>
                 ) : (
                   !runError && (
-                    <span className="text-[#9AA1AC]">Run your code to see output here.</span>
+                    <span className="text-muted-foreground">Run your code to see output here.</span>
                   )
                 )}
               </div>
             </div>
           </ResizablePanel>
 
-          <ResizableHandle withHandle className="bg-[#2A2E37] w-px" />
+          {/* 1px crisp divider */}
+          <ResizableHandle withHandle className="bg-border w-px" />
 
-          {/* RIGHT — comms panel */}
+          {/* RIGHT — AI chat / oral widget */}
           <ResizablePanel defaultSize={45} minSize={25}>
-            <div className="h-full flex flex-col bg-[#141619] overflow-hidden">
-              {/* Transcript */}
+            <div className="h-full flex flex-col bg-card overflow-hidden">
+              {/* Pane label */}
+              <div className="shrink-0 px-4 py-2 border-b border-border">
+                <span className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground">
+                  INTERVIEWER
+                </span>
+              </div>
+
+              {/* Transcript scroll area */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {messages.map((msg, idx) => (
                   <div
                     key={idx}
-                    className={`flex ${msg.role === "candidate" ? "justify-end" : "justify-start"}`}
+                    className={`flex ${msg.role === 'candidate' ? 'justify-end' : 'justify-start'}`}
                   >
                     <div
                       className={[
-                        "max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed",
-                        msg.role === "ai"
-                          ? "bg-[#1C1F25] text-[#EAECEF] rounded-tl-sm"
-                          : "bg-[#2F6BFF]/20 border border-[#2F6BFF]/30 text-[#EAECEF] rounded-tr-sm",
-                      ].join(" ")}
+                        'max-w-[85%] rounded-xl px-4 py-2.5 text-sm leading-relaxed',
+                        msg.role === 'ai'
+                          ? 'bg-muted text-foreground rounded-tl-sm'
+                          : 'bg-primary/15 border border-primary/25 text-foreground rounded-tr-sm',
+                      ].join(' ')}
                     >
-                      <p className={`text-[10px] font-medium mb-1 uppercase tracking-wider ${msg.role === "ai" ? "text-[#9AA1AC]" : "text-[#2F6BFF]"}`}>
-                        {msg.role === "ai" ? "Interviewer" : "You"}
+                      <p
+                        className={`text-[10px] font-mono font-medium mb-1 uppercase tracking-wider ${msg.role === 'ai' ? 'text-muted-foreground' : 'text-primary'}`}
+                      >
+                        {msg.role === 'ai' ? 'Interviewer' : 'You'}
                       </p>
                       <p className="whitespace-pre-wrap">{msg.text}</p>
                     </div>
@@ -406,7 +426,8 @@ export default function InterviewPage() {
 
                 {aiThinking && (
                   <div className="flex justify-start">
-                    <div className="bg-[#1C1F25] rounded-xl rounded-tl-sm px-4 py-2.5 text-sm text-[#9AA1AC] italic">
+                    <div className="bg-muted rounded-xl rounded-tl-sm px-4 py-2.5 text-sm text-muted-foreground italic flex items-center gap-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
                       Thinking…
                     </div>
                   </div>
@@ -415,8 +436,8 @@ export default function InterviewPage() {
                 <div ref={transcriptEndRef} />
               </div>
 
-              {/* Input area */}
-              <div className="shrink-0 border-t border-[#2A2E37] p-3">
+              {/* Answer input area */}
+              <div className="shrink-0 border-t border-border p-3">
                 <div className="flex gap-2">
                   <textarea
                     value={answer}
@@ -425,12 +446,12 @@ export default function InterviewPage() {
                     disabled={aiThinking}
                     placeholder="Type your answer… (Ctrl+Enter to send)"
                     rows={3}
-                    className="flex-1 resize-none rounded-lg bg-[#1C1F25] border border-[#2A2E37] text-[#EAECEF] placeholder:text-[#9AA1AC]/50 text-sm px-3 py-2 focus:outline-none focus:border-[#2F6BFF] focus:ring-1 focus:ring-[#2F6BFF] disabled:opacity-50 transition-colors"
+                    className="flex-1 resize-none rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground/50 text-sm px-3 py-2 focus:outline-none focus:border-primary/60 focus:ring-1 focus:ring-ring disabled:opacity-50 transition-colors font-sans"
                   />
                   <Button
                     onClick={handleSendAnswer}
                     disabled={aiThinking || !answer.trim()}
-                    className="self-end h-9 px-3 bg-[#2F6BFF] hover:bg-[#2F6BFF]/90 text-white focus-visible:ring-2 focus-visible:ring-[#2F6BFF] focus-visible:ring-offset-2 focus-visible:ring-offset-[#141619] disabled:opacity-50"
+                    className="self-end h-9 w-9 p-0 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:opacity-50"
                     size="icon"
                     aria-label="Send answer"
                   >

@@ -1,18 +1,20 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Section, SectionHeading } from './section';
 import { fadeUp } from '@/lib/motion';
 
-/** Static IDE mock — token-driven, non-interactive. */
+/** Static IDE mock — token-driven, non-interactive. Intentionally wider than standard Section. */
 export function EditorShowcase() {
   return (
-    <Section id="editor">
-      <SectionHeading
-        lead="Stay in flow."
-        tail="A real IDE, sandboxed."
-        sub="Split-pane CodeMirror, multi-language, with isolated execution."
-      />
+    <section className="mx-auto w-full max-w-[1280px] px-6 py-24 sm:py-32" id="editor">
+      <div className="text-center">
+        <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+          Stay in flow. <span className="text-muted-foreground">A real IDE, sandboxed.</span>
+        </h2>
+        <p className="mx-auto mt-3 max-w-xl text-pretty text-muted-foreground">
+          Split-pane CodeMirror, multi-language, with isolated execution.
+        </p>
+      </div>
 
       <motion.div
         variants={fadeUp}
@@ -31,36 +33,80 @@ export function EditorShowcase() {
           <div className="rounded-md border border-border bg-background/60 px-3 py-0.5 font-mono text-xs text-foreground">
             main.py
           </div>
+          <div className="ml-2 hidden items-center gap-2 sm:flex">
+            <span className="rounded-md border border-border bg-background/40 px-3 py-0.5 font-mono text-xs text-muted-foreground/60">
+              solution.go
+            </span>
+            <span className="rounded-md border border-border bg-background/40 px-3 py-0.5 font-mono text-xs text-muted-foreground/60">
+              test_main.py
+            </span>
+          </div>
         </div>
 
-        {/* Body: file tree + code */}
-        <div className="grid md:grid-cols-[160px_1fr]">
-          {/* File tree — hidden on small screens */}
+        {/* Body: file tree + code + output */}
+        <div className="grid md:grid-cols-[200px_1fr_280px]">
+          {/* File tree */}
           <div className="hidden border-r border-border bg-background/40 py-4 md:block">
+            <p className="mb-2 px-4 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50">
+              Explorer
+            </p>
             <ul className="space-y-0.5 px-3 font-mono text-[12px]">
-              <li className="text-muted-foreground">src/</li>
-              <li className="rounded bg-muted/60 px-2 py-0.5 text-foreground">
+              <li className="text-muted-foreground/70">src/</li>
+              <li className="rounded bg-primary/10 px-2 py-0.5 text-primary">
                 &nbsp;&nbsp;main.py
               </li>
-              <li className="text-muted-foreground">tests/</li>
-              <li className="text-muted-foreground">README.md</li>
+              <li className="px-2 text-muted-foreground/60">&nbsp;&nbsp;solution.go</li>
+              <li className="mt-1 text-muted-foreground/70">tests/</li>
+              <li className="px-2 text-muted-foreground/60">&nbsp;&nbsp;test_main.py</li>
+              <li className="mt-1 text-muted-foreground/60">README.md</li>
             </ul>
           </div>
 
           {/* Code area */}
-          <div className="overflow-x-auto py-4">
-            <table className="w-full border-collapse font-mono text-[12px] leading-6">
+          <div className="overflow-x-auto border-r border-border py-4">
+            <table className="w-full border-collapse font-mono text-[13px] leading-6">
               <tbody>
                 {CODE_LINES.map((line, i) => (
                   <tr key={i} className="group">
-                    <td className="w-10 select-none pr-4 text-right text-muted-foreground/40 group-hover:text-muted-foreground/60">
+                    <td className="w-12 select-none pr-4 text-right text-muted-foreground/30 group-hover:text-muted-foreground/60">
                       {i + 1}
                     </td>
-                    <td className="pr-6 whitespace-pre">{renderLine(line)}</td>
+                    <td className="pr-8 whitespace-pre">{renderLine(line)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Output panel */}
+          <div className="hidden flex-col md:flex">
+            <div className="border-b border-border px-4 py-2">
+              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50">
+                Output
+              </p>
+            </div>
+            <div className="flex-1 bg-background/40 px-4 py-3 font-mono text-[12px] leading-relaxed">
+              <div className="flex items-center gap-2">
+                <span className="text-primary">{'▸'}</span>
+                <span className="text-muted-foreground">python main.py</span>
+              </div>
+              <div className="mt-2 text-foreground">[0, 1]</div>
+              <div className="text-muted-foreground">42</div>
+              <div className="mt-2 text-muted-foreground/60">
+                {'✓'} 0.21s &middot; network: none
+              </div>
+              <div className="mt-4 border-t border-border pt-4">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50">
+                  Test Results
+                </p>
+                <div className="mt-2 space-y-1 text-[12px]">
+                  <div className="text-primary">{'✓'} test_case_1</div>
+                  <div className="text-primary">{'✓'} test_case_2</div>
+                  <div className="text-primary">{'✓'} test_case_3</div>
+                  <div className="mt-1 text-muted-foreground/60">3 passed &middot; 0 failed</div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -72,7 +118,7 @@ export function EditorShowcase() {
           <div className="text-muted-foreground">{'✓'} 0.21s &middot; network: none</div>
         </div>
       </motion.div>
-    </Section>
+    </section>
   );
 }
 
