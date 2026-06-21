@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,7 +11,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { Reveal } from '@/components/marketing/reveal';
 import { cn } from '@/lib/utils';
-import { Eye, EyeOff, Loader2 } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 type AuthMode = 'signin' | 'signup';
 
@@ -183,7 +184,14 @@ export default function AuthPage() {
   const { title, subtitle } = HEADINGS[mode];
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
+    <div className="relative min-h-screen bg-background flex flex-col items-center justify-center px-4">
+      <Link
+        href="/"
+        className="absolute left-4 top-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back
+      </Link>
       <Reveal className="w-full max-w-md">
         {/* Wordmark */}
         <div className="mb-8 flex justify-center">
