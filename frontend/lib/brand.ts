@@ -15,11 +15,6 @@ function readToken(name: string, fallback: string, scope?: Element | null): stri
   return `hsl(${h}, ${s}, ${l})`;
 }
 
-/** Brand accent (cyber-green) as a CSS color string. */
-export function brandAccentCss(scope?: Element | null): string {
-  return readToken('--primary', 'hsl(153, 61%, 53%)', scope);
-}
-
 /** Neutral foreground color — for the monochrome hero dot texture (Supabase-style). */
 export function dotColorCss(scope?: Element | null): string {
   return readToken('--foreground', 'hsl(0, 0%, 92%)', scope);

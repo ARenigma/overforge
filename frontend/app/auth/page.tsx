@@ -10,9 +10,9 @@ import { createClient } from '@/lib/supabase/client';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { Reveal } from '@/components/marketing/reveal';
 import { cn } from '@/lib/utils';
-import { Mail, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 
-type AuthMode = 'signin' | 'signup' | 'magic';
+type AuthMode = 'signin' | 'signup';
 
 const OAUTH_PROVIDERS = [
   {
@@ -81,10 +81,15 @@ const OAUTH_PROVIDERS = [
 
 type OAuthProvider = (typeof OAUTH_PROVIDERS)[number]['id'];
 
-const MODE_LABELS: Record<AuthMode, string> = {
-  signin: 'Sign In',
-  signup: 'Sign Up',
-  magic: 'Magic Link',
+const HEADINGS: Record<AuthMode, { title: string; subtitle: string }> = {
+  signin: {
+    title: 'Welcome back',
+    subtitle: 'Sign in to your account',
+  },
+  signup: {
+    title: 'Create your account',
+    subtitle: 'Start screening candidates in minutes',
+  },
 };
 
 export default function AuthPage() {
@@ -111,18 +116,6 @@ export default function AuthPage() {
     setLoading(true);
 
     try {
-      if (mode === 'magic') {
-        const { error } = await supabase.auth.signInWithOtp({
-          email,
-          options: {
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
-          },
-        });
-        if (error) throw error;
-        setInfo('Magic link sent — check your inbox.');
-        return;
-      }
-
       if (mode === 'signup') {
         const { error } = await supabase.auth.signUp({
           email,
@@ -166,7 +159,28 @@ export default function AuthPage() {
     }
   }
 
+  async function handleForgotPassword() {
+    clearMessages();
+    if (!email) {
+      setError('Enter your email above first, then tap “Forgot password?”.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      });
+      if (error) throw error;
+      setInfo('Password reset link sent — check your inbox.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not send reset link.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const isAnyLoading = loading || oauthLoading !== null;
+  const { title, subtitle } = HEADINGS[mode];
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
@@ -177,32 +191,11 @@ export default function AuthPage() {
         </div>
 
         {/* Auth card */}
-        <div className="rounded-xl border border-border bg-card p-6">
-          {/* Mode tabs */}
-          <div
-            role="tablist"
-            aria-label="Authentication method"
-            className="flex rounded-lg bg-muted p-1 mb-6 gap-1"
-          >
-            {(['signin', 'magic'] as const).map((m) => (
-              <button
-                key={m}
-                role="tab"
-                aria-selected={mode === m}
-                onClick={() => {
-                  clearMessages();
-                  setMode(m);
-                }}
-                className={cn(
-                  'flex-1 text-xs py-1.5 rounded-md font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-muted',
-                  mode === m
-                    ? 'bg-card text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {MODE_LABELS[m]}
-              </button>
-            ))}
+        <div className="border border-border bg-card p-6">
+          {/* Heading */}
+          <div className="mb-6">
+            <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
           </div>
 
           {/* Feedback banners */}
@@ -216,6 +209,43 @@ export default function AuthPage() {
               <AlertDescription className="text-primary text-sm">{info}</AlertDescription>
             </Alert>
           )}
+
+          {/* OAuth provider buttons — above the email form, Supabase-style */}
+          <div className="grid grid-cols-2 gap-2">
+            {OAUTH_PROVIDERS.map(({ id, label, icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => handleOAuth(id)}
+                disabled={isAnyLoading}
+                aria-label={`Continue with ${label}`}
+                className={cn(
+                  'h-9 flex items-center justify-center gap-2 border border-border bg-card',
+                  'text-xs font-medium text-muted-foreground',
+                  'hover:bg-accent hover:text-foreground',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card',
+                  'disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
+                  oauthLoading === id && 'animate-pulse'
+                )}
+              >
+                {oauthLoading === id ? (
+                  <Loader2 className="w-4 h-4 animate-spin" aria-label={`Connecting to ${label}`} />
+                ) : (
+                  icon
+                )}
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Divider */}
+          <div className="flex items-center my-5 gap-3" role="separator" aria-hidden="true">
+            <div className="flex-1 h-px bg-border" />
+            <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+              or continue with email
+            </span>
+            <div className="flex-1 h-px bg-border" />
+          </div>
 
           {/* Form */}
           <form onSubmit={handleEmailAuth} className="space-y-4" noValidate>
@@ -246,54 +276,65 @@ export default function AuthPage() {
               />
             </div>
 
-            {/* Password field (hidden in magic-link mode) */}
-            {mode !== 'magic' && (
-              <div className="space-y-1.5">
+            {/* Password field */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
                 <Label
                   htmlFor="password"
                   className="font-mono text-xs uppercase tracking-wider text-muted-foreground"
                 >
                   Password
                 </Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                    required
-                    minLength={8}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    disabled={isAnyLoading}
-                    className={cn(
-                      'h-10 bg-background border-border text-foreground placeholder:text-muted-foreground/50 pr-10',
-                      'focus-visible:ring-ring focus-visible:border-ring',
-                      'disabled:opacity-60 disabled:cursor-not-allowed',
-                      loading && 'animate-pulse'
-                    )}
-                  />
+                {mode === 'signin' && (
                   <button
                     type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    onClick={handleForgotPassword}
                     disabled={isAnyLoading}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded disabled:pointer-events-none"
+                    className="text-xs text-muted-foreground transition-colors hover:text-primary focus:outline-none focus-visible:underline disabled:pointer-events-none"
                   >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    Forgot password?
                   </button>
-                </div>
+                )}
               </div>
-            )}
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                  required
+                  minLength={8}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  disabled={isAnyLoading}
+                  className={cn(
+                    'h-10 bg-background border-border text-foreground placeholder:text-muted-foreground/50 pr-10',
+                    'focus-visible:ring-ring focus-visible:border-ring',
+                    'disabled:opacity-60 disabled:cursor-not-allowed',
+                    loading && 'animate-pulse'
+                  )}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  disabled={isAnyLoading}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded disabled:pointer-events-none"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
 
-            {/* Primary CTA — pill-shaped */}
+            {/* Primary CTA */}
             <Button
               type="submit"
               disabled={isAnyLoading}
               className={cn(
-                'w-full h-11 rounded-md bg-primary text-primary-foreground font-medium',
-                'hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card',
-                'disabled:opacity-60 disabled:cursor-not-allowed transition-opacity',
+                'w-full h-11 bg-primary text-primary-foreground font-medium',
+                'transition-opacity hover:opacity-90 active:scale-[0.98]',
+                'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card',
+                'disabled:opacity-60 disabled:cursor-not-allowed',
                 loading && 'animate-pulse'
               )}
             >
@@ -301,53 +342,11 @@ export default function AuthPage() {
                 <Loader2 className="w-4 h-4 animate-spin" aria-label="Loading" />
               ) : mode === 'signin' ? (
                 'Sign In'
-              ) : mode === 'signup' ? (
-                'Create Account'
               ) : (
-                <span className="flex items-center gap-2">
-                  <Mail className="w-4 h-4" aria-hidden="true" />
-                  Send Magic Link
-                </span>
+                'Create Account'
               )}
             </Button>
           </form>
-
-          {/* Divider */}
-          <div className="flex items-center my-5 gap-3" role="separator" aria-hidden="true">
-            <div className="flex-1 h-px bg-border" />
-            <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-              or continue with
-            </span>
-            <div className="flex-1 h-px bg-border" />
-          </div>
-
-          {/* OAuth provider buttons */}
-          <div className="grid grid-cols-2 gap-2">
-            {OAUTH_PROVIDERS.map(({ id, label, icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => handleOAuth(id)}
-                disabled={isAnyLoading}
-                aria-label={`Continue with ${label}`}
-                className={cn(
-                  'h-9 flex items-center justify-center gap-2 rounded-lg border border-border bg-card',
-                  'text-xs font-medium text-muted-foreground',
-                  'hover:bg-muted hover:text-foreground hover:border-border',
-                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card',
-                  'disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
-                  oauthLoading === id && 'animate-pulse'
-                )}
-              >
-                {oauthLoading === id ? (
-                  <Loader2 className="w-4 h-4 animate-spin" aria-label={`Connecting to ${label}`} />
-                ) : (
-                  icon
-                )}
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
         </div>
 
         {/* Footer toggle */}

@@ -54,6 +54,8 @@ const PHASE_LABELS: Record<InterviewPhase, string> = {
   done: 'Done',
 };
 
+const PHASE_ORDER: InterviewPhase[] = ['greeting', 'oral', 'handoff', 'coding', 'wrap_up', 'done'];
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function ErrorCard({ message }: { message: string }) {
@@ -119,6 +121,9 @@ export default function InterviewPage() {
   // Answer textarea
   const [answer, setAnswer] = useState('');
 
+  // Responsive: stack the split-pane vertically on small screens
+  const [isMobile, setIsMobile] = useState(false);
+
   // Whether /finish has been called (idempotent guard)
   const finishCalledRef = useRef(false);
 
@@ -129,6 +134,15 @@ export default function InterviewPage() {
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, aiThinking]);
+
+  // Track viewport so the split-pane can stack vertically on phones
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
 
   // Auto-call /finish when phase reaches done
   useEffect(() => {
@@ -246,7 +260,7 @@ export default function InterviewPage() {
 
           <Button
             onClick={handleBegin}
-            className="w-full h-11 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+            className="w-full h-11 rounded-md bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98] font-medium transition-opacity focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
           >
             I agree &amp; start
           </Button>
@@ -257,6 +271,8 @@ export default function InterviewPage() {
 
   // STAGE 2 — Interview (split-pane) + Done state
   const isDone = stage === 'done' || phase === 'done';
+  const phaseIdx = Math.max(0, PHASE_ORDER.indexOf(phase));
+  const progressPct = (phaseIdx / (PHASE_ORDER.length - 1)) * 100;
 
   return (
     <div className="h-[100svh] bg-background text-foreground flex flex-col overflow-hidden">
@@ -265,6 +281,14 @@ export default function InterviewPage() {
         <Wordmark className="scale-90 origin-left" />
         <PhaseBadge phase={phase} />
       </header>
+
+      {/* Phase progress — fills as the interview advances greeting → done */}
+      <div className="h-0.5 shrink-0 bg-border" aria-hidden="true">
+        <div
+          className="h-full bg-primary transition-all duration-500"
+          style={{ width: `${progressPct}%` }}
+        />
+      </div>
 
       {isDone ? (
         // Done state — full-width thank-you
@@ -280,7 +304,10 @@ export default function InterviewPage() {
         </div>
       ) : (
         // Split-pane interview layout — editor + output | AI chat
-        <ResizablePanelGroup direction="horizontal" className="flex-1 overflow-hidden">
+        <ResizablePanelGroup
+          direction={isMobile ? 'vertical' : 'horizontal'}
+          className="flex-1 overflow-hidden"
+        >
           {/* LEFT — editor + terminal console */}
           <ResizablePanel defaultSize={55} minSize={30}>
             <div className="h-full flex flex-col overflow-hidden bg-background">
@@ -307,7 +334,7 @@ export default function InterviewPage() {
                   size="sm"
                   onClick={handleRunCode}
                   disabled={running}
-                  className="h-7 px-4 text-xs rounded-full bg-primary/10 border border-primary/40 text-primary hover:bg-primary/20 focus-visible:ring-ring gap-1.5 font-mono"
+                  className="h-7 px-4 text-xs rounded-md bg-primary/10 border border-primary/40 text-primary hover:bg-primary/20 transition-colors focus-visible:ring-ring gap-1.5 font-mono"
                   variant="outline"
                 >
                   {running ? (
@@ -387,7 +414,7 @@ export default function InterviewPage() {
           </ResizablePanel>
 
           {/* 1px crisp divider */}
-          <ResizableHandle withHandle className="bg-border w-px" />
+          <ResizableHandle withHandle className={isMobile ? 'h-px bg-border' : 'w-px bg-border'} />
 
           {/* RIGHT — AI chat / oral widget */}
           <ResizablePanel defaultSize={45} minSize={25}>
@@ -451,7 +478,7 @@ export default function InterviewPage() {
                   <Button
                     onClick={handleSendAnswer}
                     disabled={aiThinking || !answer.trim()}
-                    className="self-end h-9 w-9 p-0 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:opacity-50"
+                    className="self-end h-9 w-9 p-0 rounded-md bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98] transition-opacity focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:opacity-50"
                     size="icon"
                     aria-label="Send answer"
                   >

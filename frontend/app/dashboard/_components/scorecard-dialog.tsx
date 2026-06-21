@@ -88,7 +88,7 @@ export function ScorecardDialog({ scorecard }: ScorecardDialogProps) {
 
         <div className="space-y-5 pt-1">
           {/* Overall score */}
-          <div className="bg-muted border border-border rounded-lg px-4 py-3 flex items-center justify-between">
+          <div className="bg-muted border border-border rounded-md px-4 py-3 flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Overall score</span>
             <span className="text-2xl font-semibold text-foreground tabular-nums">
               {scorecard.overall}

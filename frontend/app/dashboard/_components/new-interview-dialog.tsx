@@ -95,7 +95,7 @@ export function NewInterviewDialog() {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button className="rounded-md px-5 h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-sm gap-2 shrink-0">
+        <Button className="rounded-md px-5 h-9 bg-primary text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98] text-sm gap-2 shrink-0">
           <Plus className="w-4 h-4" />
           New interview
         </Button>
@@ -118,7 +118,7 @@ export function NewInterviewDialog() {
 
             {/* Link display + copy */}
             <div className="flex items-center gap-2">
-              <div className="flex-1 min-w-0 bg-muted border border-border rounded-lg px-3 py-2.5 text-xs text-foreground font-mono truncate select-all">
+              <div className="flex-1 min-w-0 bg-muted border border-border rounded-md px-3 py-2.5 text-xs text-foreground font-mono truncate select-all">
                 {link}
               </div>
               <Button
@@ -143,7 +143,7 @@ export function NewInterviewDialog() {
 
             <Button
               onClick={handleDone}
-              className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-sm"
+              className="w-full h-9 bg-primary text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98] text-sm"
             >
               Done
             </Button>
@@ -208,7 +208,7 @@ export function NewInterviewDialog() {
               <Button
                 type="submit"
                 disabled={submitting || !candidateEmail.trim()}
-                className="flex-1 h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-sm disabled:opacity-50"
+                className="flex-1 h-9 bg-primary text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98] text-sm disabled:opacity-50"
               >
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create & get link'}
               </Button>

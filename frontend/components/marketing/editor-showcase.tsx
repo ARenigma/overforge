@@ -5,7 +5,7 @@ import { Reveal } from '@/components/marketing/reveal';
 /** Static IDE mock — token-driven, non-interactive. Squarish: sidebar + editor + console. */
 export function EditorShowcase() {
   return (
-    <section className="mx-auto w-full max-w-4xl px-6 py-24 sm:py-28" id="editor">
+    <section className="mx-auto w-full max-w-5xl px-6 py-24 sm:py-28" id="editor">
       <div className="text-center">
         <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
           Stay in flow. <span className="text-muted-foreground">A real IDE, sandboxed.</span>
@@ -37,7 +37,7 @@ export function EditorShowcase() {
         </div>
 
         {/* Body: sidebar + editor (VS Code-style; console sits below) */}
-        <div className="grid min-h-[320px] md:min-h-[440px] md:grid-cols-[190px_1fr]">
+        <div className="grid min-h-[340px] md:min-h-[470px] md:grid-cols-[210px_1fr]">
           {/* File tree */}
           <div className="hidden border-r border-border bg-background/40 py-4 md:block">
             <p className="mb-2 px-4 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50">

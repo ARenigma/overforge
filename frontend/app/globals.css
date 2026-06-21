@@ -12,10 +12,12 @@
 
 @layer base {
   :root {
+    /* ── Central font config — swap the main / mono family here (+ the <link>s in layout.tsx) ── */
     --font-sans:
-      var(--font-geist-sans), system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
-      sans-serif;
-    --font-mono: var(--font-geist-mono), ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+      'Satoshi', var(--font-geist-sans), system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica,
+      Arial, sans-serif;
+    --font-mono:
+      'Source Code Pro', var(--font-geist-mono), ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
     /* ── Brand accent (THE one place to change the green, light mode) ── */
     --primary: 153 58% 36%;
@@ -41,7 +43,8 @@
     --input: 220 13% 87%;
     /* Deep surface — the bottom/footer band, intentionally darker than the page */
     --surface-deep: 220 16% 94%;
-    --radius: 0.5rem;
+    /* Square aesthetic — sharp corners everywhere (circles via rounded-full are kept) */
+    --radius: 0rem;
 
     /* Derived from the brand accent — do not give these their own green */
     --ring: var(--primary);
@@ -121,10 +124,6 @@
   animation: marquee 30s linear infinite;
 }
 
-.animate-marquee:hover {
-  animation-play-state: paused;
-}
-
 @layer base {
   * {
     @apply border-border;
@@ -138,7 +137,8 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-sans);
-    font-feature-settings: 'cv11', 'ss01';
+    /* ss03 = Satoshi's rounded "t" (Circular-like); cv11/ss01 are Geist fallbacks */
+    font-feature-settings: 'ss03', 'cv11', 'ss01';
     text-rendering: optimizeLegibility;
   }
 
