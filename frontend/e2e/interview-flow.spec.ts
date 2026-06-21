@@ -3,7 +3,7 @@
  *
  * End-to-end journey covering the four core surfaces of overForge:
  *   1. Landing page  — hero, pill nav, primary CTAs
- *   2. /auth         — auth card, mode tabs, OAuth provider buttons
+ *   2. /auth         — sign-in form (Welcome back), OAuth provider buttons
  *   3. /dashboard    — guarded by auth; either asserts the page or the redirect
  *   4. /interview/[id] — asserts editor + AI-chat elements tolerantly
  *
@@ -71,25 +71,18 @@ test.describe('Landing page', () => {
 // ── 2. /auth ──────────────────────────────────────────────────────────────────
 
 test.describe('Auth page (/auth)', () => {
-  test('auth card renders with mode tabs', async ({ page }) => {
+  test('auth card renders with heading, email and password inputs', async ({ page }) => {
     await page.goto('/auth');
 
-    // The auth card has a tablist for Sign In / Magic Link; Sign Up is a footer action.
-    const tabList = page.getByRole('tablist', { name: /authentication method/i });
-    await expect(tabList).toBeVisible();
+    // Default mode is "signin" — "Welcome back" heading must be visible.
+    await expect(page.getByRole('heading', { name: /welcome back/i })).toBeVisible();
 
-    await expect(page.getByRole('tab', { name: /sign in/i })).toBeVisible();
-    await expect(page.getByRole('tab', { name: /magic link/i })).toBeVisible();
-    // Sign Up is offered as a footer link rather than a tab.
-    await expect(page.getByRole('button', { name: /sign up/i })).toBeVisible();
-  });
-
-  test('email + password fields are present in signin mode', async ({ page }) => {
-    await page.goto('/auth');
-
-    // Default mode is "signin" — email and password fields should be visible.
+    // Email and password inputs are both present.
     await expect(page.locator('input[type="email"]')).toBeVisible();
     await expect(page.locator('input[type="password"]')).toBeVisible();
+
+    // Sign Up is offered as a footer link.
+    await expect(page.getByRole('button', { name: /sign up/i })).toBeVisible();
   });
 
   test('OAuth provider buttons are present', async ({ page }) => {
@@ -110,18 +103,6 @@ test.describe('Auth page (/auth)', () => {
 
     // Primary CTA label changes to "Create Account".
     await expect(page.getByRole('button', { name: /create account/i })).toBeVisible();
-  });
-
-  test('switching to Magic Link tab hides password field', async ({ page }) => {
-    await page.goto('/auth');
-
-    await page.getByRole('tab', { name: /magic link/i }).click();
-
-    // Password input must no longer be in the DOM in magic-link mode.
-    await expect(page.locator('input[type="password"]')).toHaveCount(0);
-
-    // CTA becomes "Send Magic Link".
-    await expect(page.getByRole('button', { name: /send magic link/i })).toBeVisible();
   });
 });
 

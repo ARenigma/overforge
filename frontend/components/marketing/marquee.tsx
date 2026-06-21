@@ -1,17 +1,31 @@
 'use client';
 
-// Placeholder brand wordmarks — replace with real customer logos before production.
+// Placeholder brands — replace with real customer logos before production.
 
-const BRANDS = [
-  'Northwind',
-  'Globex',
-  'Acme',
-  'Initech',
-  'Umbra',
-  'Hooli',
-  'Vertex',
-  'Lumen',
-] as const;
+import {
+  SiRazorpay,
+  SiPhonepe,
+  SiZomato,
+  SiSwiggy,
+  SiAmericanexpress,
+  SiOyo,
+} from 'react-icons/si';
+import type { IconType } from 'react-icons';
+
+type Brand = { type: 'icon'; name: string; Icon: IconType } | { type: 'wordmark'; name: string };
+
+const BRANDS: Brand[] = [
+  { type: 'icon', name: 'OYO', Icon: SiOyo },
+  { type: 'wordmark', name: 'Pristyn Care' },
+  { type: 'wordmark', name: 'axionix.tech' },
+  { type: 'icon', name: 'Amex', Icon: SiAmericanexpress },
+  { type: 'icon', name: 'Razorpay', Icon: SiRazorpay },
+  { type: 'icon', name: 'PhonePe', Icon: SiPhonepe },
+  { type: 'icon', name: 'Zomato', Icon: SiZomato },
+  { type: 'icon', name: 'Swiggy', Icon: SiSwiggy },
+  { type: 'wordmark', name: 'CRED' },
+  { type: 'wordmark', name: 'Groww' },
+];
 
 interface Review {
   initials: string;
@@ -81,15 +95,25 @@ export function Marquee() {
             maskImage: 'linear-gradient(to right, transparent, black 8%, black 92%, transparent)',
           }}
         >
-          <div className="flex w-max animate-marquee gap-16 whitespace-nowrap" aria-hidden="true">
-            {[...BRANDS, ...BRANDS].map((name, i) => (
-              <span
-                key={i}
-                className="font-mono text-sm font-semibold uppercase tracking-widest text-muted-foreground/40 transition-colors duration-200 hover:text-muted-foreground/70"
-              >
-                {name}
-              </span>
-            ))}
+          <div
+            className="flex w-max animate-marquee items-center gap-16 whitespace-nowrap"
+            aria-hidden="true"
+          >
+            {[...BRANDS, ...BRANDS].map((brand, i) =>
+              brand.type === 'icon' ? (
+                <brand.Icon
+                  key={i}
+                  className="h-5 w-5 text-muted-foreground/50 transition-colors duration-200 hover:text-muted-foreground"
+                />
+              ) : (
+                <span
+                  key={i}
+                  className="font-sans text-sm font-semibold text-muted-foreground/40 transition-colors duration-200 hover:text-muted-foreground/70"
+                >
+                  {brand.name}
+                </span>
+              )
+            )}
           </div>
         </div>
       </div>

@@ -1,3 +1,4 @@
+import { SITE } from '@/lib/site';
 import { cn } from '@/lib/utils';
 
 /** Overforge wordmark — a brand-token mark + Geist name. No logo asset needed. */
@@ -6,7 +7,7 @@ export function Wordmark({ className }: { className?: string }) {
     <span className={cn('flex items-center gap-2', className)}>
       <span
         aria-hidden="true"
-        className="grid h-6 w-6 place-items-center rounded-md bg-primary text-primary-foreground"
+        className="grid h-7 w-7 place-items-center rounded-md bg-primary text-primary-foreground"
       >
         <svg
           viewBox="0 0 16 16"
@@ -21,7 +22,7 @@ export function Wordmark({ className }: { className?: string }) {
           <path d="M5.5 11.5h5" />
         </svg>
       </span>
-      <span className="text-[15px] font-bold tracking-tight text-foreground">overforge</span>
+      <span className="text-xl font-bold tracking-tight text-foreground">{SITE.brandName}</span>
     </span>
   );
 }

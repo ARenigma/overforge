@@ -17,6 +17,13 @@ export function PillNav() {
 
   return (
     <header className="fixed inset-x-0 top-4 z-50 flex justify-center px-4">
+      {/* ThemeToggle pinned to viewport's right edge, vertically centered with the nav */}
+      <div className="pointer-events-none absolute inset-x-4 top-0 flex h-full items-center justify-end">
+        <div className="pointer-events-auto">
+          <ThemeToggle />
+        </div>
+      </div>
+
       <nav
         aria-label="Primary"
         className="flex items-center gap-1 rounded-none border border-border/70 bg-card/70 py-1.5 pl-3 pr-1.5 backdrop-blur-xl supports-[backdrop-filter]:bg-card/60"
@@ -25,13 +32,13 @@ export function PillNav() {
           <Wordmark />
         </Link>
 
-        {/* Desktop links — text-only hover in the brand color (Supabase-style, no box) */}
+        {/* Desktop links — bold white Supabase-style, green on hover, no box */}
         <div className="hidden items-center md:flex">
           {LINKS.map((l) => (
             <a
               key={l.href}
               href={l.href}
-              className="px-3 py-1.5 text-sm text-muted-foreground transition-colors duration-75 hover:text-primary"
+              className="px-3 py-1.5 text-sm font-semibold text-foreground transition-colors duration-75 hover:text-primary"
             >
               {l.label}
             </a>
@@ -39,10 +46,9 @@ export function PillNav() {
         </div>
 
         <div className="flex items-center gap-1 pl-1">
-          <ThemeToggle />
           <Link
             href="/auth"
-            className="hidden h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98] sm:inline-flex"
+            className="hidden text-sm font-bold text-primary transition-opacity hover:opacity-80 sm:inline-flex"
           >
             Sign in
           </Link>
