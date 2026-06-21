@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { createClient } from '@/lib/supabase/client';
-import { LogOut, Loader2 } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 
 export function SignOutButton() {
   const router = useRouter();
@@ -23,14 +23,10 @@ export function SignOutButton() {
       variant="ghost"
       size="sm"
       onClick={handleSignOut}
-      disabled={loading}
+      loading={loading}
       className="text-muted-foreground hover:text-foreground text-xs gap-2 disabled:opacity-50"
     >
-      {loading ? (
-        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-      ) : (
-        <LogOut className="w-3.5 h-3.5" />
-      )}
+      {!loading && <LogOut className="w-3.5 h-3.5" />}
       Sign out
     </Button>
   );

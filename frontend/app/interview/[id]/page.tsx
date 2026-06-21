@@ -356,15 +356,11 @@ export default function InterviewPage() {
                 <Button
                   size="sm"
                   onClick={handleRunCode}
-                  disabled={running}
+                  loading={running}
                   className="h-7 px-4 text-xs rounded-md bg-primary/10 border border-primary/40 text-primary hover:bg-primary/20 transition-colors focus-visible:ring-ring gap-1.5 font-mono"
                   variant="outline"
                 >
-                  {running ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                  )}
+                  {!running && <Play className="w-3.5 h-3.5 fill-current" />}
                   RUN
                 </Button>
               </div>
