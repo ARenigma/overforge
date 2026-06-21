@@ -15,20 +15,14 @@ export default function LandingPage() {
     <main className="relative">
       <PillNav />
       <Hero />
-      <SectionDivider />
       <Marquee />
-      <SectionDivider />
       <LanguageMatrix />
-      <SectionDivider />
       <StartInSeconds />
-      <SectionDivider />
       <EditorShowcase />
-      <SectionDivider />
       <Bento />
-      <SectionDivider />
       <Reviews />
-      <SectionDivider />
       <CTA />
+      <SectionDivider />
       <Footer />
     </main>
   );
