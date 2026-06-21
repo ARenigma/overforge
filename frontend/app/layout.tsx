@@ -5,7 +5,6 @@ import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/toaster';
-import SmoothScrollProvider from '@/components/smooth-scroll-provider';
 
 export const metadata: Metadata = {
   title: 'Overforge — Live technical interviews',
@@ -27,7 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           disableTransitionOnChange
           storageKey="overforge-theme"
         >
-          <SmoothScrollProvider>{children}</SmoothScrollProvider>
+          {children}
           <Toaster />
         </ThemeProvider>
       </body>
