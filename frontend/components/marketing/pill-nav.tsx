@@ -19,19 +19,19 @@ export function PillNav() {
     <header className="fixed inset-x-0 top-4 z-50 flex justify-center px-4">
       <nav
         aria-label="Primary"
-        className="flex items-center gap-1 rounded-full border border-border/70 bg-card/70 py-1.5 pl-3 pr-1.5 backdrop-blur-xl supports-[backdrop-filter]:bg-card/60"
+        className="flex items-center gap-1 rounded-none border border-border/70 bg-card/70 py-1.5 pl-3 pr-1.5 backdrop-blur-xl supports-[backdrop-filter]:bg-card/60"
       >
         <Link href="/" className="mr-1 shrink-0" aria-label="Overforge home">
           <Wordmark />
         </Link>
 
-        {/* Desktop links — instant CSS hover highlight (Supabase-style, no sliding spring) */}
+        {/* Desktop links — text-only hover in the brand color (Supabase-style, no box) */}
         <div className="hidden items-center md:flex">
           {LINKS.map((l) => (
             <a
               key={l.href}
               href={l.href}
-              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors duration-75 hover:bg-accent hover:text-foreground"
+              className="px-3 py-1.5 text-sm text-muted-foreground transition-colors duration-75 hover:text-primary"
             >
               {l.label}
             </a>
@@ -42,7 +42,7 @@ export function PillNav() {
           <ThemeToggle />
           <Link
             href="/auth"
-            className="hidden h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98] sm:inline-flex"
+            className="hidden h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98] sm:inline-flex"
           >
             Sign in
           </Link>

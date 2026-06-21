@@ -21,7 +21,7 @@ export function Wordmark({ className }: { className?: string }) {
           <path d="M5.5 11.5h5" />
         </svg>
       </span>
-      <span className="text-[15px] font-medium tracking-tight text-foreground">overforge</span>
+      <span className="text-[15px] font-bold tracking-tight text-foreground">overforge</span>
     </span>
   );
 }
