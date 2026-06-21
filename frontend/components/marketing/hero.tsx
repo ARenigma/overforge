@@ -31,12 +31,12 @@ export function Hero() {
             Start free
             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           </Link>
-          <a
-            href="#how"
+          <Link
+            href="/how-it-works"
             className="inline-flex h-11 items-center rounded-md border border-border bg-card/50 px-8 text-sm font-medium text-foreground backdrop-blur transition-colors hover:bg-accent"
           >
             See how it works
-          </a>
+          </Link>
         </div>
       </Reveal>
 

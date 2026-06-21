@@ -41,7 +41,8 @@
     --input: 220 13% 87%;
     /* Deep surface — the bottom/footer band, intentionally darker than the page */
     --surface-deep: 220 16% 94%;
-    --radius: 0.5rem;
+    /* Square aesthetic — sharp corners everywhere (circles via rounded-full are kept) */
+    --radius: 0rem;
 
     /* Derived from the brand accent — do not give these their own green */
     --ring: var(--primary);
