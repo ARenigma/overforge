@@ -1,29 +1,29 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { createClient } from "@/lib/supabase/client";
-import { createInterview } from "@/lib/api";
-import { Plus, Copy, Check, Loader2, ExternalLink } from "lucide-react";
+} from '@/components/ui/dialog';
+import { createClient } from '@/lib/supabase/client';
+import { createInterview } from '@/lib/api';
+import { Plus, Copy, Check, Loader2, ExternalLink } from 'lucide-react';
 
 export function NewInterviewDialog() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
 
   // Form state
-  const [candidateEmail, setCandidateEmail] = useState("");
-  const [candidateName, setCandidateName] = useState("");
+  const [candidateEmail, setCandidateEmail] = useState('');
+  const [candidateName, setCandidateName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,8 +32,8 @@ export function NewInterviewDialog() {
   const [copied, setCopied] = useState(false);
 
   function resetState() {
-    setCandidateEmail("");
-    setCandidateName("");
+    setCandidateEmail('');
+    setCandidateName('');
     setSubmitting(false);
     setError(null);
     setLink(null);
@@ -54,7 +54,7 @@ export function NewInterviewDialog() {
       } = await supabase.auth.getSession();
 
       if (!session?.access_token) {
-        throw new Error("Your session has expired. Please sign in again.");
+        throw new Error('Your session has expired. Please sign in again.');
       }
 
       const result = await createInterview(session.access_token, {
@@ -64,7 +64,7 @@ export function NewInterviewDialog() {
 
       setLink(result.link);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to create interview.");
+      setError(err instanceof Error ? err.message : 'Failed to create interview.');
     } finally {
       setSubmitting(false);
     }
@@ -95,50 +95,46 @@ export function NewInterviewDialog() {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button className="h-9 bg-[#2F6BFF] hover:bg-[#2F6BFF]/90 text-white text-sm gap-2 focus-visible:ring-2 focus-visible:ring-[#2F6BFF]">
+        <Button className="rounded-md px-5 h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-sm gap-2 shrink-0">
           <Plus className="w-4 h-4" />
           New interview
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="bg-[#141619] border border-[#2A2E37] text-[#EAECEF] sm:max-w-md">
+      <DialogContent className="bg-card border border-border text-card-foreground sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-[#EAECEF] text-base">
-            {link ? "Interview created" : "Create interview"}
+          <DialogTitle className="text-foreground text-base">
+            {link ? 'Interview created' : 'Create interview'}
           </DialogTitle>
         </DialogHeader>
 
         {link ? (
           // ── Result view ──────────────────────────────────────────────────
           <div className="space-y-5 pt-1">
-            <p className="text-sm text-[#9AA1AC]">
-              Share this link with the candidate. It contains their session token and
-              expires automatically.
+            <p className="text-sm text-muted-foreground">
+              Share this link with the candidate. It contains their session token and expires
+              automatically.
             </p>
 
             {/* Link display + copy */}
             <div className="flex items-center gap-2">
-              <div className="flex-1 min-w-0 bg-[#1C1F25] border border-[#2A2E37] rounded-lg px-3 py-2.5 text-xs text-[#EAECEF] font-mono truncate select-all">
+              <div className="flex-1 min-w-0 bg-muted border border-border rounded-lg px-3 py-2.5 text-xs text-foreground font-mono truncate select-all">
                 {link}
               </div>
               <Button
                 variant="outline"
                 size="icon"
                 onClick={handleCopy}
-                className="shrink-0 h-9 w-9 border-[#2A2E37] bg-[#1C1F25] text-[#9AA1AC] hover:text-[#EAECEF] hover:bg-[#2A2E37] focus-visible:ring-2 focus-visible:ring-[#2F6BFF]"
+                className="shrink-0 h-9 w-9 border-border bg-muted text-muted-foreground hover:text-foreground hover:bg-accent"
                 aria-label="Copy link"
               >
-                {copied ? (
-                  <Check className="w-4 h-4 text-[#34D399]" />
-                ) : (
-                  <Copy className="w-4 h-4" />
-                )}
+                {copied ? <Check className="w-4 h-4 text-success" /> : <Copy className="w-4 h-4" />}
               </Button>
               <a
                 href={link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="shrink-0 inline-flex items-center justify-center h-9 w-9 rounded-md border border-[#2A2E37] bg-[#1C1F25] text-[#9AA1AC] hover:text-[#EAECEF] hover:bg-[#2A2E37] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2F6BFF]"
+                className="shrink-0 inline-flex items-center justify-center h-9 w-9 rounded-md border border-border bg-muted text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label="Open link in new tab"
               >
                 <ExternalLink className="w-4 h-4" />
@@ -147,7 +143,7 @@ export function NewInterviewDialog() {
 
             <Button
               onClick={handleDone}
-              className="w-full h-9 bg-[#2F6BFF] hover:bg-[#2F6BFF]/90 text-white text-sm focus-visible:ring-2 focus-visible:ring-[#2F6BFF]"
+              className="w-full h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-sm"
             >
               Done
             </Button>
@@ -156,19 +152,17 @@ export function NewInterviewDialog() {
           // ── Create form ──────────────────────────────────────────────────
           <form onSubmit={handleSubmit} className="space-y-5 pt-1">
             {error && (
-              <Alert className="border-[#F2555A]/40 bg-[#F2555A]/10 py-2 px-3">
-                <AlertDescription className="text-[#F2555A] text-sm">
-                  {error}
-                </AlertDescription>
+              <Alert className="border-destructive/40 bg-destructive/10 py-2 px-3">
+                <AlertDescription className="text-destructive text-sm">{error}</AlertDescription>
               </Alert>
             )}
 
             <div className="space-y-1.5">
               <Label
                 htmlFor="ni-email"
-                className="text-[#9AA1AC] text-xs uppercase tracking-wide"
+                className="text-muted-foreground font-mono text-[10px] uppercase tracking-wider"
               >
-                Candidate email <span className="text-[#F2555A]">*</span>
+                Candidate email <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="ni-email"
@@ -178,17 +172,17 @@ export function NewInterviewDialog() {
                 value={candidateEmail}
                 onChange={(e) => setCandidateEmail(e.target.value)}
                 placeholder="candidate@example.com"
-                className="bg-[#0A0B0D] border-[#2A2E37] text-[#EAECEF] placeholder:text-[#9AA1AC]/50 focus-visible:ring-[#2F6BFF] focus-visible:border-[#2F6BFF] h-10"
+                className="bg-background border-input text-foreground placeholder:text-muted-foreground/50 focus-visible:ring-ring h-10"
               />
             </div>
 
             <div className="space-y-1.5">
               <Label
                 htmlFor="ni-name"
-                className="text-[#9AA1AC] text-xs uppercase tracking-wide"
+                className="text-muted-foreground font-mono text-[10px] uppercase tracking-wider"
               >
-                Candidate name{" "}
-                <span className="text-[#9AA1AC]/60 normal-case tracking-normal">
+                Candidate name{' '}
+                <span className="text-muted-foreground/60 normal-case tracking-normal font-sans text-xs">
                   (optional)
                 </span>
               </Label>
@@ -198,7 +192,7 @@ export function NewInterviewDialog() {
                 value={candidateName}
                 onChange={(e) => setCandidateName(e.target.value)}
                 placeholder="Jane Smith"
-                className="bg-[#0A0B0D] border-[#2A2E37] text-[#EAECEF] placeholder:text-[#9AA1AC]/50 focus-visible:ring-[#2F6BFF] focus-visible:border-[#2F6BFF] h-10"
+                className="bg-background border-input text-foreground placeholder:text-muted-foreground/50 focus-visible:ring-ring h-10"
               />
             </div>
 
@@ -207,20 +201,16 @@ export function NewInterviewDialog() {
                 type="button"
                 variant="outline"
                 onClick={() => handleOpenChange(false)}
-                className="flex-1 h-9 border-[#2A2E37] bg-transparent text-[#9AA1AC] hover:text-[#EAECEF] hover:bg-[#1C1F25] text-sm focus-visible:ring-2 focus-visible:ring-[#2F6BFF]"
+                className="flex-1 h-9 border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-accent text-sm"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 disabled={submitting || !candidateEmail.trim()}
-                className="flex-1 h-9 bg-[#2F6BFF] hover:bg-[#2F6BFF]/90 text-white text-sm focus-visible:ring-2 focus-visible:ring-[#2F6BFF] disabled:opacity-50"
+                className="flex-1 h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-sm disabled:opacity-50"
               >
-                {submitting ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  "Create & get link"
-                )}
+                {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create & get link'}
               </Button>
             </div>
           </form>
