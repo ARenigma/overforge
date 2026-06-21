@@ -8,18 +8,26 @@ import { Bento } from '@/components/marketing/bento';
 import { Reviews } from '@/components/marketing/reviews';
 import { CTA } from '@/components/marketing/cta';
 import { Footer } from '@/components/marketing/footer';
+import { SectionDivider } from '@/components/marketing/section';
 
 export default function LandingPage() {
   return (
     <main className="relative">
       <PillNav />
       <Hero />
+      <SectionDivider />
       <Marquee />
+      <SectionDivider />
       <LanguageMatrix />
+      <SectionDivider />
       <StartInSeconds />
+      <SectionDivider />
       <EditorShowcase />
+      <SectionDivider />
       <Bento />
+      <SectionDivider />
       <Reviews />
+      <SectionDivider />
       <CTA />
       <Footer />
     </main>

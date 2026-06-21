@@ -1,10 +1,9 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { motion } from 'framer-motion';
 import { Mic, BarChart3, Code2, ShieldCheck, Terminal, Link2, type LucideIcon } from 'lucide-react';
 import { Section, SectionHeading } from './section';
-import { fadeUp, staggerContainer } from '@/lib/motion';
+import { Reveal } from '@/components/marketing/reveal';
 import { cn } from '@/lib/utils';
 
 /* ── mini-visuals (token-driven; the embedded-demo polish from Supabase) ── */
@@ -121,8 +120,7 @@ function Card({
   className?: string;
 }) {
   return (
-    <motion.div
-      variants={fadeUp}
+    <div
       className={cn(
         'group flex flex-col rounded-xl border border-border bg-card p-6 transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30',
         className
@@ -135,7 +133,7 @@ function Card({
         <span className="text-muted-foreground">{tail}</span>
       </p>
       <div className="mt-4">{visual}</div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -147,14 +145,8 @@ export function Bento() {
         tail="Nothing it doesn't."
         sub="One deterministic pipeline from invite to scorecard — no agent soup, no flaky tooling."
       />
-      <motion.div
-        variants={staggerContainer}
-        initial="hidden"
-        whileInView="show"
-        viewport={{ once: true, margin: '-80px' }}
-        className="mt-12"
-      >
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="mt-12">
+        <Reveal className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Card
             icon={Mic}
             title="A spoken oral round"
@@ -169,8 +161,8 @@ export function Bento() {
             tail="The same answer earns the same score — emailed the moment it's ready."
             visual={<Scorecard />}
           />
-        </div>
-        <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        </Reveal>
+        <Reveal className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <Card
             icon={Code2}
             title="Sandboxed IDE"
@@ -199,8 +191,8 @@ export function Bento() {
             tail="No candidate account."
             visual={<InviteMini />}
           />
-        </div>
-      </motion.div>
+        </Reveal>
+      </div>
     </Section>
   );
 }

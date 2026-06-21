@@ -68,7 +68,7 @@ const REVIEWS: Review[] = [
 /** Infinite CSS marquee strip — "Trusted by high-growth teams". */
 export function Marquee() {
   return (
-    <div className="border-y border-border">
+    <div>
       <div className="py-10">
         <p className="mb-5 text-center text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground/60">
           Trusted by high-growth teams

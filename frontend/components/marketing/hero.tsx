@@ -1,10 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { motion } from 'framer-motion';
 import { ArrowRight, ChevronDown } from 'lucide-react';
-import { fadeUp, staggerContainer } from '@/lib/motion';
 import { HeroBackdrop } from '@/components/marketing/hero-backdrop';
+import { Reveal } from '@/components/marketing/reveal';
 
 export function Hero() {
   return (
@@ -13,29 +12,18 @@ export function Hero() {
       {/* Fade the dots out at the bottom for a clean break into the next section */}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-b from-transparent to-background" />
 
-      <motion.div
-        variants={staggerContainer}
-        initial="hidden"
-        animate="show"
-        className="relative z-10 mx-auto max-w-3xl"
-      >
-        <motion.h1
-          variants={fadeUp}
-          className="text-balance text-5xl font-semibold leading-[1.05] tracking-tight sm:text-7xl"
-        >
+      <Reveal className="relative z-10 mx-auto max-w-3xl">
+        <h1 className="text-balance text-5xl font-semibold leading-[1.05] tracking-tight sm:text-7xl">
           <span className="text-foreground">Technical interviews,</span>
           <br />
           <span className="text-primary">run by AI.</span>
-        </motion.h1>
+        </h1>
 
-        <motion.p
-          variants={fadeUp}
-          className="mx-auto mt-6 max-w-lg text-pretty text-base text-muted-foreground sm:text-lg"
-        >
+        <p className="mx-auto mt-6 max-w-lg text-pretty text-base text-muted-foreground sm:text-lg">
           A spoken oral round, then live coding in a sandboxed IDE — scored deterministically.
-        </motion.p>
+        </p>
 
-        <motion.div variants={fadeUp} className="mt-9 flex items-center justify-center gap-3">
+        <div className="mt-9 flex items-center justify-center gap-3">
           <Link
             href="/auth"
             className="group inline-flex h-11 items-center gap-1.5 rounded-md bg-primary px-8 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98]"
@@ -49,19 +37,13 @@ export function Hero() {
           >
             See how it works
           </a>
-        </motion.div>
-      </motion.div>
+        </div>
+      </Reveal>
 
       {/* Scroll cue */}
-      <motion.div
-        initial={{ opacity: 0, y: -4 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 1.4, duration: 0.6 }}
-        className="absolute bottom-8 left-1/2 z-10 -translate-x-1/2"
-        aria-hidden="true"
-      >
+      <div className="absolute bottom-8 left-1/2 z-10 -translate-x-1/2" aria-hidden="true">
         <ChevronDown className="h-5 w-5 animate-bounce text-muted-foreground/40" />
-      </motion.div>
+      </div>
     </section>
   );
 }

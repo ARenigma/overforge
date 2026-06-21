@@ -1,8 +1,7 @@
 'use client';
 
-import { motion } from 'framer-motion';
 import { Section, SectionHeading } from './section';
-import { fadeUp, staggerContainer } from '@/lib/motion';
+import { Reveal } from '@/components/marketing/reveal';
 
 const STEPS = [
   {
@@ -57,34 +56,23 @@ export function StartInSeconds() {
             tail="in seconds."
             sub="No scheduling, no setup, no candidate account. Drop the link — the AI handles the rest."
           />
-          <motion.div
-            variants={staggerContainer}
-            initial="hidden"
-            whileInView="show"
-            viewport={{ once: true, margin: '-80px' }}
-            className="mt-12 space-y-6"
-          >
+          <Reveal className="mt-12 space-y-6">
             {STEPS.map((s) => (
-              <motion.div key={s.n} variants={fadeUp} className="border-t border-border pt-5">
+              <div key={s.n} className="border-t border-border pt-5">
                 <span className="font-mono text-sm text-primary">{s.n}</span>
                 <h3 className="mt-2 text-base font-medium tracking-tight text-foreground">
                   {s.title}
                 </h3>
                 <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{s.desc}</p>
-              </motion.div>
+              </div>
             ))}
-          </motion.div>
+          </Reveal>
         </div>
 
         {/* Right */}
-        <motion.div
-          variants={fadeUp}
-          initial="hidden"
-          whileInView="show"
-          viewport={{ once: true, margin: '-80px' }}
-        >
+        <Reveal>
           <TerminalCard />
-        </motion.div>
+        </Reveal>
       </div>
     </Section>
   );

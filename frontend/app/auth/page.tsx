@@ -2,15 +2,14 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { createClient } from '@/lib/supabase/client';
 import { Wordmark } from '@/components/marketing/wordmark';
+import { Reveal } from '@/components/marketing/reveal';
 import { cn } from '@/lib/utils';
-import { fadeUp, staggerContainer } from '@/lib/motion';
 import { Mail, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 type AuthMode = 'signin' | 'signup' | 'magic';
@@ -171,19 +170,14 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
-      <motion.div
-        variants={staggerContainer}
-        initial="hidden"
-        animate="show"
-        className="w-full max-w-sm"
-      >
+      <Reveal className="w-full max-w-sm">
         {/* Wordmark */}
-        <motion.div variants={fadeUp} className="mb-8 flex justify-center">
+        <div className="mb-8 flex justify-center">
           <Wordmark />
-        </motion.div>
+        </div>
 
         {/* Auth card */}
-        <motion.div variants={fadeUp} className="rounded-xl border border-border bg-card p-6">
+        <div className="rounded-xl border border-border bg-card p-6">
           {/* Mode tabs */}
           <div
             role="tablist"
@@ -354,10 +348,10 @@ export default function AuthPage() {
               </button>
             ))}
           </div>
-        </motion.div>
+        </div>
 
         {/* Footer toggle */}
-        <motion.p variants={fadeUp} className="mt-5 text-center text-xs text-muted-foreground">
+        <p className="mt-5 text-center text-xs text-muted-foreground">
           {mode === 'signup' ? (
             <>
               Already have an account?{' '}
@@ -385,8 +379,8 @@ export default function AuthPage() {
               </button>
             </>
           )}
-        </motion.p>
-      </motion.div>
+        </p>
+      </Reveal>
     </div>
   );
 }

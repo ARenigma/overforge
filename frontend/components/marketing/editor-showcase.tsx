@@ -1,12 +1,11 @@
 'use client';
 
-import { motion } from 'framer-motion';
-import { fadeUp } from '@/lib/motion';
+import { Reveal } from '@/components/marketing/reveal';
 
-/** Static IDE mock — token-driven, non-interactive. Intentionally wider than standard Section. */
+/** Static IDE mock — token-driven, non-interactive. Squarish: sidebar + editor + console. */
 export function EditorShowcase() {
   return (
-    <section className="mx-auto w-full max-w-[1280px] px-6 py-24 sm:py-28" id="editor">
+    <section className="mx-auto w-full max-w-3xl px-6 py-24 sm:py-28" id="editor">
       <div className="text-center">
         <h2 className="text-balance text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
           Stay in flow. <span className="text-muted-foreground">A real IDE, sandboxed.</span>
@@ -16,13 +15,7 @@ export function EditorShowcase() {
         </p>
       </div>
 
-      <motion.div
-        variants={fadeUp}
-        initial="hidden"
-        whileInView="show"
-        viewport={{ once: true, margin: '-80px' }}
-        className="mt-10 overflow-hidden rounded-xl border border-border bg-card"
-      >
+      <Reveal className="mt-10 overflow-hidden rounded-xl border border-border bg-card">
         {/* Top bar */}
         <div className="flex items-center gap-3 border-b border-border px-4 py-2.5">
           <div className="flex items-center gap-1.5">
@@ -43,8 +36,8 @@ export function EditorShowcase() {
           </div>
         </div>
 
-        {/* Body: file tree + code + output */}
-        <div className="grid min-h-[280px] md:min-h-[360px] md:grid-cols-[200px_1fr_280px]">
+        {/* Body: sidebar + editor (VS Code-style; console sits below) */}
+        <div className="grid min-h-[300px] md:min-h-[380px] md:grid-cols-[170px_1fr]">
           {/* File tree */}
           <div className="hidden border-r border-border bg-background/40 py-4 md:block">
             <p className="mb-2 px-4 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50">
@@ -63,7 +56,7 @@ export function EditorShowcase() {
           </div>
 
           {/* Code area */}
-          <div className="overflow-x-auto border-r border-border py-4">
+          <div className="overflow-x-auto py-4">
             <table className="w-full border-collapse font-mono text-[13px] leading-6">
               <tbody>
                 {CODE_LINES.map((line, i) => (
@@ -77,45 +70,23 @@ export function EditorShowcase() {
               </tbody>
             </table>
           </div>
+        </div>
 
-          {/* Output panel */}
-          <div className="hidden flex-col md:flex">
-            <div className="border-b border-border px-4 py-2">
-              <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50">
-                Output
-              </p>
-            </div>
-            <div className="flex-1 bg-background/40 px-4 py-3 font-mono text-[12px] leading-relaxed">
-              <div className="flex items-center gap-2">
-                <span className="text-primary">{'▸'}</span>
-                <span className="text-muted-foreground">python main.py</span>
-              </div>
-              <div className="mt-2 text-foreground">[0, 1]</div>
-              <div className="mt-2 text-muted-foreground/60">
-                {'✓'} 0.21s &middot; network: none
-              </div>
-              <div className="mt-4 border-t border-border pt-4">
-                <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50">
-                  Test Results
-                </p>
-                <div className="mt-2 space-y-1 text-[12px]">
-                  <div className="text-primary">{'✓'} two_sum &middot; basic</div>
-                  <div className="text-primary">{'✓'} two_sum &middot; edge</div>
-                  <div className="mt-1 text-muted-foreground/60">2 passed &middot; 0 failed</div>
-                </div>
-              </div>
-            </div>
+        {/* Console / output strip */}
+        <div className="border-t border-border bg-background/40 px-4 py-3 font-mono text-[12px] leading-relaxed">
+          <div className="flex items-center gap-2">
+            <span className="text-primary">{'▸'}</span>
+            <span className="text-muted-foreground">python main.py</span>
           </div>
+          <div className="mt-1 text-foreground">[0, 1]</div>
+          <div className="mt-1">
+            <span className="text-primary">{'✓'} two_sum &middot; basic</span>
+            <span className="mx-3 text-primary">{'✓'} two_sum &middot; edge</span>
+            <span className="text-muted-foreground/60">2 passed &middot; 0 failed</span>
+          </div>
+          <div className="mt-1 text-muted-foreground/60">{'✓'} 0.21s &middot; network: none</div>
         </div>
-
-        {/* Console strip — mobile only (desktop shows the Output panel) */}
-        <div className="border-t border-border bg-background/40 px-4 py-3 font-mono text-[12px] leading-relaxed md:hidden">
-          <span className="text-primary">{'▸'}</span>
-          <span className="text-muted-foreground"> python main.py</span>
-          <div className="text-foreground">[0, 1]</div>
-          <div className="text-muted-foreground">{'✓'} 0.21s &middot; network: none</div>
-        </div>
-      </motion.div>
+      </Reveal>
     </section>
   );
 }

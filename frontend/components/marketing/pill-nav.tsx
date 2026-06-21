@@ -2,11 +2,9 @@
 
 import * as React from 'react';
 import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Menu, X } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Wordmark } from '@/components/marketing/wordmark';
-import { EASE, DUR } from '@/lib/motion';
 
 const LINKS = [
   { label: 'Product', href: '#product' },
@@ -60,35 +58,27 @@ export function PillNav() {
         </div>
       </nav>
 
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, y: -8, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.98 }}
-            transition={{ duration: DUR.fast, ease: EASE }}
-            className="absolute top-16 w-[calc(100%-2rem)] max-w-sm origin-top rounded-2xl border border-border bg-card p-2 backdrop-blur-xl md:hidden"
-          >
-            {LINKS.map((l) => (
-              <a
-                key={l.href}
-                href={l.href}
-                onClick={() => setOpen(false)}
-                className="block rounded-xl px-4 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                {l.label}
-              </a>
-            ))}
-            <Link
-              href="/auth"
+      {open && (
+        <div className="absolute top-16 w-[calc(100%-2rem)] max-w-sm origin-top rounded-2xl border border-border bg-card p-2 backdrop-blur-xl md:hidden animate-in fade-in-0 slide-in-from-top-2 duration-150">
+          {LINKS.map((l) => (
+            <a
+              key={l.href}
+              href={l.href}
               onClick={() => setOpen(false)}
-              className="mt-1 block rounded-xl bg-primary px-4 py-2.5 text-center text-sm font-medium text-primary-foreground"
+              className="block rounded-xl px-4 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
-              Sign in
-            </Link>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              {l.label}
+            </a>
+          ))}
+          <Link
+            href="/auth"
+            onClick={() => setOpen(false)}
+            className="mt-1 block rounded-xl bg-primary px-4 py-2.5 text-center text-sm font-medium text-primary-foreground"
+          >
+            Sign in
+          </Link>
+        </div>
+      )}
     </header>
   );
 }
