@@ -329,22 +329,16 @@ export default function AuthPage() {
             {/* Primary CTA */}
             <Button
               type="submit"
-              disabled={isAnyLoading}
+              loading={loading}
+              disabled={oauthLoading !== null}
               className={cn(
                 'w-full h-11 bg-primary text-primary-foreground font-medium',
                 'transition-opacity hover:opacity-90 active:scale-[0.98]',
                 'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card',
-                'disabled:opacity-60 disabled:cursor-not-allowed',
-                loading && 'animate-pulse'
+                'disabled:opacity-60 disabled:cursor-not-allowed'
               )}
             >
-              {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" aria-label="Loading" />
-              ) : mode === 'signin' ? (
-                'Sign In'
-              ) : (
-                'Create Account'
-              )}
+              {mode === 'signin' ? 'Sign In' : 'Create Account'}
             </Button>
           </form>
         </div>
