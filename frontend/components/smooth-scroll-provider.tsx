@@ -17,11 +17,13 @@ export default function SmoothScrollProvider({ children }: { children: React.Rea
       return;
     }
 
+    // Snappy, near-native (Supabase-like): short lerp catch-up instead of a long
+    // duration ease — responsive, not floaty. wheelMultiplier 1 = native distance.
     const lenis = new Lenis({
-      duration: 1.05,
-      easing: (t: number) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+      lerp: 0.1,
       smoothWheel: true,
-      wheelMultiplier: 1.1,
+      wheelMultiplier: 1,
+      touchMultiplier: 1.5,
     });
 
     lenisRef.current = lenis;
