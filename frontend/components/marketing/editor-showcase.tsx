@@ -21,7 +21,7 @@ export function EditorShowcase() {
         initial="hidden"
         whileInView="show"
         viewport={{ once: true, margin: '-80px' }}
-        className="mt-12 overflow-hidden rounded-xl border border-border bg-card"
+        className="mt-10 overflow-hidden rounded-xl border border-border bg-card"
       >
         {/* Top bar */}
         <div className="flex items-center gap-3 border-b border-border px-4 py-2.5">
@@ -44,7 +44,7 @@ export function EditorShowcase() {
         </div>
 
         {/* Body: file tree + code + output */}
-        <div className="grid min-h-[460px] md:min-h-[520px] md:grid-cols-[200px_1fr_280px]">
+        <div className="grid min-h-[280px] md:min-h-[360px] md:grid-cols-[200px_1fr_280px]">
           {/* File tree */}
           <div className="hidden border-r border-border bg-background/40 py-4 md:block">
             <p className="mb-2 px-4 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50">
@@ -91,7 +91,6 @@ export function EditorShowcase() {
                 <span className="text-muted-foreground">python main.py</span>
               </div>
               <div className="mt-2 text-foreground">[0, 1]</div>
-              <div className="text-foreground">5</div>
               <div className="mt-2 text-muted-foreground/60">
                 {'✓'} 0.21s &middot; network: none
               </div>
@@ -102,20 +101,18 @@ export function EditorShowcase() {
                 <div className="mt-2 space-y-1 text-[12px]">
                   <div className="text-primary">{'✓'} two_sum &middot; basic</div>
                   <div className="text-primary">{'✓'} two_sum &middot; edge</div>
-                  <div className="text-primary">{'✓'} max_profit &middot; basic</div>
-                  <div className="text-primary">{'✓'} max_profit &middot; flat</div>
-                  <div className="mt-1 text-muted-foreground/60">4 passed &middot; 0 failed</div>
+                  <div className="mt-1 text-muted-foreground/60">2 passed &middot; 0 failed</div>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Console strip */}
-        <div className="border-t border-border bg-background/40 px-4 py-3 font-mono text-[12px] leading-relaxed">
+        {/* Console strip — mobile only (desktop shows the Output panel) */}
+        <div className="border-t border-border bg-background/40 px-4 py-3 font-mono text-[12px] leading-relaxed md:hidden">
           <span className="text-primary">{'▸'}</span>
           <span className="text-muted-foreground"> python main.py</span>
-          <div className="text-foreground">42</div>
+          <div className="text-foreground">[0, 1]</div>
           <div className="text-muted-foreground">{'✓'} 0.21s &middot; network: none</div>
         </div>
       </motion.div>
@@ -161,41 +158,14 @@ const CODE_LINES: CodeLine[] = [
   ],
   [{ text: '        seen[num] = i', type: 'plain' }],
   [{ text: '', type: 'plain' }],
-  [{ text: '    return', type: 'keyword' }],
-  [{ text: '', type: 'plain' }],
   [
-    { text: 'def', type: 'keyword' },
-    { text: ' max_profit(prices: List[int]) -> int:', type: 'plain' },
-  ],
-  [{ text: '    """Best time to buy and sell stock (one transaction)."""', type: 'comment' }],
-  [
-    { text: '    min_price = float(', type: 'plain' },
-    { text: "'inf'", type: 'string' },
-    { text: ')', type: 'plain' },
-  ],
-  [{ text: '    best = 0', type: 'plain' }],
-  [
-    { text: '    ', type: 'plain' },
-    { text: 'for', type: 'keyword' },
-    { text: ' price ', type: 'plain' },
-    { text: 'in', type: 'keyword' },
-    { text: ' prices:', type: 'plain' },
-  ],
-  [{ text: '        min_price = min(min_price, price)', type: 'plain' }],
-  [{ text: '        best = max(best, price - min_price)', type: 'plain' }],
-  [
-    { text: '    ', type: 'plain' },
-    { text: 'return', type: 'keyword' },
-    { text: ' best', type: 'plain' },
+    { text: '    return', type: 'keyword' },
+    { text: ' []', type: 'plain' },
   ],
   [{ text: '', type: 'plain' }],
   [
     { text: 'print', type: 'plain' },
     { text: '(two_sum([2, 7, 11, 15], 9))', type: 'plain' },
-  ],
-  [
-    { text: 'print', type: 'plain' },
-    { text: '(max_profit([7, 1, 5, 3, 6, 4]))', type: 'plain' },
   ],
 ];
 

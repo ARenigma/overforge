@@ -4,7 +4,6 @@ import * as React from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu, X } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { EASE, DUR } from '@/lib/motion';
@@ -17,7 +16,6 @@ const LINKS = [
 
 export function PillNav() {
   const [open, setOpen] = React.useState(false);
-  const [hovered, setHovered] = React.useState<string | null>(null);
 
   return (
     <header className="fixed inset-x-0 top-4 z-50 flex justify-center px-4">
@@ -29,25 +27,14 @@ export function PillNav() {
           <Wordmark />
         </Link>
 
-        {/* Desktop links with a snappy sliding highlight (Supabase-style) */}
-        <div className="relative hidden items-center md:flex" onMouseLeave={() => setHovered(null)}>
+        {/* Desktop links — instant CSS hover highlight (Supabase-style, no sliding spring) */}
+        <div className="hidden items-center md:flex">
           {LINKS.map((l) => (
             <a
               key={l.href}
               href={l.href}
-              onMouseEnter={() => setHovered(l.href)}
-              className={cn(
-                'relative rounded-full px-3 py-1.5 text-sm transition-colors duration-150',
-                hovered === l.href ? 'text-foreground' : 'text-muted-foreground'
-              )}
+              className="rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors duration-75 hover:bg-accent hover:text-foreground"
             >
-              {hovered === l.href && (
-                <motion.span
-                  layoutId="nav-highlight"
-                  className="absolute inset-0 -z-10 rounded-full bg-accent"
-                  transition={{ type: 'spring', stiffness: 520, damping: 34, mass: 0.6 }}
-                />
-              )}
               {l.label}
             </a>
           ))}
