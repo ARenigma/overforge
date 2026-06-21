@@ -159,6 +159,26 @@ export default function AuthPage() {
     }
   }
 
+  async function handleForgotPassword() {
+    clearMessages();
+    if (!email) {
+      setError('Enter your email above first, then tap “Forgot password?”.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/auth/callback`,
+      });
+      if (error) throw error;
+      setInfo('Password reset link sent — check your inbox.');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not send reset link.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const isAnyLoading = loading || oauthLoading !== null;
   const { title, subtitle } = HEADINGS[mode];
 
@@ -189,6 +209,43 @@ export default function AuthPage() {
               <AlertDescription className="text-primary text-sm">{info}</AlertDescription>
             </Alert>
           )}
+
+          {/* OAuth provider buttons — above the email form, Supabase-style */}
+          <div className="grid grid-cols-2 gap-2">
+            {OAUTH_PROVIDERS.map(({ id, label, icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => handleOAuth(id)}
+                disabled={isAnyLoading}
+                aria-label={`Continue with ${label}`}
+                className={cn(
+                  'h-9 flex items-center justify-center gap-2 border border-border bg-card',
+                  'text-xs font-medium text-muted-foreground',
+                  'hover:bg-accent hover:text-foreground',
+                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card',
+                  'disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
+                  oauthLoading === id && 'animate-pulse'
+                )}
+              >
+                {oauthLoading === id ? (
+                  <Loader2 className="w-4 h-4 animate-spin" aria-label={`Connecting to ${label}`} />
+                ) : (
+                  icon
+                )}
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Divider */}
+          <div className="flex items-center my-5 gap-3" role="separator" aria-hidden="true">
+            <div className="flex-1 h-px bg-border" />
+            <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+              or continue with email
+            </span>
+            <div className="flex-1 h-px bg-border" />
+          </div>
 
           {/* Form */}
           <form onSubmit={handleEmailAuth} className="space-y-4" noValidate>
@@ -221,12 +278,24 @@ export default function AuthPage() {
 
             {/* Password field */}
             <div className="space-y-1.5">
-              <Label
-                htmlFor="password"
-                className="font-mono text-xs uppercase tracking-wider text-muted-foreground"
-              >
-                Password
-              </Label>
+              <div className="flex items-center justify-between">
+                <Label
+                  htmlFor="password"
+                  className="font-mono text-xs uppercase tracking-wider text-muted-foreground"
+                >
+                  Password
+                </Label>
+                {mode === 'signin' && (
+                  <button
+                    type="button"
+                    onClick={handleForgotPassword}
+                    disabled={isAnyLoading}
+                    className="text-xs text-muted-foreground transition-colors hover:text-primary focus:outline-none focus-visible:underline disabled:pointer-events-none"
+                  >
+                    Forgot password?
+                  </button>
+                )}
+              </div>
               <div className="relative">
                 <Input
                   id="password"
@@ -278,43 +347,6 @@ export default function AuthPage() {
               )}
             </Button>
           </form>
-
-          {/* Divider */}
-          <div className="flex items-center my-5 gap-3" role="separator" aria-hidden="true">
-            <div className="flex-1 h-px bg-border" />
-            <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-              or continue with
-            </span>
-            <div className="flex-1 h-px bg-border" />
-          </div>
-
-          {/* OAuth provider buttons */}
-          <div className="grid grid-cols-2 gap-2">
-            {OAUTH_PROVIDERS.map(({ id, label, icon }) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => handleOAuth(id)}
-                disabled={isAnyLoading}
-                aria-label={`Continue with ${label}`}
-                className={cn(
-                  'h-9 flex items-center justify-center gap-2 border border-border bg-card',
-                  'text-xs font-medium text-muted-foreground',
-                  'hover:bg-accent hover:text-foreground',
-                  'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card',
-                  'disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
-                  oauthLoading === id && 'animate-pulse'
-                )}
-              >
-                {oauthLoading === id ? (
-                  <Loader2 className="w-4 h-4 animate-spin" aria-label={`Connecting to ${label}`} />
-                ) : (
-                  icon
-                )}
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
         </div>
 
         {/* Footer toggle */}
