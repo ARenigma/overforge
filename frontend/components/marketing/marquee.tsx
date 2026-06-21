@@ -69,11 +69,18 @@ const REVIEWS: Review[] = [
 export function Marquee() {
   return (
     <div className="border-y border-border">
-      <div className="py-6">
+      <div className="py-10">
         <p className="mb-5 text-center text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground/60">
           Trusted by high-growth teams
         </p>
-        <div className="overflow-hidden">
+        <div
+          className="overflow-hidden"
+          style={{
+            WebkitMaskImage:
+              'linear-gradient(to right, transparent, black 8%, black 92%, transparent)',
+            maskImage: 'linear-gradient(to right, transparent, black 8%, black 92%, transparent)',
+          }}
+        >
           <div className="flex w-max animate-marquee gap-16 whitespace-nowrap" aria-hidden="true">
             {[...BRANDS, ...BRANDS].map((name, i) => (
               <span
@@ -94,7 +101,13 @@ export function Marquee() {
 export function ReviewsMarquee() {
   const doubled = [...REVIEWS, ...REVIEWS];
   return (
-    <div className="overflow-hidden py-2">
+    <div
+      className="overflow-hidden py-2"
+      style={{
+        WebkitMaskImage: 'linear-gradient(to right, transparent, black 8%, black 92%, transparent)',
+        maskImage: 'linear-gradient(to right, transparent, black 8%, black 92%, transparent)',
+      }}
+    >
       <div
         className="flex w-max animate-marquee gap-6"
         style={{ animationDuration: '40s' }}

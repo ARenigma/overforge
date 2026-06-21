@@ -57,7 +57,7 @@ export function PillNav() {
           <ThemeToggle />
           <Link
             href="/auth"
-            className="hidden h-9 items-center rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98] sm:inline-flex"
+            className="hidden h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98] sm:inline-flex"
           >
             Sign in
           </Link>

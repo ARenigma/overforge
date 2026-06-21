@@ -14,7 +14,7 @@ export function CTA() {
         </p>
         <Link
           href="/auth"
-          className="mt-8 inline-flex h-11 items-center rounded-full bg-primary px-8 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98]"
+          className="mt-8 inline-flex h-11 items-center rounded-md bg-primary px-8 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98]"
         >
           Start free
         </Link>

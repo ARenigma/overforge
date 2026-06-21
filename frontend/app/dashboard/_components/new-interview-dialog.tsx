@@ -95,7 +95,7 @@ export function NewInterviewDialog() {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button className="rounded-full px-5 h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-sm gap-2 shrink-0">
+        <Button className="rounded-md px-5 h-9 bg-primary text-primary-foreground hover:bg-primary/90 text-sm gap-2 shrink-0">
           <Plus className="w-4 h-4" />
           New interview
         </Button>

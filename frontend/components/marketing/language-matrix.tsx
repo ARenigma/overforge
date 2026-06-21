@@ -194,7 +194,7 @@ export function LanguageMatrix() {
         initial="hidden"
         whileInView="show"
         viewport={{ once: true, margin: '-80px' }}
-        className="mt-12 grid grid-cols-2 gap-6 sm:grid-cols-4 lg:grid-cols-8"
+        className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8"
       >
         {LANGUAGES.map((lang) => {
           const { Icon } = lang;
@@ -202,9 +202,9 @@ export function LanguageMatrix() {
             <motion.div
               key={lang.name}
               variants={fadeUp}
-              className="group flex flex-col items-center gap-3 rounded-xl border border-border bg-card px-4 py-8 transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30 cursor-default select-none"
+              className="group aspect-square flex flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30 cursor-default select-none"
             >
-              <div className="flex h-11 w-11 items-center justify-center">
+              <div className="flex h-11 w-11 items-center justify-center opacity-60 transition-all duration-200 group-hover:opacity-100 group-hover:scale-110">
                 <Icon />
               </div>
               <div className="flex flex-col items-center gap-0.5">

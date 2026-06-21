@@ -297,7 +297,7 @@ export default function AuthPage() {
               type="submit"
               disabled={isAnyLoading}
               className={cn(
-                'w-full h-11 rounded-full bg-primary text-primary-foreground font-medium',
+                'w-full h-11 rounded-md bg-primary text-primary-foreground font-medium',
                 'hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card',
                 'disabled:opacity-60 disabled:cursor-not-allowed transition-opacity',
                 loading && 'animate-pulse'
