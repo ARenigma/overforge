@@ -9,7 +9,28 @@ import { cpp } from '@codemirror/lang-cpp';
 import { EditorState } from '@codemirror/state';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { keymap } from '@codemirror/view';
-import { indentUnit } from '@codemirror/language';
+import { indentUnit, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { tags as t } from '@lezer/highlight';
+
+/**
+ * Bespoke dark syntax theme — charcoal background, cyber-green keywords.
+ * Token hues mirror the design system (green 153, blue 199, amber 36, purple 280, yellow 47).
+ */
+const brandHighlight = HighlightStyle.define([
+  {
+    tag: [t.keyword, t.controlKeyword, t.moduleKeyword, t.operatorKeyword],
+    color: 'hsl(153 61% 60%)',
+    fontWeight: '600',
+  },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: 'hsl(199 89% 66%)' },
+  { tag: [t.string, t.special(t.string), t.regexp], color: 'hsl(36 96% 62%)' },
+  { tag: [t.number, t.bool, t.null, t.atom], color: 'hsl(280 65% 74%)' },
+  { tag: [t.typeName, t.className, t.namespace], color: 'hsl(47 95% 66%)' },
+  { tag: [t.comment, t.lineComment, t.blockComment], color: 'hsl(0 0% 42%)', fontStyle: 'italic' },
+  { tag: [t.variableName, t.propertyName, t.definition(t.variableName)], color: 'hsl(0 0% 90%)' },
+  { tag: [t.operator, t.punctuation, t.bracket, t.separator], color: 'hsl(0 0% 55%)' },
+  { tag: t.invalid, color: 'hsl(358 75% 65%)' },
+]);
 
 interface EnhancedCodeMirrorEditorProps {
   value: string;
@@ -82,6 +103,7 @@ export function EnhancedCodeMirrorEditor({
 
     const extensions = [
       basicSetup,
+      syntaxHighlighting(brandHighlight),
       getLanguageExtension(language),
       indentUnit.of(' '.repeat(tabSize)),
       keymap.of([...searchKeymap, ...customKeymap]),

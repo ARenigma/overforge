@@ -184,7 +184,7 @@ export default function AuthPage() {
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center justify-center px-4">
-      <Reveal className="w-full max-w-sm">
+      <Reveal className="w-full max-w-md">
         {/* Wordmark */}
         <div className="mb-8 flex justify-center">
           <Wordmark />
