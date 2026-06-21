@@ -286,14 +286,15 @@ export default function AuthPage() {
               </div>
             )}
 
-            {/* Primary CTA — pill-shaped */}
+            {/* Primary CTA */}
             <Button
               type="submit"
               disabled={isAnyLoading}
               className={cn(
                 'w-full h-11 rounded-md bg-primary text-primary-foreground font-medium',
-                'hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card',
-                'disabled:opacity-60 disabled:cursor-not-allowed transition-opacity',
+                'transition-opacity hover:opacity-90 active:scale-[0.98]',
+                'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card',
+                'disabled:opacity-60 disabled:cursor-not-allowed',
                 loading && 'animate-pulse'
               )}
             >
@@ -331,9 +332,9 @@ export default function AuthPage() {
                 disabled={isAnyLoading}
                 aria-label={`Continue with ${label}`}
                 className={cn(
-                  'h-9 flex items-center justify-center gap-2 rounded-lg border border-border bg-card',
+                  'h-9 flex items-center justify-center gap-2 rounded-md border border-border bg-card',
                   'text-xs font-medium text-muted-foreground',
-                  'hover:bg-muted hover:text-foreground hover:border-border',
+                  'hover:bg-accent hover:text-foreground',
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-card',
                   'disabled:opacity-50 disabled:cursor-not-allowed transition-colors',
                   oauthLoading === id && 'animate-pulse'

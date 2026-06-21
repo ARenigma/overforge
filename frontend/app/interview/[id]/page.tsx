@@ -246,7 +246,7 @@ export default function InterviewPage() {
 
           <Button
             onClick={handleBegin}
-            className="w-full h-11 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+            className="w-full h-11 rounded-md bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98] font-medium transition-opacity focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
           >
             I agree &amp; start
           </Button>
@@ -307,7 +307,7 @@ export default function InterviewPage() {
                   size="sm"
                   onClick={handleRunCode}
                   disabled={running}
-                  className="h-7 px-4 text-xs rounded-full bg-primary/10 border border-primary/40 text-primary hover:bg-primary/20 focus-visible:ring-ring gap-1.5 font-mono"
+                  className="h-7 px-4 text-xs rounded-md bg-primary/10 border border-primary/40 text-primary hover:bg-primary/20 transition-colors focus-visible:ring-ring gap-1.5 font-mono"
                   variant="outline"
                 >
                   {running ? (
@@ -451,7 +451,7 @@ export default function InterviewPage() {
                   <Button
                     onClick={handleSendAnswer}
                     disabled={aiThinking || !answer.trim()}
-                    className="self-end h-9 w-9 p-0 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:opacity-50"
+                    className="self-end h-9 w-9 p-0 rounded-md bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98] transition-opacity focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:opacity-50"
                     size="icon"
                     aria-label="Send answer"
                   >

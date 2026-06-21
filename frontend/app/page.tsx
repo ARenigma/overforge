@@ -1,10 +1,13 @@
 import { PillNav } from '@/components/marketing/pill-nav';
 import { Hero } from '@/components/marketing/hero';
 import { Marquee } from '@/components/marketing/marquee';
+import { HowItWorks } from '@/components/marketing/how-it-works';
 import { LanguageMatrix } from '@/components/marketing/language-matrix';
 import { StartInSeconds } from '@/components/marketing/start-in-seconds';
 import { EditorShowcase } from '@/components/marketing/editor-showcase';
 import { Bento } from '@/components/marketing/bento';
+import { Security } from '@/components/marketing/security';
+import { Pricing } from '@/components/marketing/pricing';
 import { Reviews } from '@/components/marketing/reviews';
 import { CTA } from '@/components/marketing/cta';
 import { Footer } from '@/components/marketing/footer';
@@ -16,10 +19,13 @@ export default function LandingPage() {
       <PillNav />
       <Hero />
       <Marquee />
+      <HowItWorks />
       <LanguageMatrix />
       <StartInSeconds />
       <EditorShowcase />
       <Bento />
+      <Security />
+      <Pricing />
       <Reviews />
       <CTA />
       <SectionDivider />
