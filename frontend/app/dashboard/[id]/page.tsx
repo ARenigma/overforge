@@ -6,6 +6,7 @@ import { Wordmark } from '@/components/marketing/wordmark';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { SignOutButton } from '../_components/sign-out-button';
 import { RescoreButton } from '../_components/rescore-button';
+import { LiveRefresh } from '../_components/live-refresh';
 import { PageContainer } from '@/components/ds/page-container';
 import { StatusBadge, type BadgeIntent } from '@/components/ds/status-badge';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
@@ -109,9 +110,13 @@ export default async function InterviewDetailPage({ params }: { params: { id: st
                 Created {formatDateTime(iv.created_at)}
               </p>
             </div>
-            <StatusBadge intent={meta.intent} className="mt-1">
-              {meta.label}
-            </StatusBadge>
+            <div className="mt-1 flex items-center gap-3">
+              <LiveRefresh
+                interviewId={iv.id}
+                live={iv.status === 'in_progress' || iv.status === 'completed'}
+              />
+              <StatusBadge intent={meta.intent}>{meta.label}</StatusBadge>
+            </div>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-2">

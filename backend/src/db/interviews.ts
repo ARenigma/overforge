@@ -44,6 +44,7 @@ export interface Interview {
   code_runs: RunResult[];
   evaluation_score: Scorecard | null;
   scorecard_sent_at: string | null;
+  last_request_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -70,6 +71,7 @@ export type UpdateInterviewInput = Partial<{
   token_expires_at: string;
   evaluation_score: Scorecard;
   scorecard_sent_at: string;
+  last_request_id: string;
 }>;
 
 // ─────────────────────── Repository functions ───────────────────────

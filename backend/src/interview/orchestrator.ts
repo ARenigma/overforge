@@ -64,7 +64,8 @@ async function persistTransition(
   newCtx: InterviewContext,
   effect: Effect,
   utterance: Utterance | null,
-  candidateAnswer?: string
+  candidateAnswer?: string,
+  requestId?: string
 ): Promise<void> {
   const transcript: TranscriptTurn[] = interview.transcript ?? [];
 
@@ -80,6 +81,7 @@ async function persistTransition(
     fsm_state: newCtx,
     phase: newCtx.phase,
     transcript,
+    ...(requestId ? { last_request_id: requestId } : {}),
   });
 
   await appendEvent(interview.id, 'transition', {
@@ -240,8 +242,36 @@ export interface AnswerResult {
   state: InterviewContext;
 }
 
-export async function submitAnswer(interviewId: string, answer: string): Promise<AnswerResult> {
+/** Replay the last processed answer's result without advancing (idempotent retry path). */
+function replayLastAnswer(interview: Interview): AnswerResult {
+  const transcript = interview.transcript ?? [];
+  const lastAi = [...transcript].reverse().find((t) => t.role === 'interviewer');
+  const ctx = interview.fsm_state as InterviewContext;
+  if (interview.status === 'scored' || ctx.phase === 'scoring' || ctx.phase === 'done') {
+    return {
+      utterance: {
+        text: lastAi?.text ?? 'Your interview is complete. Thank you!',
+        expects: 'text',
+      },
+      phase: 'done',
+      state: { ...ctx, phase: 'done' },
+    };
+  }
+  return { utterance: { text: lastAi?.text ?? '', expects: 'text' }, phase: ctx.phase, state: ctx };
+}
+
+export async function submitAnswer(
+  interviewId: string,
+  answer: string,
+  requestId?: string
+): Promise<AnswerResult> {
   const interview = requireInterview(await getById(interviewId), interviewId);
+
+  // Idempotency: if this exact submission was already processed (lost response + client
+  // retry), replay the prior result instead of advancing the FSM a second time.
+  if (requestId && interview.last_request_id === requestId) {
+    return replayLastAnswer(interview);
+  }
 
   if (interview.status !== 'in_progress') {
     throw Object.assign(new Error('Interview is not in progress'), { status: 409 });
@@ -267,7 +297,7 @@ export async function submitAnswer(interviewId: string, answer: string): Promise
   await appendEvent(interviewId, 'answer', { text: answer });
 
   if (effect.kind === 'score') {
-    await persistTransition(interview, newCtx, effect, null, answer);
+    await persistTransition(interview, newCtx, effect, null, answer, requestId);
     // Score in the background so the candidate's final response returns immediately. The
     // explicit /finish path also calls finishAndScore; the single-flight claim makes it safe.
     void finishAndScore(interviewId).catch((err: unknown) => {
@@ -282,7 +312,7 @@ export async function submitAnswer(interviewId: string, answer: string): Promise
   }
 
   if (effect.kind === 'done') {
-    await persistTransition(interview, newCtx, effect, null, answer);
+    await persistTransition(interview, newCtx, effect, null, answer, requestId);
     return {
       utterance: { text: '', expects: 'text' },
       phase: 'done',
@@ -298,7 +328,7 @@ export async function submitAnswer(interviewId: string, answer: string): Promise
   };
   const utterance = await oracle.generateUtterance(req);
 
-  await persistTransition(interview, newCtx, effect, utterance, answer);
+  await persistTransition(interview, newCtx, effect, utterance, answer, requestId);
 
   return { utterance, phase: newCtx.phase, state: newCtx };
 }

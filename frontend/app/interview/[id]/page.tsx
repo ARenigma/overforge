@@ -143,6 +143,9 @@ export default function InterviewPage() {
   // Whether /finish has been called (idempotent guard)
   const finishCalledRef = useRef(false);
 
+  // Idempotency: requestId of the last answer attempt, reused on retry so the server dedupes.
+  const pendingAnswerRef = useRef<{ text: string; requestId: string } | null>(null);
+
   // Transcript scroll ref
   const transcriptEndRef = useRef<HTMLDivElement>(null);
 
@@ -177,10 +180,10 @@ export default function InterviewPage() {
     }
   }, [phase, id, activeToken]);
 
-  // Resume on reload (session token in sessionStorage), else show consent for a fresh link.
+  // Resume on reload / new tab (session token in localStorage), else consent for a fresh link.
   useEffect(() => {
     let cancelled = false;
-    const saved = typeof window !== 'undefined' ? sessionStorage.getItem(sessionKey) : null;
+    const saved = typeof window !== 'undefined' ? localStorage.getItem(sessionKey) : null;
 
     async function resume(tok: string) {
       try {
@@ -227,8 +230,8 @@ export default function InterviewPage() {
     setStage('loading_token');
     try {
       const res = await beginInterview(id, urlToken);
-      // Persist the rotated session token so a reload can resume on this device.
-      sessionStorage.setItem(sessionKey, res.sessionToken);
+      // Persist the rotated session token (localStorage = survives reloads AND new tabs).
+      localStorage.setItem(sessionKey, res.sessionToken);
       setActiveToken(res.sessionToken);
       setPhase(res.phase);
       setMessages([{ role: 'ai', text: res.utterance.text }]);
@@ -242,12 +245,20 @@ export default function InterviewPage() {
   async function handleSendAnswer() {
     if (!activeToken || !answer.trim() || aiThinking) return;
     const text = answer.trim();
+    // Reuse the requestId when resending the SAME answer so the server dedupes a retry
+    // after a lost response; a fresh answer gets a new id.
+    const requestId =
+      pendingAnswerRef.current?.text === text
+        ? pendingAnswerRef.current.requestId
+        : crypto.randomUUID();
+    pendingAnswerRef.current = { text, requestId };
     setAnswer('');
     setAnswerError(null);
     setMessages((prev) => [...prev, { role: 'candidate', text }]);
     setAiThinking(true);
     try {
-      const res = await answerInterview(id, activeToken, text);
+      const res = await answerInterview(id, activeToken, text, requestId);
+      pendingAnswerRef.current = null;
       setPhase(res.phase);
       setMessages((prev) => [...prev, { role: 'ai', text: res.utterance.text }]);
       if (res.phase === 'done') {

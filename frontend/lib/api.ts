@@ -187,10 +187,11 @@ export async function getInterviewState(id: string, token: string): Promise<Inte
 export async function answerInterview(
   id: string,
   token: string,
-  answer: string
+  answer: string,
+  requestId?: string
 ): Promise<AnswerResponse> {
   return apiFetch<AnswerResponse>(`/api/interviews/${id}/answer`, {
-    body: { token, answer },
+    body: { token, answer, ...(requestId ? { requestId } : {}) },
   });
 }
 

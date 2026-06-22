@@ -140,7 +140,11 @@ router.post('/:id/state', async (req: Request, res: Response): Promise<void> => 
 router.post('/:id/answer', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { token, answer } = req.body as { token?: string; answer?: string };
+    const { token, answer, requestId } = req.body as {
+      token?: string;
+      answer?: string;
+      requestId?: string;
+    };
 
     await validateCandidate(id, token ?? '');
     await enforceRateLimit(`answer:${hashToken(token ?? '')}`, { limit: 60, windowMs: 600_000 });
@@ -150,7 +154,11 @@ router.post('/:id/answer', async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    const result = await orchestrator.submitAnswer(id, answer);
+    const result = await orchestrator.submitAnswer(
+      id,
+      answer,
+      typeof requestId === 'string' ? requestId : undefined
+    );
     res.json(result);
   } catch (err) {
     sendError(res, err);
