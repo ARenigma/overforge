@@ -37,18 +37,18 @@ export function FilterBar({
   return (
     <div role="search" className="flex flex-wrap items-center gap-2">
       <div className="relative min-w-0 flex-1">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/50" />
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/50" />
         <Input
           type="text"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search by name or email"
           aria-label="Search by candidate name or email"
-          className="h-9 pl-9"
+          className="h-11 pl-10 text-sm"
         />
       </div>
       <Select value={statusFilter} onValueChange={onStatusChange}>
-        <SelectTrigger className="h-9 w-full sm:w-[160px]" aria-label="Filter by status">
+        <SelectTrigger className="h-11 w-full sm:w-[170px]" aria-label="Filter by status">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

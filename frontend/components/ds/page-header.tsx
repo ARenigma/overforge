@@ -14,12 +14,13 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="mb-8 flex items-start justify-between gap-4">
-      <div className="space-y-1">
+    <div className="mb-8 space-y-1">
+      {/* Title + action share one center-aligned row; description sits on the next line. */}
+      <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">{title}</h1>
-        {description && <p className="text-sm text-muted-foreground">{description}</p>}
+        {actions && <div className="shrink-0">{actions}</div>}
       </div>
-      {actions && <div className="shrink-0">{actions}</div>}
+      {description && <p className="text-sm text-muted-foreground">{description}</p>}
     </div>
   );
 }

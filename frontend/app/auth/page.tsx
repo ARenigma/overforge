@@ -11,7 +11,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { Reveal } from '@/components/marketing/reveal';
 import { cn } from '@/lib/utils';
-import { ArrowLeft, Eye, EyeOff, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Loader2 } from 'lucide-react';
 
 type AuthMode = 'signin' | 'signup';
 
@@ -187,17 +187,12 @@ export default function AuthPage() {
     <div className="relative min-h-screen bg-background flex flex-col items-center justify-center px-4">
       <Link
         href="/"
-        className="absolute left-4 top-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        aria-label="Overforge — home"
+        className="absolute left-6 top-6 transition-opacity hover:opacity-80"
       >
-        <ArrowLeft className="h-4 w-4" />
-        Back
+        <Wordmark />
       </Link>
       <Reveal className="w-full max-w-md">
-        {/* Wordmark */}
-        <div className="mb-8 flex justify-center">
-          <Wordmark />
-        </div>
-
         {/* Auth card */}
         <div className="border border-border bg-card p-6">
           {/* Heading */}
