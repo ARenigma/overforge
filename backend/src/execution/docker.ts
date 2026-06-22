@@ -22,14 +22,38 @@ interface LangSpec {
   file: string;
   // shell run inside the container; compiles if needed then runs $file, reading the program's stdin.
   cmd: string;
+  // Extra env beyond COMMON_ENV (e.g. Go's cache/module dirs that otherwise default to the
+  // read-only root FS). Merged on top of COMMON_ENV.
+  env?: Readonly<Record<string, string>>;
 }
+
+// The container is --read-only with ONLY /work (a tmpfs) writable. Point HOME and the temp
+// dir at /work so toolchains that need scratch space — and programs that open temp files —
+// don't hit the read-only root. Applied to every language.
+const COMMON_ENV: Readonly<Record<string, string>> = {
+  HOME: '/work',
+  TMPDIR: '/work',
+};
 
 // Official multi-arch (arm64-native) images + per-language run line.
 const LANGS: Readonly<Record<string, LangSpec>> = {
   python: { image: 'python:3.12-slim', file: 'main.py', cmd: 'python3 main.py' },
   javascript: { image: 'node:20-slim', file: 'main.js', cmd: 'node main.js' },
   ruby: { image: 'ruby:3.3-slim', file: 'main.rb', cmd: 'ruby main.rb' },
-  go: { image: 'golang:1.22-alpine', file: 'main.go', cmd: 'go run main.go' },
+  go: {
+    image: 'golang:1.22-alpine',
+    file: 'main.go',
+    cmd: 'go run main.go',
+    // `go run` needs writable cache/module/work dirs; their defaults ($HOME/.cache, the
+    // image's GOPATH=/go, and $TMPDIR for the build work dir) all land on the read-only
+    // root FS, so it fails with "mkdir /tmp/go-build…: read-only file system". Redirect
+    // each into the writable /work tmpfs.
+    env: {
+      GOCACHE: '/work/.cache/go-build',
+      GOPATH: '/work/go',
+      GOTMPDIR: '/work',
+    },
+  },
   java: { image: 'eclipse-temurin:21-jdk', file: 'Main.java', cmd: 'javac Main.java && java Main' },
   cpp: { image: 'gcc:13', file: 'main.cpp', cmd: 'g++ -O2 -o app main.cpp && ./app' },
 };
@@ -65,6 +89,13 @@ export function createDockerKernel(config: DockerKernelConfig = {}): ExecutionKe
 
       const cpuSec = req.cpuTimeLimit ?? config.cpuTimeoutSec ?? 10;
       const containerName = `of-run-${randomUUID()}`;
+
+      // Redirect HOME/TMPDIR (+ per-language scratch like Go's caches) into the writable
+      // /work tmpfs, since the rest of the FS is read-only.
+      const envArgs = Object.entries({ ...COMMON_ENV, ...(spec.env ?? {}) }).flatMap(([k, v]) => [
+        '-e',
+        `${k}=${v}`,
+      ]);
 
       // In-container: decode source + stdin from env, then (compile &&) run under `timeout`,
       // piping the decoded stdin to the program. Single-quoted heredoc-free, all data is base64.
@@ -103,6 +134,7 @@ export function createDockerKernel(config: DockerKernelConfig = {}): ExecutionKe
         'ALL',
         '--security-opt',
         'no-new-privileges',
+        ...envArgs,
         '-e',
         `B64SRC=${b64(req.source)}`,
         '-e',

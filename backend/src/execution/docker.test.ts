@@ -51,6 +51,30 @@ describe('docker execution kernel', () => {
     expect(srcEnv).toBe(`B64SRC=${Buffer.from('print(40+2)').toString('base64')}`);
   });
 
+  test('go run gets writable scratch dirs (HOME/TMPDIR + Go caches → /work)', async () => {
+    let captured: string[] = [];
+    onRun((args, cb) => {
+      captured = args;
+      cb(null, 'ok\n', '');
+    });
+    await createDockerKernel().run({ language: 'go', source: 'package main' });
+    // Without these, `go run` fails with "mkdir /tmp/go-build…: read-only file system".
+    expect(captured).toEqual(
+      expect.arrayContaining([
+        '-e',
+        'HOME=/work',
+        '-e',
+        'TMPDIR=/work',
+        '-e',
+        'GOCACHE=/work/.cache/go-build',
+        '-e',
+        'GOPATH=/work/go',
+        '-e',
+        'GOTMPDIR=/work',
+      ])
+    );
+  });
+
   test('host-side kill → Time Limit Exceeded', async () => {
     onRun((_args, cb) => cb(Object.assign(new Error('killed'), { killed: true }), '', ''));
     const r = await createDockerKernel({ wallTimeoutMs: 50 }).run({
