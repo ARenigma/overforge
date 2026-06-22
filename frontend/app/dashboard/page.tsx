@@ -6,8 +6,11 @@ import { ScorecardDialog } from './_components/scorecard-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { AlertCircle, CalendarClock } from 'lucide-react';
+import { CalendarClock, CheckCircle2, Gauge, Users } from 'lucide-react';
 import { type Scorecard } from '@/lib/api';
+import { PageHeader } from '@/components/ds/page-header';
+import { MetricCard } from '@/components/ds/metric-card';
+import { EmptyState, ErrorState } from '@/components/ds/state-block';
 
 interface Interview {
   id: string;
@@ -78,6 +81,11 @@ export default async function DashboardPage() {
 
   const rows = (interviews ?? []) as Interview[];
 
+  const scoredRows = rows.filter((r) => r.evaluation_score);
+  const avgScore = scoredRows.length
+    ? scoredRows.reduce((sum, r) => sum + (r.evaluation_score?.overall ?? 0), 0) / scoredRows.length
+    : null;
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       {/* ── Top bar ─────────────────────────────────────────────────────── */}
@@ -104,37 +112,53 @@ export default async function DashboardPage() {
 
       {/* ── Main content ────────────────────────────────────────────────── */}
       <main className="max-w-[1200px] mx-auto px-6 sm:px-8 py-10">
-        {/* ── Page section header ─────────────────────────────────────── */}
-        <div className="flex items-start justify-between gap-4 mb-8">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Interviews</h1>
-            <p className="text-sm text-muted-foreground">
-              All sessions where you are the interviewer
-            </p>
-          </div>
+        {/* ── Page header ─────────────────────────────────────────────── */}
+        <PageHeader
+          title="Interviews"
+          description="All sessions where you are the interviewer"
+          actions={<NewInterviewDialog />}
+        />
 
-          <NewInterviewDialog />
-        </div>
+        {/* ── Metrics ─────────────────────────────────────────────────── */}
+        {rows.length > 0 && (
+          <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <MetricCard
+              label="Total"
+              value={rows.length}
+              hint="All sessions"
+              icon={<Users className="h-4 w-4" />}
+            />
+            <MetricCard
+              label="Scored"
+              value={scoredRows.length}
+              icon={<CheckCircle2 className="h-4 w-4" />}
+            />
+            <MetricCard
+              label="Awaiting"
+              value={rows.length - scoredRows.length}
+              icon={<CalendarClock className="h-4 w-4" />}
+            />
+            <MetricCard
+              label="Avg score"
+              value={avgScore !== null ? avgScore.toFixed(1) : '—'}
+              hint="out of 5"
+              icon={<Gauge className="h-4 w-4" />}
+            />
+          </div>
+        )}
 
         {/* ── Interview list ──────────────────────────────────────────── */}
         {error ? (
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-6 py-16 text-center">
-            <AlertCircle className="h-8 w-8 text-destructive" />
-            <p className="text-sm font-medium text-foreground">
-              Couldn&apos;t load your interviews
-            </p>
-            <p className="max-w-xs text-xs text-muted-foreground">
-              Something went wrong fetching your sessions. Refresh the page to try again.
-            </p>
-          </div>
+          <ErrorState
+            title="Couldn't load your interviews"
+            description="Something went wrong fetching your sessions. Refresh the page to try again."
+          />
         ) : rows.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border py-20 text-center">
-            <CalendarClock className="h-8 w-8 text-muted-foreground/30" />
-            <p className="text-sm font-medium text-muted-foreground">No interviews yet</p>
-            <p className="max-w-xs text-xs text-muted-foreground/60">
-              Create your first session and share the link with a candidate.
-            </p>
-          </div>
+          <EmptyState
+            icon={<CalendarClock className="h-8 w-8" />}
+            title="No interviews yet"
+            description="Create your first session and share the link with a candidate."
+          />
         ) : (
           <div className="overflow-hidden rounded-xl border border-border">
             <table className="w-full text-left">
