@@ -34,6 +34,14 @@ jest.mock('../db/interviews', () => {
       events.push({ id, kind, seq: events.filter((e) => e.id === id).length + 1 });
     }),
     appendCodeRun: jest.fn(async () => {}),
+    claimForScoring: jest.fn(async (id: string) => {
+      const row = store.get(id) as { status?: string } | undefined;
+      if (row && row.status === 'in_progress') {
+        row.status = 'completed';
+        return true;
+      }
+      return false;
+    }),
     insertOutbox: jest.fn(async (id: string) => {
       outbox.push(id);
     }),
@@ -83,6 +91,9 @@ describe('orchestrator end-to-end (offline)', () => {
     expect(guard).toBeLessThan(30); // bounded — no infinite loop
     expect(phase).toBe('done');
 
+    // Scoring now runs in the background (fire-and-forget) off the final answer; let it settle.
+    await new Promise((r) => setTimeout(r, 0));
+
     // finishAndScore ran: status scored, a scorecard was written, outbox queued.
     const row = (await db.getById(id)) as Record<string, unknown>;
     expect(row.status).toBe('scored');
@@ -90,14 +101,19 @@ describe('orchestrator end-to-end (offline)', () => {
     expect(db.__outbox).toContain(id);
 
     // Events were recorded for replay (transitions, utterances, answers, score).
-    const kinds = new Set(db.__events.filter((e: { id: string }) => e.id === id).map((e: { kind: string }) => e.kind));
+    const kinds = new Set(
+      db.__events.filter((e: { id: string }) => e.id === id).map((e: { kind: string }) => e.kind)
+    );
     expect(kinds.has('transition')).toBe(true);
     expect(kinds.has('answer')).toBe(true);
     expect(kinds.has('score')).toBe(true);
   });
 
   test('begin requires T&C acceptance', async () => {
-    const { id } = await orch.createInterview({ interviewerId: 'u2', candidateEmail: 'c2@example.com' });
+    const { id } = await orch.createInterview({
+      interviewerId: 'u2',
+      candidateEmail: 'c2@example.com',
+    });
     await expect(orch.begin(id, { tncAccepted: false })).rejects.toThrow(/T&C/);
   });
 });

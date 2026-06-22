@@ -184,6 +184,44 @@ export async function appendCodeRun(id: string, run: RunResult): Promise<void> {
   await updateInterview(id, { code_runs: runs });
 }
 
+/** Atomically claim an in-progress interview for scoring (single-flight). Returns true only
+ *  for the caller that flipped status in_progress -> completed; concurrent callers get false. */
+export async function claimForScoring(id: string): Promise<boolean> {
+  const db = createServiceClient();
+  const { data, error } = await db
+    .from('interviews')
+    .update({ status: 'completed' })
+    .eq('id', id)
+    .eq('status', 'in_progress')
+    .select('id');
+  if (error) throw new Error(`claimForScoring: ${error.message}`);
+  return !!data && data.length > 0;
+}
+
+/** Mark stale interviews: invited past TTL -> expired; in_progress past TTL -> abandoned. */
+export async function sweepExpiredInterviews(): Promise<{ expired: number; abandoned: number }> {
+  const db = createServiceClient();
+  const now = new Date().toISOString();
+
+  const { data: exp, error: e1 } = await db
+    .from('interviews')
+    .update({ status: 'expired' })
+    .eq('status', 'invited')
+    .lt('token_expires_at', now)
+    .select('id');
+  if (e1) throw new Error(`sweepExpired invited: ${e1.message}`);
+
+  const { data: ab, error: e2 } = await db
+    .from('interviews')
+    .update({ status: 'abandoned' })
+    .eq('status', 'in_progress')
+    .lt('token_expires_at', now)
+    .select('id');
+  if (e2) throw new Error(`sweepExpired in_progress: ${e2.message}`);
+
+  return { expired: exp?.length ?? 0, abandoned: ab?.length ?? 0 };
+}
+
 // ─────────────────────── Outbox store implementation ───────────────────────
 
 /** Insert a pending outbox row for the given interview. */

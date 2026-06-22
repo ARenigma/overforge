@@ -14,6 +14,7 @@ import {
   updateInterview,
   appendEvent,
   appendCodeRun,
+  claimForScoring,
   insertOutbox,
   makeOutboxStore,
   Interview,
@@ -225,7 +226,11 @@ export async function submitAnswer(interviewId: string, answer: string): Promise
 
   if (effect.kind === 'score') {
     await persistTransition(interview, newCtx, effect, null, answer);
-    await finishAndScore(interviewId);
+    // Score in the background so the candidate's final response returns immediately. The
+    // explicit /finish path also calls finishAndScore; the single-flight claim makes it safe.
+    void finishAndScore(interviewId).catch((err: unknown) => {
+      console.error(`[orchestrator] background scoring failed for ${interviewId}:`, err);
+    });
     // Return an empty utterance — the UI should show a "scoring complete" state.
     return {
       utterance: { text: 'Your interview is complete. Thank you!', expects: 'text' },
@@ -286,9 +291,13 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
 export async function finishAndScore(interviewId: string): Promise<void> {
   const interview = requireInterview(await getById(interviewId), interviewId);
 
-  // Idempotency: scoring runs exactly once. Both the /answer 'score' effect and the
-  // explicit /finish route can reach here; the second call is a no-op.
-  if (interview.status === 'scored') return;
+  // Single-flight idempotency: only the caller that atomically flips in_progress -> completed
+  // proceeds to score. The background (post-answer) path and the explicit /finish route can
+  // reach here concurrently; exactly one scores, so there's no double-score / double-email.
+  if (interview.status === 'scored' || interview.status === 'completed') return;
+  if (interview.status !== 'in_progress') return; // not scorable (invited/expired/abandoned/cancelled)
+  const claimed = await claimForScoring(interviewId);
+  if (!claimed) return;
 
   const { client: minimaxClient } = (() => {
     if (process.env.MINIMAX_API_KEY) {

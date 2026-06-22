@@ -7,7 +7,7 @@ import cors from 'cors';
 import { interviewsRouter } from './http/interviews';
 import { SUPPORTED_LANGUAGES } from './execution/docker';
 import { drainOutbox } from './notify/outbox';
-import { makeOutboxStore } from './db/interviews';
+import { makeOutboxStore, sweepExpiredInterviews } from './db/interviews';
 import { createEmailSender } from './notify/resend';
 
 const app = express();
@@ -70,6 +70,7 @@ app.use((_req, res) => {
 // ─────────────────────── Outbox drain interval ───────────────────────
 
 let drainInterval: ReturnType<typeof setInterval> | null = null;
+let sweepInterval: ReturnType<typeof setInterval> | null = null;
 
 function startDrainInterval(): void {
   drainInterval = setInterval(() => {
@@ -81,6 +82,15 @@ function startDrainInterval(): void {
   drainInterval.unref();
 }
 
+function startSweepInterval(): void {
+  sweepInterval = setInterval(() => {
+    sweepExpiredInterviews().catch((err: unknown) => {
+      console.error('[sweep] expiry sweep error:', err);
+    });
+  }, 300_000);
+  sweepInterval.unref();
+}
+
 // ─────────────────────── Startup ───────────────────────
 
 const PORT = Number(process.env.PORT ?? 5000);
@@ -88,6 +98,7 @@ const PORT = Number(process.env.PORT ?? 5000);
 const server = app.listen(PORT, () => {
   console.log(`[server] listening on port ${PORT}`);
   startDrainInterval();
+  startSweepInterval();
 });
 
 // ─────────────────────── Graceful shutdown ───────────────────────
@@ -95,6 +106,7 @@ const server = app.listen(PORT, () => {
 function shutdown(signal: string): void {
   console.log(`[server] ${signal} received — shutting down`);
   if (drainInterval) clearInterval(drainInterval);
+  if (sweepInterval) clearInterval(sweepInterval);
   server.close(() => {
     console.log('[server] closed');
     process.exit(0);
