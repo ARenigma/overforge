@@ -26,7 +26,10 @@ const RUBRIC_SYSTEM =
   '{"overall": number, "recommendation": "strong_hire"|"hire"|"lean_hire"|"no_hire", ' +
   '"dimensions":[{"name":string,"score":number,"notes":string}], "summary": string}.';
 
-export async function scoreInterview(input: ScoringInput, client: MinimaxClient): Promise<Scorecard> {
+export async function scoreInterview(
+  input: ScoringInput,
+  client: MinimaxClient
+): Promise<Scorecard> {
   const messages: ChatMessage[] = [
     { role: 'system', content: RUBRIC_SYSTEM },
     { role: 'user', content: buildScoringPrompt(input) },
@@ -41,7 +44,11 @@ export async function scoreInterview(input: ScoringInput, client: MinimaxClient)
 
 export function buildScoringPrompt(input: ScoringInput): string {
   const transcript = input.transcript.map((t) => `${t.role}: ${t.text}`).join('\n');
-  const runs = input.codeRuns.map((r) => `- ${r.language}: ${r.status}${r.stderr ? ` (stderr: ${r.stderr.slice(0, 120)})` : ''}`).join('\n');
+  const runs = input.codeRuns
+    .map(
+      (r) => `- ${r.language}: ${r.status}${r.stderr ? ` (stderr: ${r.stderr.slice(0, 120)})` : ''}`
+    )
+    .join('\n');
   return [
     `TRANSCRIPT:\n${transcript || '(none)'}`,
     input.finalCode ? `FINAL CODE:\n${input.finalCode.slice(0, 4000)}` : '',
@@ -59,7 +66,9 @@ const clamp05 = (n: unknown): number => {
 
 export function validateScorecard(raw: unknown): Scorecard {
   const o = (raw ?? {}) as Partial<Scorecard>;
-  const recommendation: Recommendation = RECOMMENDATIONS.includes(o.recommendation as Recommendation)
+  const recommendation: Recommendation = RECOMMENDATIONS.includes(
+    o.recommendation as Recommendation
+  )
     ? (o.recommendation as Recommendation)
     : 'no_hire';
   const dimensions: ScoreDimension[] = Array.isArray(o.dimensions)
@@ -74,6 +83,7 @@ export function validateScorecard(raw: unknown): Scorecard {
     recommendation,
     dimensions,
     summary: typeof o.summary === 'string' ? o.summary : '',
+    scoringFailed: false,
   };
 }
 
@@ -83,5 +93,6 @@ export function fallbackScorecard(): Scorecard {
     recommendation: 'no_hire',
     dimensions: [],
     summary: 'Automatic scoring was unavailable; manual review required.',
+    scoringFailed: true,
   };
 }

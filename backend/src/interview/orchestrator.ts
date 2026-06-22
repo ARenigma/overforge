@@ -230,8 +230,13 @@ export async function submitAnswer(interviewId: string, answer: string): Promise
 export async function recordRun(interviewId: string, req: RunRequest): Promise<RunResult> {
   const interview = requireInterview(await getById(interviewId), interviewId);
 
+  if (interview.status !== 'in_progress') {
+    throw Object.assign(new Error('Interview is not in progress'), { status: 409 });
+  }
+
   const kernel = getExecutionKernel();
   const result = await kernel.run(req);
+  result.language = req.language;
 
   await appendCodeRun(interviewId, result);
   await updateInterview(interviewId, { code_snapshot: req.source });
@@ -252,6 +257,10 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
 export async function finishAndScore(interviewId: string): Promise<void> {
   const interview = requireInterview(await getById(interviewId), interviewId);
 
+  // Idempotency: scoring runs exactly once. Both the /answer 'score' effect and the
+  // explicit /finish route can reach here; the second call is a no-op.
+  if (interview.status === 'scored') return;
+
   const { client: minimaxClient } = (() => {
     if (process.env.MINIMAX_API_KEY) {
       return { client: createMinimaxClient(minimaxConfigFromEnv()) };
@@ -267,7 +276,7 @@ export async function finishAndScore(interviewId: string): Promise<void> {
   })();
 
   const codeRuns: CodeRunSummary[] = (interview.code_runs ?? []).map((r: RunResult) => ({
-    language: 'unknown',
+    language: r.language ?? 'unknown',
     status: r.status,
     stderr: r.stderr,
   }));

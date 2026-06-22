@@ -2,21 +2,15 @@
 // Candidate routes authenticate via token in request body (from URL ?t=).
 // Interviewer routes authenticate via Bearer token (Supabase access_token).
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type InterviewPhase =
-  | "greeting"
-  | "oral"
-  | "handoff"
-  | "coding"
-  | "wrap_up"
-  | "done";
+export type InterviewPhase = 'greeting' | 'oral' | 'handoff' | 'coding' | 'wrap_up' | 'done';
 
 export interface Utterance {
   text: string;
-  expects: "voice" | "text" | "code";
+  expects: 'voice' | 'text' | 'code';
 }
 
 export interface BeginResponse {
@@ -49,9 +43,11 @@ export interface ScorecardDimension {
 
 export interface Scorecard {
   overall: number;
-  recommendation: "strong_hire" | "hire" | "lean_hire" | "no_hire";
+  recommendation: 'strong_hire' | 'hire' | 'lean_hire' | 'no_hire';
   summary: string;
   dimensions: ScorecardDimension[];
+  /** True when automatic scoring failed — show "manual review", never a real no_hire. */
+  scoringFailed?: boolean;
 }
 
 export interface CreateInterviewResponse {
@@ -70,13 +66,13 @@ interface FetchOptions {
 }
 
 async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T> {
-  const { method = "POST", body, accessToken } = options;
+  const { method = 'POST', body, accessToken } = options;
 
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    'Content-Type': 'application/json',
   };
   if (accessToken) {
-    headers["Authorization"] = `Bearer ${accessToken}`;
+    headers['Authorization'] = `Bearer ${accessToken}`;
   }
 
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -109,7 +105,7 @@ export async function createInterview(
   accessToken: string,
   body: { candidateEmail: string; candidateName?: string }
 ): Promise<CreateInterviewResponse> {
-  return apiFetch<CreateInterviewResponse>("/api/interviews", {
+  return apiFetch<CreateInterviewResponse>('/api/interviews', {
     accessToken,
     body,
   });
@@ -121,10 +117,7 @@ export async function createInterview(
  * POST /api/interviews/:id/begin
  * Starts the interview. Authenticates via candidate token in body.
  */
-export async function beginInterview(
-  id: string,
-  token: string
-): Promise<BeginResponse> {
+export async function beginInterview(id: string, token: string): Promise<BeginResponse> {
   return apiFetch<BeginResponse>(`/api/interviews/${id}/begin`, {
     body: { token, tncAccepted: true },
   });

@@ -14,6 +14,8 @@ export interface Scorecard {
   recommendation: Recommendation;
   dimensions: ScoreDimension[];
   summary: string;
+  /** True when automatic scoring failed — a human must review. Never a real no_hire. */
+  scoringFailed?: boolean;
 }
 
 export const RECOMMENDATIONS: readonly Recommendation[] = [

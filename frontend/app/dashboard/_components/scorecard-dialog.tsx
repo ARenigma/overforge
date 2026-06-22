@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { type Scorecard } from '@/lib/api';
 import { InfoTooltip } from '@/components/ds/info-tooltip';
-import { BarChart2 } from 'lucide-react';
+import { AlertCircle, BarChart2 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -78,27 +78,43 @@ export function ScorecardDialog({ scorecard }: ScorecardDialogProps) {
         <DialogHeader>
           <div className="flex items-center justify-between gap-4 pr-6">
             <DialogTitle className="text-foreground text-base">Interview scorecard</DialogTitle>
-            <Badge
-              variant="outline"
-              className={`text-xs shrink-0 ${RECOMMENDATION_STYLES[scorecard.recommendation]}`}
-            >
-              {RECOMMENDATION_LABELS[scorecard.recommendation]}
-            </Badge>
+            {scorecard.scoringFailed ? (
+              <Badge
+                variant="outline"
+                className="shrink-0 gap-1 border-border bg-muted text-xs text-foreground"
+              >
+                <AlertCircle className="h-3 w-3" />
+                Manual review
+              </Badge>
+            ) : (
+              <Badge
+                variant="outline"
+                className={`text-xs shrink-0 ${RECOMMENDATION_STYLES[scorecard.recommendation]}`}
+              >
+                {RECOMMENDATION_LABELS[scorecard.recommendation]}
+              </Badge>
+            )}
           </div>
         </DialogHeader>
 
         <div className="space-y-5 pt-1">
           {/* Overall score */}
-          <div className="bg-muted border border-border rounded-md px-4 py-3 flex items-center justify-between">
+          <div className="bg-muted border border-border rounded-md px-4 py-3 flex items-center justify-between gap-3">
             <InfoTooltip
               label="Overall score"
               tip="Weighted average of all dimension scores, on a 1–5 scale."
               className="text-muted-foreground"
             />
-            <span className="text-2xl font-semibold text-foreground tabular-nums">
-              {scorecard.overall}
-              <span className="text-base font-normal text-muted-foreground">/5</span>
-            </span>
+            {scorecard.scoringFailed ? (
+              <span className="text-right text-xs text-muted-foreground">
+                Automatic scoring failed — review the transcript manually.
+              </span>
+            ) : (
+              <span className="text-2xl font-semibold text-foreground tabular-nums">
+                {scorecard.overall}
+                <span className="text-base font-normal text-muted-foreground">/5</span>
+              </span>
+            )}
           </div>
 
           {/* Dimensions */}

@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScorecardDialog } from './scorecard-dialog';
 import { FilterBar } from './filter-bar';
 import { EmptyState, ErrorState } from '@/components/ds/state-block';
-import { CalendarClock, SearchX } from 'lucide-react';
+import { AlertCircle, CalendarClock, SearchX } from 'lucide-react';
 import { type Scorecard } from '@/lib/api';
 
 export interface InterviewRow {
@@ -195,7 +195,17 @@ export function InterviewTable({
                     <div className="flex items-center justify-end gap-2">
                       {interview.evaluation_score ? (
                         <>
-                          <ScoreBadge score={interview.evaluation_score.overall} />
+                          {interview.evaluation_score.scoringFailed ? (
+                            <Badge
+                              variant="outline"
+                              className="gap-1 border-border bg-muted text-[11px] text-foreground"
+                            >
+                              <AlertCircle className="h-3 w-3" />
+                              Review
+                            </Badge>
+                          ) : (
+                            <ScoreBadge score={interview.evaluation_score.overall} />
+                          )}
                           <ScorecardDialog
                             interviewId={interview.id}
                             scorecard={interview.evaluation_score}
