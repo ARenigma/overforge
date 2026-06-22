@@ -60,20 +60,12 @@ export function InterviewRowActions({ id, status }: { id: string; status: string
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
           {cancellable && (
-            <DropdownMenuItem
-              onSelect={(e) => {
-                e.preventDefault();
-                setCancelOpen(true);
-              }}
-            >
+            <DropdownMenuItem onSelect={() => setTimeout(() => setCancelOpen(true), 0)}>
               Cancel interview
             </DropdownMenuItem>
           )}
           <DropdownMenuItem
-            onSelect={(e) => {
-              e.preventDefault();
-              setDeleteOpen(true);
-            }}
+            onSelect={() => setTimeout(() => setDeleteOpen(true), 0)}
             className="text-destructive focus:text-destructive"
           >
             Delete permanently
