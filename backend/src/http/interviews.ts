@@ -73,6 +73,24 @@ router.post('/:id/begin', async (req: Request, res: Response): Promise<void> => 
   }
 });
 
+// ─────────────────────── POST /api/interviews/:id/state ───────────────────────
+// Candidate UI rehydration after a reload — read-only snapshot, token-authenticated.
+
+router.post('/:id/state', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { token } = req.body as { token?: string };
+
+    await enforceRateLimit(`state:${req.ip}`, { limit: 120, windowMs: 600_000 });
+    await validateCandidate(id, token ?? '');
+
+    const state = await orchestrator.getCandidateState(id);
+    res.json(state);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 // ─────────────────────── POST /api/interviews/:id/answer ───────────────────────
 
 router.post('/:id/answer', async (req: Request, res: Response): Promise<void> => {

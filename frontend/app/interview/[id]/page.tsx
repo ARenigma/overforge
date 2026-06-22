@@ -19,6 +19,7 @@ import {
   answerInterview,
   runCode as apiRunCode,
   finishInterview,
+  getInterviewState,
   type InterviewPhase,
   type RunResult,
 } from '@/lib/api';
@@ -107,12 +108,15 @@ export default function InterviewPage() {
   const searchParams = useSearchParams();
 
   const id = params.id;
-  const token = searchParams.get('t');
+  const urlToken = searchParams.get('t');
+  const sessionKey = `of_session_${id}`;
 
-  const [stage, setStage] = useState<Stage>(token ? 'consent' : 'error');
-  const [errorMsg, setErrorMsg] = useState<string>(
-    token ? '' : 'Invalid or missing interview link.'
-  );
+  const [stage, setStage] = useState<Stage>('loading_token');
+  const [errorMsg, setErrorMsg] = useState<string>('');
+  // Rotated session token used for all candidate calls after begin.
+  const [activeToken, setActiveToken] = useState<string | null>(null);
+  // Inline answer error (kept out of the transcript) so the candidate can resend.
+  const [answerError, setAnswerError] = useState<string | null>(null);
 
   // Interview state
   const [phase, setPhase] = useState<InterviewPhase>('greeting');
@@ -165,28 +169,70 @@ export default function InterviewPage() {
 
   // Auto-call /finish when phase reaches done
   useEffect(() => {
-    if (phase === 'done' && !finishCalledRef.current && token) {
+    if (phase === 'done' && !finishCalledRef.current && activeToken) {
       finishCalledRef.current = true;
-      finishInterview(id, token).catch(() => {
+      finishInterview(id, activeToken).catch(() => {
         // Idempotent — ignore errors silently
       });
     }
-  }, [phase, id, token]);
+  }, [phase, id, activeToken]);
+
+  // Resume on reload (session token in sessionStorage), else show consent for a fresh link.
+  useEffect(() => {
+    let cancelled = false;
+    const saved = typeof window !== 'undefined' ? sessionStorage.getItem(sessionKey) : null;
+
+    async function resume(tok: string) {
+      try {
+        const s = await getInterviewState(id, tok);
+        if (cancelled) return;
+        const done = s.status === 'scored' || s.phase === 'done' || s.phase === 'scoring';
+        setPhase(done ? 'done' : (s.phase as InterviewPhase));
+        setMessages(
+          s.transcript
+            .filter((t) => t.role !== 'system')
+            .map((t) => ({ role: t.role === 'candidate' ? 'candidate' : 'ai', text: t.text }))
+        );
+        if (s.codeSnapshot) setCode(s.codeSnapshot);
+        setStage(done ? 'done' : 'interview');
+      } catch {
+        if (cancelled) return;
+        setErrorMsg(
+          'Your interview session could not be resumed on this device. If you have not finished, please contact your interviewer.'
+        );
+        setStage('error');
+      }
+    }
+
+    if (saved) {
+      setActiveToken(saved);
+      void resume(saved);
+    } else if (urlToken) {
+      setStage('consent');
+    } else {
+      setErrorMsg('Invalid or missing interview link.');
+      setStage('error');
+    }
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   async function handleBegin() {
-    if (!token) return;
+    if (!urlToken) return;
     setStage('loading_token');
     try {
-      const res = await beginInterview(id, token);
+      const res = await beginInterview(id, urlToken);
+      // Persist the rotated session token so a reload can resume on this device.
+      sessionStorage.setItem(sessionKey, res.sessionToken);
+      setActiveToken(res.sessionToken);
       setPhase(res.phase);
       setMessages([{ role: 'ai', text: res.utterance.text }]);
-      if (res.phase === 'done') {
-        setStage('done');
-      } else {
-        setStage('interview');
-      }
+      setStage(res.phase === 'done' ? 'done' : 'interview');
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to start interview.');
       setStage('error');
@@ -194,45 +240,46 @@ export default function InterviewPage() {
   }
 
   async function handleSendAnswer() {
-    if (!token || !answer.trim() || aiThinking) return;
+    if (!activeToken || !answer.trim() || aiThinking) return;
     const text = answer.trim();
     setAnswer('');
+    setAnswerError(null);
     setMessages((prev) => [...prev, { role: 'candidate', text }]);
     setAiThinking(true);
     try {
-      const res = await answerInterview(id, token, text);
+      const res = await answerInterview(id, activeToken, text);
       setPhase(res.phase);
       setMessages((prev) => [...prev, { role: 'ai', text: res.utterance.text }]);
       if (res.phase === 'done') {
         setStage('done');
       }
     } catch (err: unknown) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'ai',
-          text: `Error: ${err instanceof Error ? err.message : 'Failed to send answer. Please try again.'}`,
-        },
-      ]);
+      // Roll back the optimistic bubble + refill the box so the candidate can resend —
+      // never inject a fake AI error message into the transcript.
+      setMessages((prev) => prev.slice(0, -1));
+      setAnswer(text);
+      setAnswerError(
+        err instanceof Error ? err.message : 'Failed to send answer. Please try again.'
+      );
     } finally {
       setAiThinking(false);
     }
   }
 
   const handleRunCode = useCallback(async () => {
-    if (!token || running) return;
+    if (!activeToken || running) return;
     setRunning(true);
     setRunError(null);
     setRunResult(null);
     try {
-      const result = await apiRunCode(id, token, language, code);
+      const result = await apiRunCode(id, activeToken, language, code);
       setRunResult(result);
     } catch (err: unknown) {
       setRunError(err instanceof Error ? err.message : 'Code execution failed.');
     } finally {
       setRunning(false);
     }
-  }, [id, token, language, code, running]);
+  }, [id, activeToken, language, code, running]);
 
   function handleAnswerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -405,7 +452,9 @@ export default function InterviewPage() {
                         {runResult.status}
                       </span>
                       <span>{runResult.timeMs}ms</span>
-                      <span>{Math.round(runResult.memoryKb / 1024)}KB</span>
+                      {runResult.memoryKb ? (
+                        <span>{Math.round(runResult.memoryKb / 1024)}KB</span>
+                      ) : null}
                     </div>
                     {runResult.compileOutput && (
                       <pre className="text-destructive whitespace-pre-wrap break-all">
@@ -509,6 +558,20 @@ export default function InterviewPage() {
 
               {/* Answer input — Assistant Chat style: expanding textarea + inset send */}
               <div className="shrink-0 border-t border-border p-3">
+                {answerError && (
+                  <Alert className="mb-2 border-destructive/40 bg-destructive/10 px-3 py-2">
+                    <AlertDescription className="flex items-center justify-between gap-3 text-xs text-destructive">
+                      <span>{answerError}</span>
+                      <button
+                        type="button"
+                        onClick={() => setAnswerError(null)}
+                        className="shrink-0 underline underline-offset-2"
+                      >
+                        Dismiss
+                      </button>
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <div className="relative border border-border bg-background transition-colors focus-within:border-muted-foreground/40">
                   <textarea
                     value={answer}

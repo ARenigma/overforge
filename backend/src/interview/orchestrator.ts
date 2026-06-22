@@ -41,7 +41,8 @@ function getExecutionKernel() {
 
 // ─────────────────────── Token TTL ───────────────────────
 
-const TOKEN_TTL_HOURS = 72;
+const TOKEN_TTL_HOURS = Number(process.env.TOKEN_TTL_HOURS ?? 72);
+const TNC_VERSION = 'v1';
 
 function tokenExpiry(): Date {
   const d = new Date();
@@ -127,6 +128,8 @@ export interface BeginResult {
   utterance: Utterance;
   phase: string;
   state: InterviewContext;
+  /** Fresh session token issued at begin — the invite-link token is now dead. */
+  sessionToken: string;
 }
 
 export async function begin(
@@ -152,14 +155,40 @@ export async function begin(
   const req: UtteranceRequest = { effect, ctx: newCtx, transcript: interview.transcript ?? [] };
   const utterance = await oracle.generateUtterance(req);
 
+  // Rotate the access token: the invite-link token is consumed here and replaced by a
+  // fresh session token bound to the candidate's browser. A forwarded invite link can no
+  // longer act on the interview once it has begun.
+  const sessionToken = generateToken();
+
   await updateInterview(interviewId, {
     tnc_accepted_at: new Date().toISOString(),
+    tnc_version: TNC_VERSION,
     status: 'in_progress',
+    access_token_hash: hashToken(sessionToken),
+    token_expires_at: tokenExpiry().toISOString(),
   });
 
   await persistTransition(interview, newCtx, effect, utterance);
 
-  return { utterance, phase: newCtx.phase, state: newCtx };
+  return { utterance, phase: newCtx.phase, state: newCtx, sessionToken };
+}
+
+export interface CandidateState {
+  status: string;
+  phase: string;
+  transcript: TranscriptTurn[];
+  codeSnapshot: string;
+}
+
+/** Read-only snapshot for the candidate UI to rehydrate after a reload. */
+export async function getCandidateState(interviewId: string): Promise<CandidateState> {
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  return {
+    status: interview.status,
+    phase: interview.phase,
+    transcript: interview.transcript ?? [],
+    codeSnapshot: interview.code_snapshot ?? '',
+  };
 }
 
 export interface AnswerResult {

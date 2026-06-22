@@ -17,6 +17,20 @@ export interface BeginResponse {
   utterance: Utterance;
   phase: InterviewPhase;
   state: Record<string, unknown>;
+  /** Fresh session token issued at begin; use it for all subsequent candidate calls. */
+  sessionToken: string;
+}
+
+export interface TranscriptTurn {
+  role: 'interviewer' | 'candidate' | 'system';
+  text: string;
+}
+
+export interface InterviewState {
+  status: string;
+  phase: string;
+  transcript: TranscriptTurn[];
+  codeSnapshot: string;
 }
 
 export interface AnswerResponse {
@@ -30,9 +44,9 @@ export interface RunResult {
   stderr: string;
   compileOutput: string;
   status: string;
-  exitCode: number;
+  exitCode: number | null;
   timeMs: number;
-  memoryKb: number;
+  memoryKb: number | null;
 }
 
 export interface ScorecardDimension {
@@ -120,6 +134,16 @@ export async function createInterview(
 export async function beginInterview(id: string, token: string): Promise<BeginResponse> {
   return apiFetch<BeginResponse>(`/api/interviews/${id}/begin`, {
     body: { token, tncAccepted: true },
+  });
+}
+
+/**
+ * POST /api/interviews/:id/state
+ * Read-only snapshot for rehydrating the candidate UI after a reload.
+ */
+export async function getInterviewState(id: string, token: string): Promise<InterviewState> {
+  return apiFetch<InterviewState>(`/api/interviews/${id}/state`, {
+    body: { token },
   });
 }
 

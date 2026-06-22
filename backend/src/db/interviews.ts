@@ -64,6 +64,9 @@ export type UpdateInterviewInput = Partial<{
   code_snapshot: string;
   code_runs: RunResult[];
   tnc_accepted_at: string;
+  tnc_version: string;
+  access_token_hash: string;
+  token_expires_at: string;
   evaluation_score: Scorecard;
   scorecard_sent_at: string;
 }>;
