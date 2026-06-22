@@ -386,7 +386,7 @@ export default function InterviewPage() {
               {/* Code toolbar — language selector + Run pill */}
               <div className="flex h-10 items-center gap-2 px-3 border-b border-border bg-card shrink-0">
                 <Select value={language} onValueChange={(v) => setLanguage(v as Language)}>
-                  <SelectTrigger className="h-7 w-36 text-xs bg-muted border-border text-foreground focus:ring-ring font-mono">
+                  <SelectTrigger className="h-7 w-36 text-xs bg-muted border-border text-foreground focus-visible:ring-ring font-mono">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent className="bg-card border-border text-foreground">
@@ -591,7 +591,7 @@ export default function InterviewPage() {
                     onClick={handleSendAnswer}
                     disabled={aiThinking || !answer.trim()}
                     aria-label="Send answer"
-                    className="absolute bottom-2 right-2 grid h-8 w-8 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity hover:opacity-90 active:scale-95 disabled:opacity-40"
+                    className="absolute bottom-2 right-2 grid h-8 w-8 place-items-center rounded-full bg-primary text-primary-foreground outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-95 disabled:opacity-40"
                   >
                     {aiThinking ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
