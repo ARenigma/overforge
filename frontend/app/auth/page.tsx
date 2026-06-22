@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Field } from '@/components/ds/field';
 import { createClient } from '@/lib/supabase/client';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { Reveal } from '@/components/marketing/reveal';
@@ -258,13 +258,7 @@ export default function AuthPage() {
           {/* Form */}
           <form onSubmit={handleEmailAuth} className="space-y-4" noValidate>
             {/* Email field */}
-            <div className="space-y-1.5">
-              <Label
-                htmlFor="email"
-                className="font-mono text-xs uppercase tracking-wider text-muted-foreground"
-              >
-                Email
-              </Label>
+            <Field id="email" label="Email">
               <Input
                 id="email"
                 type="email"
@@ -282,18 +276,14 @@ export default function AuthPage() {
                   loading && 'animate-pulse'
                 )}
               />
-            </div>
+            </Field>
 
             {/* Password field */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label
-                  htmlFor="password"
-                  className="font-mono text-xs uppercase tracking-wider text-muted-foreground"
-                >
-                  Password
-                </Label>
-                {mode === 'signin' && (
+            <Field
+              id="password"
+              label="Password"
+              labelAction={
+                mode === 'signin' ? (
                   <button
                     type="button"
                     onClick={handleForgotPassword}
@@ -302,8 +292,9 @@ export default function AuthPage() {
                   >
                     Forgot password?
                   </button>
-                )}
-              </div>
+                ) : undefined
+              }
+            >
               <div className="relative">
                 <Input
                   id="password"
@@ -332,7 +323,7 @@ export default function AuthPage() {
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
-            </div>
+            </Field>
 
             {/* Primary CTA */}
             <Button
