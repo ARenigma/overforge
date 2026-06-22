@@ -24,6 +24,7 @@ import {
 } from '@/lib/api';
 import { AlertCircle, ArrowUp, CheckCircle, Clock, Loader2, Play } from 'lucide-react';
 import { Wordmark } from '@/components/marketing/wordmark';
+import { MarkdownMessage } from '@/components/interview/markdown-message';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -482,13 +483,13 @@ export default function InterviewPage() {
                   >
                     <div
                       className={[
-                        'max-w-[88%] whitespace-pre-wrap px-4 py-2.5 text-sm font-semibold leading-relaxed',
+                        'max-w-[88%] px-4 py-2.5 text-sm font-semibold leading-relaxed',
                         msg.role === 'ai'
                           ? 'bg-card text-foreground'
-                          : 'border border-primary/30 bg-primary/15 text-foreground',
+                          : 'whitespace-pre-wrap border border-primary/30 bg-primary/15 text-foreground',
                       ].join(' ')}
                     >
-                      {msg.text}
+                      {msg.role === 'ai' ? <MarkdownMessage text={msg.text} /> : msg.text}
                     </div>
                   </div>
                 ))}
