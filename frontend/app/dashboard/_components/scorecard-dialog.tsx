@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { StatusBadge, type BadgeIntent } from '@/components/ds/status-badge';
 import {
   Dialog,
   DialogContent,
@@ -11,22 +11,24 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { type Scorecard } from '@/lib/api';
-import { BarChart2 } from 'lucide-react';
+import { InfoTooltip } from '@/components/ds/info-tooltip';
+import { AlertCircle, BarChart2 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ScorecardDialogProps {
   interviewId: string;
   scorecard: Scorecard;
+  candidateName?: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const RECOMMENDATION_STYLES: Record<Scorecard['recommendation'], string> = {
-  strong_hire: 'border-success/40 text-success bg-success/10',
-  hire: 'border-primary/40 text-primary bg-primary/10',
-  lean_hire: 'border-primary/30 text-muted-foreground bg-primary/5',
-  no_hire: 'border-destructive/40 text-destructive bg-destructive/10',
+const RECOMMENDATION_INTENT: Record<Scorecard['recommendation'], BadgeIntent> = {
+  strong_hire: 'success',
+  hire: 'info',
+  lean_hire: 'neutral',
+  no_hire: 'danger',
 };
 
 const RECOMMENDATION_LABELS: Record<Scorecard['recommendation'], string> = {
@@ -57,7 +59,7 @@ function ScoreBar({ score }: { score: number }) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ScorecardDialog({ scorecard }: ScorecardDialogProps) {
+export function ScorecardDialog({ scorecard, candidateName }: ScorecardDialogProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -76,24 +78,44 @@ export function ScorecardDialog({ scorecard }: ScorecardDialogProps) {
       <DialogContent className="bg-card border border-border text-card-foreground sm:max-w-lg">
         <DialogHeader>
           <div className="flex items-center justify-between gap-4 pr-6">
-            <DialogTitle className="text-foreground text-base">Interview scorecard</DialogTitle>
-            <Badge
-              variant="outline"
-              className={`text-xs shrink-0 ${RECOMMENDATION_STYLES[scorecard.recommendation]}`}
-            >
-              {RECOMMENDATION_LABELS[scorecard.recommendation]}
-            </Badge>
+            <div className="space-y-0.5">
+              <DialogTitle className="text-foreground text-base">Interview scorecard</DialogTitle>
+              {candidateName && <p className="text-xs text-muted-foreground">{candidateName}</p>}
+            </div>
+            {scorecard.scoringFailed ? (
+              <StatusBadge intent="warning" className="shrink-0 gap-1">
+                <AlertCircle className="h-3 w-3" />
+                Manual review
+              </StatusBadge>
+            ) : (
+              <StatusBadge
+                intent={RECOMMENDATION_INTENT[scorecard.recommendation]}
+                className="shrink-0"
+              >
+                {RECOMMENDATION_LABELS[scorecard.recommendation]}
+              </StatusBadge>
+            )}
           </div>
         </DialogHeader>
 
         <div className="space-y-5 pt-1">
           {/* Overall score */}
-          <div className="bg-muted border border-border rounded-md px-4 py-3 flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Overall score</span>
-            <span className="text-2xl font-semibold text-foreground tabular-nums">
-              {scorecard.overall}
-              <span className="text-base font-normal text-muted-foreground">/5</span>
-            </span>
+          <div className="bg-muted border border-border rounded-md px-4 py-3 flex items-center justify-between gap-3">
+            <InfoTooltip
+              label="Overall score"
+              tip="Weighted average of all dimension scores, on a 1–5 scale."
+              className="text-muted-foreground"
+            />
+            {scorecard.scoringFailed ? (
+              <span className="text-right text-xs text-muted-foreground">
+                Automatic scoring failed — review the transcript manually.
+              </span>
+            ) : (
+              <span className="text-2xl font-semibold text-foreground tabular-nums">
+                {scorecard.overall}
+                <span className="text-base font-normal text-muted-foreground">/5</span>
+              </span>
+            )}
           </div>
 
           {/* Dimensions */}

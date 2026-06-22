@@ -7,7 +7,7 @@ import cors from 'cors';
 import { interviewsRouter } from './http/interviews';
 import { SUPPORTED_LANGUAGES } from './execution/docker';
 import { drainOutbox } from './notify/outbox';
-import { makeOutboxStore } from './db/interviews';
+import { makeOutboxStore, sweepExpiredInterviews } from './db/interviews';
 import { createEmailSender } from './notify/resend';
 
 const app = express();
@@ -15,6 +15,25 @@ const app = express();
 // ─────────────────────── Middleware ───────────────────────
 
 const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+
+// Refuse to boot a production process pointed at localhost — that would open CORS to
+// localhost instead of the real origin (silent misconfiguration).
+if (process.env.NODE_ENV === 'production' && frontendUrl.includes('localhost')) {
+  throw new Error('FRONTEND_URL must be the production origin in production (got localhost)');
+}
+
+// Behind Caddy: trust the proxy so req.ip reflects the real client (used for rate limiting).
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
+// Minimal security headers for a JSON API (no helmet dependency required).
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-DNS-Prefetch-Control', 'off');
+  next();
+});
 
 app.use(
   cors({
@@ -51,6 +70,7 @@ app.use((_req, res) => {
 // ─────────────────────── Outbox drain interval ───────────────────────
 
 let drainInterval: ReturnType<typeof setInterval> | null = null;
+let sweepInterval: ReturnType<typeof setInterval> | null = null;
 
 function startDrainInterval(): void {
   drainInterval = setInterval(() => {
@@ -62,6 +82,15 @@ function startDrainInterval(): void {
   drainInterval.unref();
 }
 
+function startSweepInterval(): void {
+  sweepInterval = setInterval(() => {
+    sweepExpiredInterviews().catch((err: unknown) => {
+      console.error('[sweep] expiry sweep error:', err);
+    });
+  }, 300_000);
+  sweepInterval.unref();
+}
+
 // ─────────────────────── Startup ───────────────────────
 
 const PORT = Number(process.env.PORT ?? 5000);
@@ -69,6 +98,7 @@ const PORT = Number(process.env.PORT ?? 5000);
 const server = app.listen(PORT, () => {
   console.log(`[server] listening on port ${PORT}`);
   startDrainInterval();
+  startSweepInterval();
 });
 
 // ─────────────────────── Graceful shutdown ───────────────────────
@@ -76,6 +106,7 @@ const server = app.listen(PORT, () => {
 function shutdown(signal: string): void {
   console.log(`[server] ${signal} received — shutting down`);
   if (drainInterval) clearInterval(drainInterval);
+  if (sweepInterval) clearInterval(sweepInterval);
   server.close(() => {
     console.log('[server] closed');
     process.exit(0);

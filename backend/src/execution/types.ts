@@ -20,6 +20,8 @@ export interface RunResult {
   exitCode: number | null;
   timeMs: number | null;
   memoryKb: number | null;
+  /** Canonical language of the run, recorded so the scorer can judge code quality. */
+  language?: string;
 }
 
 export interface ExecutionKernel {

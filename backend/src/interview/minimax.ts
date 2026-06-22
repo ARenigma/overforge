@@ -6,12 +6,7 @@
 // staged (see docs/ARCHITECTURE_SPEC §4). Until then this typechecks and is unit-
 // tested via the DeterministicOracle; live calls require MINIMAX_API_KEY.
 
-import {
-  Oracle,
-  UtteranceRequest,
-  Utterance,
-  EvaluateRequest,
-} from './oracle';
+import { Oracle, UtteranceRequest, Utterance, EvaluateRequest } from './oracle';
 import { OracleDecision } from './types';
 
 export interface MinimaxConfig {
@@ -52,9 +47,7 @@ export function createMinimaxClient(config: MinimaxConfig): MinimaxClient {
   return {
     async complete(messages: ChatMessage[], opts: CompleteOptions = {}): Promise<string> {
       if (!config.apiKey || !config.model) {
-        throw new Error(
-          'Minimax is not configured: set MINIMAX_API_KEY and MINIMAX_LLM_MODEL.'
-        );
+        throw new Error('Minimax is not configured: set MINIMAX_API_KEY and MINIMAX_LLM_MODEL.');
       }
       const url = config.groupId
         ? `${config.baseUrl}?GroupId=${encodeURIComponent(config.groupId)}`
@@ -139,13 +132,20 @@ function utteranceMode(kind: string): Utterance['expects'] {
   return 'text';
 }
 
+// The full interview is short (~12 turns) and fits the model context comfortably, so the
+// interviewer sees the whole conversation — earlier oral answers inform later questions.
+const TRANSCRIPT_WINDOW = 40;
+
 function buildUtterancePrompt(req: UtteranceRequest): string {
-  const recent = req.transcript.slice(-6).map((t) => `${t.role}: ${t.text}`).join('\n');
+  const recent = req.transcript
+    .slice(-TRANSCRIPT_WINDOW)
+    .map((t) => `${t.role}: ${t.text}`)
+    .join('\n');
   return [
     `Phase: ${req.ctx.phase}. Next action: ${req.effect.kind}.`,
     req.code ? `Candidate code so far:\n${req.code.slice(0, 1500)}` : '',
     recent ? `Recent transcript:\n${recent}` : '',
-    'Produce only the interviewer\'s next utterance.',
+    "Produce only the interviewer's next utterance.",
   ]
     .filter(Boolean)
     .join('\n\n');

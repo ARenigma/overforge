@@ -5,6 +5,8 @@ import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/toaster';
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { CommandMenuProvider } from '@/components/providers/command-menu-provider';
 
 export const metadata: Metadata = {
   title: 'Overforge — Live technical interviews',
@@ -40,8 +42,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           disableTransitionOnChange
           storageKey="overforge-theme"
         >
-          {children}
+          <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
           <Toaster />
+          <CommandMenuProvider />
         </ThemeProvider>
       </body>
     </html>

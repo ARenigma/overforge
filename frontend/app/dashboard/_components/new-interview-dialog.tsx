@@ -4,8 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Field } from '@/components/ds/field';
 import {
   Dialog,
   DialogContent,
@@ -157,13 +157,7 @@ export function NewInterviewDialog() {
               </Alert>
             )}
 
-            <div className="space-y-1.5">
-              <Label
-                htmlFor="ni-email"
-                className="text-muted-foreground font-mono text-[10px] uppercase tracking-wider"
-              >
-                Candidate email <span className="text-destructive">*</span>
-              </Label>
+            <Field id="ni-email" label="Candidate email" required>
               <Input
                 id="ni-email"
                 type="email"
@@ -174,18 +168,9 @@ export function NewInterviewDialog() {
                 placeholder="candidate@example.com"
                 className="bg-background border-input text-foreground placeholder:text-muted-foreground/50 focus-visible:ring-ring h-10"
               />
-            </div>
+            </Field>
 
-            <div className="space-y-1.5">
-              <Label
-                htmlFor="ni-name"
-                className="text-muted-foreground font-mono text-[10px] uppercase tracking-wider"
-              >
-                Candidate name{' '}
-                <span className="text-muted-foreground/60 normal-case tracking-normal font-sans text-xs">
-                  (optional)
-                </span>
-              </Label>
+            <Field id="ni-name" label="Candidate name" optional>
               <Input
                 id="ni-name"
                 type="text"
@@ -194,7 +179,7 @@ export function NewInterviewDialog() {
                 placeholder="Jane Smith"
                 className="bg-background border-input text-foreground placeholder:text-muted-foreground/50 focus-visible:ring-ring h-10"
               />
-            </div>
+            </Field>
 
             <div className="flex gap-2 pt-1">
               <Button

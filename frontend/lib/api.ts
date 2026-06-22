@@ -2,27 +2,35 @@
 // Candidate routes authenticate via token in request body (from URL ?t=).
 // Interviewer routes authenticate via Bearer token (Supabase access_token).
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type InterviewPhase =
-  | "greeting"
-  | "oral"
-  | "handoff"
-  | "coding"
-  | "wrap_up"
-  | "done";
+export type InterviewPhase = 'greeting' | 'oral' | 'handoff' | 'coding' | 'wrap_up' | 'done';
 
 export interface Utterance {
   text: string;
-  expects: "voice" | "text" | "code";
+  expects: 'voice' | 'text' | 'code';
 }
 
 export interface BeginResponse {
   utterance: Utterance;
   phase: InterviewPhase;
   state: Record<string, unknown>;
+  /** Fresh session token issued at begin; use it for all subsequent candidate calls. */
+  sessionToken: string;
+}
+
+export interface TranscriptTurn {
+  role: 'interviewer' | 'candidate' | 'system';
+  text: string;
+}
+
+export interface InterviewState {
+  status: string;
+  phase: string;
+  transcript: TranscriptTurn[];
+  codeSnapshot: string;
 }
 
 export interface AnswerResponse {
@@ -36,9 +44,9 @@ export interface RunResult {
   stderr: string;
   compileOutput: string;
   status: string;
-  exitCode: number;
+  exitCode: number | null;
   timeMs: number;
-  memoryKb: number;
+  memoryKb: number | null;
 }
 
 export interface ScorecardDimension {
@@ -49,9 +57,11 @@ export interface ScorecardDimension {
 
 export interface Scorecard {
   overall: number;
-  recommendation: "strong_hire" | "hire" | "lean_hire" | "no_hire";
+  recommendation: 'strong_hire' | 'hire' | 'lean_hire' | 'no_hire';
   summary: string;
   dimensions: ScorecardDimension[];
+  /** True when automatic scoring failed — show "manual review", never a real no_hire. */
+  scoringFailed?: boolean;
 }
 
 export interface CreateInterviewResponse {
@@ -70,13 +80,13 @@ interface FetchOptions {
 }
 
 async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T> {
-  const { method = "POST", body, accessToken } = options;
+  const { method = 'POST', body, accessToken } = options;
 
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    'Content-Type': 'application/json',
   };
   if (accessToken) {
-    headers["Authorization"] = `Bearer ${accessToken}`;
+    headers['Authorization'] = `Bearer ${accessToken}`;
   }
 
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -109,9 +119,31 @@ export async function createInterview(
   accessToken: string,
   body: { candidateEmail: string; candidateName?: string }
 ): Promise<CreateInterviewResponse> {
-  return apiFetch<CreateInterviewResponse>("/api/interviews", {
+  return apiFetch<CreateInterviewResponse>('/api/interviews', {
     accessToken,
     body,
+  });
+}
+
+/**
+ * POST /api/interviews/:id/cancel
+ * Soft-cancel an interview (keeps the record; the candidate's link stops working).
+ */
+export async function cancelInterview(accessToken: string, id: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/api/interviews/${id}/cancel`, {
+    accessToken,
+    body: {},
+  });
+}
+
+/**
+ * DELETE /api/interviews/:id
+ * Permanently delete an interview and all of its data (erasure).
+ */
+export async function deleteInterview(accessToken: string, id: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/api/interviews/${id}`, {
+    method: 'DELETE',
+    accessToken,
   });
 }
 
@@ -121,12 +153,19 @@ export async function createInterview(
  * POST /api/interviews/:id/begin
  * Starts the interview. Authenticates via candidate token in body.
  */
-export async function beginInterview(
-  id: string,
-  token: string
-): Promise<BeginResponse> {
+export async function beginInterview(id: string, token: string): Promise<BeginResponse> {
   return apiFetch<BeginResponse>(`/api/interviews/${id}/begin`, {
     body: { token, tncAccepted: true },
+  });
+}
+
+/**
+ * POST /api/interviews/:id/state
+ * Read-only snapshot for rehydrating the candidate UI after a reload.
+ */
+export async function getInterviewState(id: string, token: string): Promise<InterviewState> {
+  return apiFetch<InterviewState>(`/api/interviews/${id}/state`, {
+    body: { token },
   });
 }
 

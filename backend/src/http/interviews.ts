@@ -4,14 +4,19 @@
 
 import { Router, Request, Response } from 'express';
 import { requireInterviewer, validateCandidate } from './middleware';
+import { enforceRateLimit } from './rate-limit';
+import { hashToken } from '../interview/token';
 import * as orchestrator from '../interview/orchestrator';
 
 const router = Router();
 
+const MAX_SOURCE_BYTES = 64 * 1024;
+
 /** Helper: send a structured error response. */
 function sendError(res: Response, err: unknown): void {
-  const e = err as { status?: number; message?: string };
+  const e = err as { status?: number; message?: string; retryAfterSec?: number };
   const status = e?.status ?? 500;
+  if (e?.retryAfterSec) res.setHeader('Retry-After', String(e.retryAfterSec));
   const message = e?.message ?? 'Internal server error';
   res.status(status).json({ error: message });
 }
@@ -30,6 +35,12 @@ router.post('/', requireInterviewer, async (req: Request, res: Response): Promis
       return;
     }
 
+    await enforceRateLimit(`create:${req.userId}`, {
+      limit: 30,
+      windowMs: 3_600_000,
+      message: 'Interview creation limit reached. Please try again later.',
+    });
+
     const result = await orchestrator.createInterview({
       interviewerId: req.userId!,
       candidateEmail,
@@ -45,6 +56,34 @@ router.post('/', requireInterviewer, async (req: Request, res: Response): Promis
   }
 });
 
+// ─────────────────────── POST /api/interviews/:id/cancel ───────────────────────
+// Interviewer soft-cancel — keeps the row + transcript; the candidate's link stops working.
+
+router.post(
+  '/:id/cancel',
+  requireInterviewer,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      await orchestrator.cancelInterview(req.params.id, req.userId!);
+      res.json({ ok: true });
+    } catch (err) {
+      sendError(res, err);
+    }
+  }
+);
+
+// ─────────────────────── DELETE /api/interviews/:id ───────────────────────
+// Interviewer hard-delete (erasure) — removes the interview and all of its data.
+
+router.delete('/:id', requireInterviewer, async (req: Request, res: Response): Promise<void> => {
+  try {
+    await orchestrator.deleteInterview(req.params.id, req.userId!);
+    res.json({ ok: true });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 // ─────────────────────── POST /api/interviews/:id/begin ───────────────────────
 
 router.post('/:id/begin', async (req: Request, res: Response): Promise<void> => {
@@ -52,10 +91,29 @@ router.post('/:id/begin', async (req: Request, res: Response): Promise<void> => 
     const { id } = req.params;
     const { token, tncAccepted } = req.body as { token?: string; tncAccepted?: boolean };
 
+    await enforceRateLimit(`begin:${req.ip}`, { limit: 20, windowMs: 600_000 });
     await validateCandidate(id, token ?? '');
 
     const result = await orchestrator.begin(id, { tncAccepted: tncAccepted === true });
     res.json(result);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ─────────────────────── POST /api/interviews/:id/state ───────────────────────
+// Candidate UI rehydration after a reload — read-only snapshot, token-authenticated.
+
+router.post('/:id/state', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { token } = req.body as { token?: string };
+
+    await enforceRateLimit(`state:${req.ip}`, { limit: 120, windowMs: 600_000 });
+    await validateCandidate(id, token ?? '');
+
+    const state = await orchestrator.getCandidateState(id);
+    res.json(state);
   } catch (err) {
     sendError(res, err);
   }
@@ -69,6 +127,7 @@ router.post('/:id/answer', async (req: Request, res: Response): Promise<void> =>
     const { token, answer } = req.body as { token?: string; answer?: string };
 
     await validateCandidate(id, token ?? '');
+    await enforceRateLimit(`answer:${hashToken(token ?? '')}`, { limit: 60, windowMs: 600_000 });
 
     if (typeof answer !== 'string' || answer.trim() === '') {
       res.status(400).json({ error: 'answer is required' });
@@ -95,9 +154,19 @@ router.post('/:id/run', async (req: Request, res: Response): Promise<void> => {
     };
 
     await validateCandidate(id, token ?? '');
+    await enforceRateLimit(`run:${hashToken(token ?? '')}`, {
+      limit: 30,
+      windowMs: 600_000,
+      message: 'Too many code runs; please slow down.',
+    });
 
     if (!language || !source) {
       res.status(400).json({ error: 'language and source are required' });
+      return;
+    }
+
+    if (source.length > MAX_SOURCE_BYTES) {
+      res.status(413).json({ error: 'Source is too large (max 64 KB).' });
       return;
     }
 

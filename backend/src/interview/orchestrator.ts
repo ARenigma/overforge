@@ -12,8 +12,10 @@ import {
   createInterview as dbCreateInterview,
   getById,
   updateInterview,
+  deleteInterview as dbDeleteInterview,
   appendEvent,
   appendCodeRun,
+  claimForScoring,
   insertOutbox,
   makeOutboxStore,
   Interview,
@@ -41,7 +43,8 @@ function getExecutionKernel() {
 
 // ─────────────────────── Token TTL ───────────────────────
 
-const TOKEN_TTL_HOURS = 72;
+const TOKEN_TTL_HOURS = Number(process.env.TOKEN_TTL_HOURS ?? 72);
+const TNC_VERSION = 'v1';
 
 function tokenExpiry(): Date {
   const d = new Date();
@@ -127,6 +130,8 @@ export interface BeginResult {
   utterance: Utterance;
   phase: string;
   state: InterviewContext;
+  /** Fresh session token issued at begin — the invite-link token is now dead. */
+  sessionToken: string;
 }
 
 export async function begin(
@@ -152,14 +157,64 @@ export async function begin(
   const req: UtteranceRequest = { effect, ctx: newCtx, transcript: interview.transcript ?? [] };
   const utterance = await oracle.generateUtterance(req);
 
+  // Rotate the access token: the invite-link token is consumed here and replaced by a
+  // fresh session token bound to the candidate's browser. A forwarded invite link can no
+  // longer act on the interview once it has begun.
+  const sessionToken = generateToken();
+
   await updateInterview(interviewId, {
     tnc_accepted_at: new Date().toISOString(),
+    tnc_version: TNC_VERSION,
     status: 'in_progress',
+    access_token_hash: hashToken(sessionToken),
+    token_expires_at: tokenExpiry().toISOString(),
   });
 
   await persistTransition(interview, newCtx, effect, utterance);
 
-  return { utterance, phase: newCtx.phase, state: newCtx };
+  return { utterance, phase: newCtx.phase, state: newCtx, sessionToken };
+}
+
+export interface CandidateState {
+  status: string;
+  phase: string;
+  transcript: TranscriptTurn[];
+  codeSnapshot: string;
+}
+
+/** Read-only snapshot for the candidate UI to rehydrate after a reload. */
+export async function getCandidateState(interviewId: string): Promise<CandidateState> {
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  return {
+    status: interview.status,
+    phase: interview.phase,
+    transcript: interview.transcript ?? [],
+    codeSnapshot: interview.code_snapshot ?? '',
+  };
+}
+
+function assertOwner(interview: Interview, interviewerId: string): void {
+  if (interview.interviewer_id !== interviewerId) {
+    throw Object.assign(new Error('You are not authorized for this interview'), { status: 403 });
+  }
+}
+
+/** Soft-cancel — keeps the row + transcript; the candidate's invite link stops working. */
+export async function cancelInterview(interviewId: string, interviewerId: string): Promise<void> {
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  assertOwner(interview, interviewerId);
+  if (interview.status === 'scored') {
+    throw Object.assign(new Error('A scored interview cannot be cancelled'), { status: 409 });
+  }
+  await updateInterview(interviewId, { status: 'cancelled' });
+  await appendEvent(interviewId, 'transition', { from: interview.status, to: 'cancelled' });
+}
+
+/** Hard-delete (erasure) — removes the interview and all of its data. */
+export async function deleteInterview(interviewId: string, interviewerId: string): Promise<void> {
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  assertOwner(interview, interviewerId);
+  await dbDeleteInterview(interviewId);
 }
 
 export interface AnswerResult {
@@ -196,7 +251,11 @@ export async function submitAnswer(interviewId: string, answer: string): Promise
 
   if (effect.kind === 'score') {
     await persistTransition(interview, newCtx, effect, null, answer);
-    await finishAndScore(interviewId);
+    // Score in the background so the candidate's final response returns immediately. The
+    // explicit /finish path also calls finishAndScore; the single-flight claim makes it safe.
+    void finishAndScore(interviewId).catch((err: unknown) => {
+      console.error(`[orchestrator] background scoring failed for ${interviewId}:`, err);
+    });
     // Return an empty utterance — the UI should show a "scoring complete" state.
     return {
       utterance: { text: 'Your interview is complete. Thank you!', expects: 'text' },
@@ -230,8 +289,13 @@ export async function submitAnswer(interviewId: string, answer: string): Promise
 export async function recordRun(interviewId: string, req: RunRequest): Promise<RunResult> {
   const interview = requireInterview(await getById(interviewId), interviewId);
 
+  if (interview.status !== 'in_progress') {
+    throw Object.assign(new Error('Interview is not in progress'), { status: 409 });
+  }
+
   const kernel = getExecutionKernel();
   const result = await kernel.run(req);
+  result.language = req.language;
 
   await appendCodeRun(interviewId, result);
   await updateInterview(interviewId, { code_snapshot: req.source });
@@ -252,6 +316,14 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
 export async function finishAndScore(interviewId: string): Promise<void> {
   const interview = requireInterview(await getById(interviewId), interviewId);
 
+  // Single-flight idempotency: only the caller that atomically flips in_progress -> completed
+  // proceeds to score. The background (post-answer) path and the explicit /finish route can
+  // reach here concurrently; exactly one scores, so there's no double-score / double-email.
+  if (interview.status === 'scored' || interview.status === 'completed') return;
+  if (interview.status !== 'in_progress') return; // not scorable (invited/expired/abandoned/cancelled)
+  const claimed = await claimForScoring(interviewId);
+  if (!claimed) return;
+
   const { client: minimaxClient } = (() => {
     if (process.env.MINIMAX_API_KEY) {
       return { client: createMinimaxClient(minimaxConfigFromEnv()) };
@@ -267,7 +339,7 @@ export async function finishAndScore(interviewId: string): Promise<void> {
   })();
 
   const codeRuns: CodeRunSummary[] = (interview.code_runs ?? []).map((r: RunResult) => ({
-    language: 'unknown',
+    language: r.language ?? 'unknown',
     status: r.status,
     stderr: r.stderr,
   }));
