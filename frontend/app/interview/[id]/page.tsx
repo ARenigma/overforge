@@ -25,6 +25,7 @@ import {
 import { AlertCircle, ArrowUp, CheckCircle, Clock, Loader2, Play } from 'lucide-react';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
+import { Kbd } from '@/components/ds/kbd';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -536,12 +537,7 @@ export default function InterviewPage() {
                     )}
                   </button>
                 </div>
-                <p className="mt-1.5 px-0.5 text-[10px] text-muted-foreground/60">
-                  <kbd className="border border-border bg-muted px-1 py-px font-mono text-[9px] text-muted-foreground">
-                    ⌘ ↵
-                  </kbd>{' '}
-                  to send
-                </p>
+                <Kbd keys="⌘ ↵" label="to send" className="mt-1.5 px-0.5" />
               </div>
             </div>
           </ResizablePanel>

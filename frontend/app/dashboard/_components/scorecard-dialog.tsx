@@ -11,6 +11,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { type Scorecard } from '@/lib/api';
+import { InfoTooltip } from '@/components/ds/info-tooltip';
 import { BarChart2 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -89,7 +90,11 @@ export function ScorecardDialog({ scorecard }: ScorecardDialogProps) {
         <div className="space-y-5 pt-1">
           {/* Overall score */}
           <div className="bg-muted border border-border rounded-md px-4 py-3 flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Overall score</span>
+            <InfoTooltip
+              label="Overall score"
+              tip="Weighted average of all dimension scores, on a 1–5 scale."
+              className="text-muted-foreground"
+            />
             <span className="text-2xl font-semibold text-foreground tabular-nums">
               {scorecard.overall}
               <span className="text-base font-normal text-muted-foreground">/5</span>
