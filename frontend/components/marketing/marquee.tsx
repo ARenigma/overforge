@@ -95,25 +95,23 @@ export function Marquee() {
             maskImage: 'linear-gradient(to right, transparent, black 8%, black 92%, transparent)',
           }}
         >
-          <div
-            className="flex w-max animate-marquee items-center gap-16 whitespace-nowrap"
-            aria-hidden="true"
-          >
-            {[...BRANDS, ...BRANDS].map((brand, i) =>
-              brand.type === 'icon' ? (
-                <brand.Icon
-                  key={i}
-                  className="h-5 w-5 text-muted-foreground/50 transition-colors duration-200 hover:text-muted-foreground"
-                />
-              ) : (
-                <span
-                  key={i}
-                  className="font-sans text-sm font-semibold text-muted-foreground/40 transition-colors duration-200 hover:text-muted-foreground/70"
-                >
-                  {brand.name}
-                </span>
-              )
-            )}
+          {/* Two identical groups + translateX(-50%) keyframe = seamless closed loop. */}
+          <div className="flex w-max animate-marquee" aria-hidden="true">
+            {[0, 1].map((group) => (
+              <ul key={group} className="flex shrink-0 items-center gap-16 pr-16">
+                {BRANDS.map((brand, i) => (
+                  <li
+                    key={`${group}-${i}`}
+                    className="flex items-center gap-2 whitespace-nowrap text-muted-foreground/50 transition-colors duration-200 hover:text-muted-foreground"
+                  >
+                    {brand.type === 'icon' && (
+                      <brand.Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+                    )}
+                    <span className="font-sans text-sm font-semibold">{brand.name}</span>
+                  </li>
+                ))}
+              </ul>
+            ))}
           </div>
         </div>
       </div>
