@@ -12,10 +12,9 @@ const nextConfig = {
   experimental: {
     forceSwcTransforms: true,
     esmExternals: false,
-  },
-  webpack: (config) => {
-    config.cache = false;
-    return config;
+    // Tree-shake heavy barrel imports so dev doesn't compile the entire set
+    // (react-icons ships ~3k icons; importing a few should not bundle them all).
+    optimizePackageImports: ['react-icons', 'react-icons/si'],
   },
   async headers() {
     return [
