@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { SignOutButton } from './_components/sign-out-button';
@@ -45,7 +46,13 @@ export default async function DashboardPage() {
         <div className="max-w-[1200px] mx-auto px-6 sm:px-8 h-14 flex items-center justify-between gap-4">
           {/* Left: wordmark + breadcrumbs */}
           <div className="flex items-center gap-3 min-w-0">
-            <Wordmark />
+            <Link
+              href="/"
+              aria-label="Overforge — home"
+              className="transition-opacity hover:opacity-80"
+            >
+              <Wordmark />
+            </Link>
 
             {/* Breadcrumb separator + page */}
             <div className="flex items-center gap-2 text-sm text-muted-foreground select-none">

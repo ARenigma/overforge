@@ -63,7 +63,7 @@ export function CommandMenuDialog({
     onOpenChange(false);
     const supabase = createClient();
     await supabase.auth.signOut();
-    router.push('/auth');
+    router.push('/');
     router.refresh();
   }
 

@@ -13,17 +13,21 @@ import {
 import { ConfirmDialog } from '@/components/ds/confirm-dialog';
 import { TextConfirmDialog } from '@/components/ds/text-confirm-dialog';
 import { createClient } from '@/lib/supabase/client';
-import { cancelInterview, deleteInterview } from '@/lib/api';
+import { cancelInterview, deleteInterview, rescoreInterview } from '@/lib/api';
 
 // States from which a soft-cancel is meaningless (already terminal).
 const TERMINAL = new Set(['scored', 'cancelled', 'expired', 'abandoned']);
+// States with a transcript worth (re)scoring.
+const RESCORABLE = new Set(['scored', 'completed', 'abandoned']);
 
 export function InterviewRowActions({ id, status }: { id: string; status: string }) {
   const router = useRouter();
   const [cancelOpen, setCancelOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [rescoreOpen, setRescoreOpen] = useState(false);
 
   const cancellable = !TERMINAL.has(status);
+  const rescorable = RESCORABLE.has(status);
 
   async function accessToken(): Promise<string> {
     const {
@@ -42,6 +46,11 @@ export function InterviewRowActions({ id, status }: { id: string; status: string
 
   async function doDelete() {
     await deleteInterview(await accessToken(), id);
+    router.refresh();
+  }
+
+  async function doRescore() {
+    await rescoreInterview(await accessToken(), id);
     router.refresh();
   }
 
@@ -64,6 +73,11 @@ export function InterviewRowActions({ id, status }: { id: string; status: string
               Cancel interview
             </DropdownMenuItem>
           )}
+          {rescorable && (
+            <DropdownMenuItem onSelect={() => setTimeout(() => setRescoreOpen(true), 0)}>
+              Re-score
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             onSelect={() => setTimeout(() => setDeleteOpen(true), 0)}
             className="text-destructive focus:text-destructive"
@@ -81,6 +95,14 @@ export function InterviewRowActions({ id, status }: { id: string; status: string
         confirmLabel="Cancel interview"
         destructive
         onConfirm={doCancel}
+      />
+      <ConfirmDialog
+        open={rescoreOpen}
+        onOpenChange={setRescoreOpen}
+        title="Re-score this interview?"
+        description="This re-runs the AI grader over the transcript and code, overwrites any existing scorecard, and emails the result."
+        confirmLabel="Re-score"
+        onConfirm={doRescore}
       />
       <TextConfirmDialog
         open={deleteOpen}

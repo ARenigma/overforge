@@ -147,6 +147,17 @@ export async function deleteInterview(accessToken: string, id: string): Promise<
   });
 }
 
+/**
+ * POST /api/interviews/:id/rescore
+ * Re-run scoring (recovers a stuck interview / retries a failed scorecard).
+ */
+export async function rescoreInterview(accessToken: string, id: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/api/interviews/${id}/rescore`, {
+    accessToken,
+    body: {},
+  });
+}
+
 // ── Candidate endpoints ───────────────────────────────────────────────────────
 
 /**

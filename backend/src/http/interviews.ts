@@ -84,6 +84,22 @@ router.delete('/:id', requireInterviewer, async (req: Request, res: Response): P
   }
 });
 
+// ─────────────────────── POST /api/interviews/:id/rescore ───────────────────────
+// Interviewer re-runs scoring (recovers a stuck 'completed' / retries a failed scorecard).
+
+router.post(
+  '/:id/rescore',
+  requireInterviewer,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      await orchestrator.rescore(req.params.id, req.userId!);
+      res.json({ ok: true });
+    } catch (err) {
+      sendError(res, err);
+    }
+  }
+);
+
 // ─────────────────────── POST /api/interviews/:id/begin ───────────────────────
 
 router.post('/:id/begin', async (req: Request, res: Response): Promise<void> => {

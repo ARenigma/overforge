@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Menu, X } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Wordmark } from '@/components/marketing/wordmark';
+import { createClient } from '@/lib/supabase/client';
 
 const LINKS = [
   { label: 'Product', href: '/product' },
@@ -14,12 +15,24 @@ const LINKS = [
 
 export function PillNav() {
   const [open, setOpen] = React.useState(false);
+  const [authed, setAuthed] = React.useState(false);
+
+  // Reflect auth so a signed-in member can jump to the dashboard without signing out.
+  React.useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getSession().then(({ data }) => setAuthed(!!data.session));
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => setAuthed(!!session));
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  const accountHref = authed ? '/dashboard' : '/auth';
+  const accountLabel = authed ? 'Dashboard' : 'Sign in';
 
   return (
     <header className="fixed inset-x-0 top-4 z-50 flex justify-center px-4">
       {/* ThemeToggle pinned to viewport's right edge, vertically centered with the nav */}
       <div className="pointer-events-none absolute inset-x-4 top-0 flex h-full items-center justify-end">
-        <div className="pointer-events-auto flex h-11 items-center border border-border/70 bg-card/60 px-1.5 backdrop-blur-xl supports-[backdrop-filter]:bg-card/40">
+        <div className="pointer-events-auto">
           <ThemeToggle />
         </div>
       </div>
@@ -47,10 +60,10 @@ export function PillNav() {
 
         <div className="flex items-center gap-1 pl-1">
           <Link
-            href="/auth"
+            href={accountHref}
             className="hidden text-sm font-bold text-primary transition-opacity hover:opacity-80 sm:inline-flex"
           >
-            Sign in
+            {accountLabel}
           </Link>
           <button
             type="button"
@@ -77,11 +90,11 @@ export function PillNav() {
             </a>
           ))}
           <Link
-            href="/auth"
+            href={accountHref}
             onClick={() => setOpen(false)}
             className="mt-1 block rounded-xl bg-primary px-4 py-2.5 text-center text-sm font-medium text-primary-foreground"
           >
-            Sign in
+            {accountLabel}
           </Link>
         </div>
       )}
