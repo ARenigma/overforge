@@ -16,6 +16,25 @@ const app = express();
 
 const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
 
+// Refuse to boot a production process pointed at localhost — that would open CORS to
+// localhost instead of the real origin (silent misconfiguration).
+if (process.env.NODE_ENV === 'production' && frontendUrl.includes('localhost')) {
+  throw new Error('FRONTEND_URL must be the production origin in production (got localhost)');
+}
+
+// Behind Caddy: trust the proxy so req.ip reflects the real client (used for rate limiting).
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
+// Minimal security headers for a JSON API (no helmet dependency required).
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-DNS-Prefetch-Control', 'off');
+  next();
+});
+
 app.use(
   cors({
     origin: frontendUrl,

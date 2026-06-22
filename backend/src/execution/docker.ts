@@ -6,7 +6,14 @@
 // candidate's code runs in the sandbox container, never with socket access).
 
 import { execFile } from 'child_process';
+import { randomUUID } from 'crypto';
 import { ExecutionKernel, RunRequest, RunResult } from './types';
+import { Semaphore } from './semaphore';
+
+// Global cap on simultaneous sandbox containers across all in-flight /run calls, so a
+// burst (or a stolen token in a loop) cannot exhaust the host. Tune via env.
+const EXEC_MAX_CONCURRENCY = Number(process.env.EXEC_MAX_CONCURRENCY ?? 4);
+const execSemaphore = new Semaphore(EXEC_MAX_CONCURRENCY);
 
 export const SUPPORTED_LANGUAGES = ['python', 'javascript', 'java', 'cpp', 'go', 'ruby'] as const;
 
@@ -47,7 +54,17 @@ export function createDockerKernel(config: DockerKernelConfig = {}): ExecutionKe
     run(req: RunRequest): Promise<RunResult> {
       const spec = LANGS[req.language.trim().toLowerCase()];
       if (!spec) return Promise.reject(new Error(`Unsupported language: ${req.language}`));
+
+      if (!execSemaphore.tryAcquire()) {
+        return Promise.reject(
+          Object.assign(new Error('Server is busy running code; please retry in a moment.'), {
+            status: 429,
+          })
+        );
+      }
+
       const cpuSec = req.cpuTimeLimit ?? config.cpuTimeoutSec ?? 10;
+      const containerName = `of-run-${randomUUID()}`;
 
       // In-container: decode source + stdin from env, then (compile &&) run under `timeout`,
       // piping the decoded stdin to the program. Single-quoted heredoc-free, all data is base64.
@@ -60,6 +77,11 @@ export function createDockerKernel(config: DockerKernelConfig = {}): ExecutionKe
         'run',
         '--rm',
         '-i',
+        '--name',
+        containerName,
+        // Images are pre-pulled (deploy/pull-runtimes.sh); never hit a registry at run time.
+        '--pull',
+        'never',
         '--network',
         'none',
         '--memory',
@@ -98,6 +120,7 @@ export function createDockerKernel(config: DockerKernelConfig = {}): ExecutionKe
           args,
           { timeout: wallMs, maxBuffer: 2 * 1024 * 1024, killSignal: 'SIGKILL' },
           (err, stdout, stderr) => {
+            execSemaphore.release();
             const timeMs = Date.now() - started;
             const e = err as
               | (NodeJS.ErrnoException & { killed?: boolean; code?: number | string })
@@ -107,6 +130,9 @@ export function createDockerKernel(config: DockerKernelConfig = {}): ExecutionKe
             if (e && e.killed) {
               status = 'Time Limit Exceeded';
               exitCode = null;
+              // The wall-clock kill stops the docker client, not necessarily the
+              // container — best-effort force-remove so it can't linger on the host.
+              execFile('docker', ['rm', '-f', containerName], {}, () => undefined);
             } else if (e && typeof e.code === 'number' && e.code !== 0) {
               // 124 = in-container timeout; 137 = OOM/kill; else runtime error
               status = e.code === 124 || e.code === 137 ? 'Time Limit Exceeded' : 'Runtime Error';

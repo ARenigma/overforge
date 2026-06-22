@@ -10,8 +10,21 @@ import { OutboxStore, ScorecardOutboxItem } from '../notify/outbox';
 
 // ─────────────────────── Interview row shape ───────────────────────
 
-export type InterviewStatus = 'invited' | 'in_progress' | 'completed' | 'scored' | 'expired' | 'abandoned';
-export type InterviewPhase = 'greeting' | 'oral' | 'handoff' | 'coding' | 'wrap_up' | 'scoring' | 'done';
+export type InterviewStatus =
+  | 'invited'
+  | 'in_progress'
+  | 'completed'
+  | 'scored'
+  | 'expired'
+  | 'abandoned';
+export type InterviewPhase =
+  | 'greeting'
+  | 'oral'
+  | 'handoff'
+  | 'coding'
+  | 'wrap_up'
+  | 'scoring'
+  | 'done';
 
 export interface Interview {
   id: string;
@@ -83,11 +96,7 @@ export async function createInterview(input: CreateInterviewInput): Promise<Inte
 
 export async function getById(id: string): Promise<Interview | null> {
   const db = createServiceClient();
-  const { data, error } = await db
-    .from('interviews')
-    .select('*')
-    .eq('id', id)
-    .single();
+  const { data, error } = await db.from('interviews').select('*').eq('id', id).single();
 
   if (error && error.code === 'PGRST116') return null;
   if (error) throw new Error(`getById: ${error.message}`);
@@ -122,7 +131,7 @@ export async function updateInterview(id: string, patch: UpdateInterviewInput): 
 export async function appendEvent(
   interviewId: string,
   kind: string,
-  payload: Record<string, unknown>,
+  payload: Record<string, unknown>
 ): Promise<void> {
   const db = createServiceClient();
 
@@ -187,16 +196,18 @@ export async function insertOutbox(interviewId: string): Promise<void> {
   if (error) throw new Error(`insertOutbox: ${error.message}`);
 }
 
+/** Cap on delivery attempts before an outbox row is permanently marked failed. */
+const MAX_OUTBOX_ATTEMPTS = 5;
+
 /** Returns an OutboxStore implementation backed by the live DB. */
 export function makeOutboxStore(): OutboxStore {
   return {
     async claimPending(limit: number): Promise<ScorecardOutboxItem[]> {
       const db = createServiceClient();
 
-      // Fetch pending outbox rows.
       const { data: rows, error } = await db
         .from('notify_outbox')
-        .select('id, interview_id')
+        .select('id, interview_id, attempts')
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
         .limit(limit);
@@ -206,21 +217,35 @@ export function makeOutboxStore(): OutboxStore {
 
       const items: ScorecardOutboxItem[] = [];
 
-      for (const row of rows as Array<{ id: number; interview_id: string }>) {
+      for (const row of rows as Array<{ id: number; interview_id: string; attempts: number }>) {
+        // Give up after too many tries so a permanently-failing row can't loop forever.
+        if (row.attempts >= MAX_OUTBOX_ATTEMPTS) {
+          await db.from('notify_outbox').update({ status: 'failed' }).eq('id', row.id);
+          continue;
+        }
+
+        // Compare-and-swap claim: bump attempts only from the value we just read. If the
+        // conditional update matches no row, another drainer already claimed it — skip,
+        // so the same scorecard email is never sent twice.
+        const { data: claimed, error: claimErr } = await db
+          .from('notify_outbox')
+          .update({ attempts: row.attempts + 1 })
+          .eq('id', row.id)
+          .eq('status', 'pending')
+          .eq('attempts', row.attempts)
+          .select('id');
+
+        if (claimErr) throw new Error(`claimPending claim: ${claimErr.message}`);
+        if (!claimed || claimed.length === 0) continue;
+
         const interview = await getById(row.interview_id);
         if (!interview || !interview.evaluation_score) continue;
 
         // Get interviewer email via Auth Admin API.
         const { data: userData, error: userErr } = await db.auth.admin.getUserById(
-          interview.interviewer_id,
+          interview.interviewer_id
         );
         if (userErr || !userData?.user?.email) continue;
-
-        // Mark as in-flight to avoid double-claiming (increment attempts).
-        await db
-          .from('notify_outbox')
-          .update({ attempts: db.rpc as unknown as number })
-          .eq('id', row.id);
 
         items.push({
           id: row.id,
@@ -237,18 +262,27 @@ export function makeOutboxStore(): OutboxStore {
 
     async markSent(id: number | string): Promise<void> {
       const db = createServiceClient();
-      const { error } = await db
+      const sentAt = new Date().toISOString();
+      const { data, error } = await db
         .from('notify_outbox')
-        .update({ status: 'sent', sent_at: new Date().toISOString() })
-        .eq('id', id);
+        .update({ status: 'sent', sent_at: sentAt })
+        .eq('id', id)
+        .select('interview_id')
+        .single();
       if (error) throw new Error(`markSent: ${error.message}`);
+      // Close the idempotency loop on the interview row too.
+      if (data?.interview_id) {
+        await updateInterview(data.interview_id as string, { scorecard_sent_at: sentAt });
+      }
     },
 
     async markFailed(id: number | string, errMsg: string): Promise<void> {
       const db = createServiceClient();
+      // Return to 'pending' so the next drain retries; the attempts cap in claimPending
+      // eventually marks a permanently-failing row as 'failed'.
       const { error } = await db
         .from('notify_outbox')
-        .update({ status: 'failed', last_error: errMsg.slice(0, 500) })
+        .update({ status: 'pending', last_error: errMsg.slice(0, 500) })
         .eq('id', id);
       if (error) throw new Error(`markFailed: ${error.message}`);
     },
