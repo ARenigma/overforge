@@ -5,11 +5,8 @@ import { createClient } from '@/lib/supabase/server';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { SignOutButton } from '../_components/sign-out-button';
-import {
-  LiveInterview,
-  INTERVIEW_DETAIL_COLUMNS,
-  type InterviewDetail,
-} from '../_components/live-interview';
+import { LiveInterview } from '../_components/live-interview';
+import { INTERVIEW_DETAIL_COLUMNS, type InterviewDetail } from '@/lib/interview-detail';
 import { PageContainer } from '@/components/ds/page-container';
 
 export default async function InterviewDetailPage({ params }: { params: { id: string } }) {

@@ -8,31 +8,7 @@ import { StatusBadge, type BadgeIntent } from '@/components/ds/status-badge';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
 import { statusMeta } from '@/lib/interview-status';
 import { type Scorecard } from '@/lib/api';
-
-interface Turn {
-  role: 'interviewer' | 'candidate' | 'system';
-  text: string;
-}
-interface RunResult {
-  language?: string;
-  status: string;
-  timeMs: number | null;
-}
-export interface InterviewDetail {
-  id: string;
-  candidate_email: string | null;
-  candidate_name: string | null;
-  status: string;
-  created_at: string;
-  transcript: Turn[];
-  code_snapshot: string;
-  code_runs: RunResult[];
-  evaluation_score: Scorecard | null;
-}
-
-/** Columns the detail view renders. The live poll re-selects exactly these. */
-export const INTERVIEW_DETAIL_COLUMNS =
-  'id, candidate_email, candidate_name, status, created_at, transcript, code_snapshot, code_runs, evaluation_score';
+import { INTERVIEW_DETAIL_COLUMNS, type InterviewDetail } from '@/lib/interview-detail';
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
