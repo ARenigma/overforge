@@ -19,14 +19,14 @@ export function PillNav() {
     <header className="fixed inset-x-0 top-4 z-50 flex justify-center px-4">
       {/* ThemeToggle pinned to viewport's right edge, vertically centered with the nav */}
       <div className="pointer-events-none absolute inset-x-4 top-0 flex h-full items-center justify-end">
-        <div className="pointer-events-auto flex items-center border border-border/70 bg-card/70 p-1.5 backdrop-blur-xl supports-[backdrop-filter]:bg-card/60">
+        <div className="pointer-events-auto flex h-11 items-center border border-border/70 bg-card/60 px-1.5 backdrop-blur-xl supports-[backdrop-filter]:bg-card/40">
           <ThemeToggle />
         </div>
       </div>
 
       <nav
         aria-label="Primary"
-        className="flex items-center gap-1 rounded-none border border-border/70 bg-card/70 py-1.5 pl-3 pr-1.5 backdrop-blur-xl supports-[backdrop-filter]:bg-card/60"
+        className="flex h-11 items-center gap-1 rounded-none border border-border/70 bg-card/60 pl-3 pr-1.5 backdrop-blur-xl supports-[backdrop-filter]:bg-card/40"
       >
         <Link href="/" className="mr-1 shrink-0" aria-label="Overforge home">
           <Wordmark />
