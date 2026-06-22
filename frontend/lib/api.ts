@@ -19,6 +19,8 @@ export interface BeginResponse {
   state: Record<string, unknown>;
   /** Fresh session token issued at begin; use it for all subsequent candidate calls. */
   sessionToken: string;
+  /** Server-recorded interview start; the client seeds its elapsed timer from this. */
+  startedAt: string;
 }
 
 export interface TranscriptTurn {
@@ -31,6 +33,12 @@ export interface InterviewState {
   phase: string;
   transcript: TranscriptTurn[];
   codeSnapshot: string;
+  /** Interview start (tnc_accepted_at) — used to re-seed the elapsed timer on resume. */
+  startedAt: string | null;
+  /** Last editor language persisted server-side; null if no run yet. */
+  language: string | null;
+  /** Most recent code-run output, so the output panel is restored on resume. */
+  lastRunResult: RunResult | null;
 }
 
 export interface AnswerResponse {
@@ -45,7 +53,7 @@ export interface RunResult {
   compileOutput: string;
   status: string;
   exitCode: number | null;
-  timeMs: number;
+  timeMs: number | null;
   memoryKb: number | null;
 }
 

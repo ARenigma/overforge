@@ -134,6 +134,9 @@ export interface BeginResult {
   state: InterviewContext;
   /** Fresh session token issued at begin — the invite-link token is now dead. */
   sessionToken: string;
+  /** Server-recorded interview start (tnc_accepted_at). The client seeds its timer from
+   *  this so elapsed time is correct across reloads. */
+  startedAt: string;
 }
 
 export async function begin(
@@ -164,8 +167,12 @@ export async function begin(
   // longer act on the interview once it has begun.
   const sessionToken = generateToken();
 
+  // The interview's authoritative start time. Recorded once here and echoed back so the
+  // client can anchor its elapsed timer (survives reloads).
+  const startedAt = new Date().toISOString();
+
   await updateInterview(interviewId, {
-    tnc_accepted_at: new Date().toISOString(),
+    tnc_accepted_at: startedAt,
     tnc_version: TNC_VERSION,
     status: 'in_progress',
     access_token_hash: hashToken(sessionToken),
@@ -174,7 +181,7 @@ export async function begin(
 
   await persistTransition(interview, newCtx, effect, utterance);
 
-  return { utterance, phase: newCtx.phase, state: newCtx, sessionToken };
+  return { utterance, phase: newCtx.phase, state: newCtx, sessionToken, startedAt };
 }
 
 export interface CandidateState {
@@ -182,16 +189,26 @@ export interface CandidateState {
   phase: string;
   transcript: TranscriptTurn[];
   codeSnapshot: string;
+  /** Interview start (tnc_accepted_at) so the client can re-seed its elapsed timer. */
+  startedAt: string | null;
+  /** Last editor language, persisted on /run; null if no run yet (client falls back). */
+  language: string | null;
+  /** Most recent code-run output so the candidate's output panel survives a reload. */
+  lastRunResult: RunResult | null;
 }
 
 /** Read-only snapshot for the candidate UI to rehydrate after a reload. */
 export async function getCandidateState(interviewId: string): Promise<CandidateState> {
   const interview = requireInterview(await getById(interviewId), interviewId);
+  const runs = interview.code_runs ?? [];
   return {
     status: interview.status,
     phase: interview.phase,
     transcript: interview.transcript ?? [],
     codeSnapshot: interview.code_snapshot ?? '',
+    startedAt: interview.tnc_accepted_at,
+    language: interview.code_language ?? null,
+    lastRunResult: runs.length > 0 ? runs[runs.length - 1] : null,
   };
 }
 
@@ -344,8 +361,9 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
   const result = await kernel.run(req);
   result.language = req.language;
 
-  await appendCodeRun(interviewId, result);
-  await updateInterview(interviewId, { code_snapshot: req.source });
+  // One atomic write: append the run AND record the snapshot + last-used language together,
+  // so code_runs[-1], code_snapshot, and code_language can never describe different runs.
+  await appendCodeRun(interviewId, result, req.source, req.language);
 
   await appendEvent(interviewId, 'code_run', {
     language: req.language,
@@ -361,15 +379,18 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
 }
 
 export async function finishAndScore(interviewId: string): Promise<void> {
-  const interview = requireInterview(await getById(interviewId), interviewId);
-
   // Single-flight idempotency: only the caller that atomically flips in_progress -> completed
-  // proceeds to score. The background (post-answer) path and the explicit /finish route can
-  // reach here concurrently; exactly one scores, so there's no double-score / double-email.
-  if (interview.status === 'scored' || interview.status === 'completed') return;
-  if (interview.status !== 'in_progress') return; // not scorable (invited/expired/abandoned/cancelled)
+  // proceeds to score. claimForScoring matches WHERE status = 'in_progress', so a
+  // scored/completed/expired/abandoned/cancelled interview yields claimed=false here — the
+  // background (post-answer) path and the explicit /finish route can race; exactly one wins,
+  // so there's no double-score / double-email.
   const claimed = await claimForScoring(interviewId);
   if (!claimed) return;
+
+  // Re-fetch AFTER claiming so scoring sees every code run that landed before the claim — a
+  // concurrent /run's atomic append could otherwise slip in between an earlier read and the
+  // claim and be missed.
+  const interview = requireInterview(await getById(interviewId), interviewId);
 
   const { client: minimaxClient } = (() => {
     if (process.env.MINIMAX_API_KEY) {

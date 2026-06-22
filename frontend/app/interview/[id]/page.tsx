@@ -65,6 +65,21 @@ function formatTime(totalSeconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+/** Seconds elapsed since the server-recorded interview start, clamped to ≥ 0.
+ *  Lets the timer resume at the correct value after a reload instead of restarting at 0. */
+function elapsedSince(startedAt: string | null | undefined): number {
+  if (!startedAt) return 0;
+  const ms = Date.now() - new Date(startedAt).getTime();
+  return Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1000)) : 0;
+}
+
+const DEFAULT_LANGUAGE: Language = 'python';
+
+/** Validate a stored/loaded language string against the supported set. */
+function isLanguage(v: unknown): v is Language {
+  return typeof v === 'string' && LANGUAGES.some((l) => l.value === v);
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function ErrorCard({ message }: { message: string }) {
@@ -110,6 +125,7 @@ export default function InterviewPage() {
   const id = params.id;
   const urlToken = searchParams.get('t');
   const sessionKey = `of_session_${id}`;
+  const langKey = `of_lang_${id}`;
 
   const [stage, setStage] = useState<Stage>('loading_token');
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -123,8 +139,12 @@ export default function InterviewPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [aiThinking, setAiThinking] = useState(false);
 
-  // Code pane
-  const [language, setLanguage] = useState<Language>('python');
+  // Code pane — language persists across reloads via localStorage (per-interview key).
+  const [language, setLanguage] = useState<Language>(() => {
+    if (typeof window === 'undefined') return DEFAULT_LANGUAGE;
+    const stored = localStorage.getItem(langKey);
+    return isLanguage(stored) ? stored : DEFAULT_LANGUAGE;
+  });
   const [code, setCode] = useState('');
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<RunResult | null>(null);
@@ -197,6 +217,13 @@ export default function InterviewPage() {
             .map((t) => ({ role: t.role === 'candidate' ? 'candidate' : 'ai', text: t.text }))
         );
         if (s.codeSnapshot) setCode(s.codeSnapshot);
+        // Re-seed the elapsed timer from the server start so it doesn't restart at 0.
+        setElapsed(elapsedSince(s.startedAt));
+        // Restore the last run's output so the console isn't blank after a reload.
+        if (s.lastRunResult) setRunResult(s.lastRunResult);
+        // Language: the candidate's own (localStorage) choice wins; fall back to the
+        // server's last-used language only when this browser has no stored preference.
+        if (isLanguage(s.language) && !localStorage.getItem(langKey)) setLanguage(s.language);
         setStage(done ? 'done' : 'interview');
       } catch {
         if (cancelled) return;
@@ -235,6 +262,8 @@ export default function InterviewPage() {
       setActiveToken(res.sessionToken);
       setPhase(res.phase);
       setMessages([{ role: 'ai', text: res.utterance.text }]);
+      // Anchor the timer to the server start (≈0 on a fresh begin, exact after any reload).
+      setElapsed(elapsedSince(res.startedAt));
       setStage(res.phase === 'done' ? 'done' : 'interview');
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to start interview.');
@@ -396,7 +425,14 @@ export default function InterviewPage() {
             <div className="h-full flex flex-col overflow-hidden bg-background">
               {/* Code toolbar — language selector + Run pill */}
               <div className="flex h-10 items-center gap-2 px-3 border-b border-border bg-card shrink-0">
-                <Select value={language} onValueChange={(v) => setLanguage(v as Language)}>
+                <Select
+                  value={language}
+                  onValueChange={(v) => {
+                    setLanguage(v as Language);
+                    // Persist so a reload/reconnect restores the candidate's choice.
+                    if (typeof window !== 'undefined') localStorage.setItem(langKey, v);
+                  }}
+                >
                   <SelectTrigger className="h-7 w-36 text-xs bg-muted border-border text-foreground focus-visible:ring-ring font-mono">
                     <SelectValue />
                   </SelectTrigger>
@@ -462,7 +498,7 @@ export default function InterviewPage() {
                       >
                         {runResult.status}
                       </span>
-                      <span>{runResult.timeMs}ms</span>
+                      {runResult.timeMs != null ? <span>{runResult.timeMs}ms</span> : null}
                       {runResult.memoryKb ? (
                         <span>{Math.round(runResult.memoryKb / 1024)}KB</span>
                       ) : null}

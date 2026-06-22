@@ -41,6 +41,7 @@ export interface Interview {
   tnc_version: string | null;
   transcript: TranscriptTurn[];
   code_snapshot: string;
+  code_language: string | null;
   code_runs: RunResult[];
   evaluation_score: Scorecard | null;
   scorecard_sent_at: string | null;
@@ -64,6 +65,7 @@ export type UpdateInterviewInput = Partial<{
   status: InterviewStatus;
   transcript: TranscriptTurn[];
   code_snapshot: string;
+  code_language: string;
   code_runs: RunResult[];
   tnc_accepted_at: string;
   tnc_version: string;
@@ -184,14 +186,25 @@ export async function appendEvent(
   }
 }
 
-/** Append a code-run record to the interview's code_runs array. */
-export async function appendCodeRun(id: string, run: RunResult): Promise<void> {
-  // Read current runs then append (Supabase JS v2 has no array-append via RPC without a function).
-  const interview = await getById(id);
-  if (!interview) throw new Error(`appendCodeRun: interview ${id} not found`);
-
-  const runs = [...(interview.code_runs ?? []), run];
-  await updateInterview(id, { code_runs: runs });
+/** Atomically persist a code run: append it to code_runs AND set code_snapshot +
+ *  code_language, all in one UPDATE (the append_code_run Postgres function, under a
+ *  row-level write lock). Doing the three writes together means concurrent runs can
+ *  neither lose an append nor leave code_runs[-1] describing a different run than
+ *  code_snapshot — unlike the old read-modify-write + separate snapshot update. */
+export async function appendCodeRun(
+  id: string,
+  run: RunResult,
+  snapshot: string,
+  language: string
+): Promise<void> {
+  const db = createServiceClient();
+  const { error } = await db.rpc('append_code_run', {
+    p_id: id,
+    p_run: run as unknown as Record<string, unknown>,
+    p_snapshot: snapshot,
+    p_language: language,
+  });
+  if (error) throw new Error(`appendCodeRun: ${error.message}`);
 }
 
 /** Atomically claim an in-progress interview for scoring (single-flight). Returns true only
