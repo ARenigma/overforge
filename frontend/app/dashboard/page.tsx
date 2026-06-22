@@ -8,6 +8,8 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { CalendarClock, CheckCircle2, Gauge, Users } from 'lucide-react';
 import { PageHeader } from '@/components/ds/page-header';
 import { MetricCard } from '@/components/ds/metric-card';
+import { PageContainer } from '@/components/ds/page-container';
+import { CommandMenuTrigger } from '@/components/ds/command-menu-trigger';
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -52,8 +54,9 @@ export default async function DashboardPage() {
             </div>
           </div>
 
-          {/* Right: theme toggle + sign-out */}
-          <div className="flex items-center gap-1 shrink-0">
+          {/* Right: command menu + theme toggle + sign-out */}
+          <div className="flex shrink-0 items-center gap-2">
+            <CommandMenuTrigger className="hidden sm:inline-flex" />
             <ThemeToggle />
             <SignOutButton />
           </div>
@@ -61,44 +64,46 @@ export default async function DashboardPage() {
       </header>
 
       {/* ── Main content ────────────────────────────────────────────────── */}
-      <main className="max-w-[1200px] mx-auto px-6 sm:px-8 py-10">
-        {/* ── Page header ─────────────────────────────────────────────── */}
-        <PageHeader
-          title="Interviews"
-          description="All sessions where you are the interviewer"
-          actions={<NewInterviewDialog />}
-        />
+      <main>
+        <PageContainer>
+          {/* ── Page header ─────────────────────────────────────────────── */}
+          <PageHeader
+            title="Interviews"
+            description="All sessions where you are the interviewer"
+            actions={<NewInterviewDialog />}
+          />
 
-        {/* ── Metrics (always the unfiltered totals) ──────────────────── */}
-        {rows.length > 0 && (
-          <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <MetricCard
-              label="Total"
-              value={rows.length}
-              hint="All sessions"
-              icon={<Users className="h-4 w-4" />}
-            />
-            <MetricCard
-              label="Scored"
-              value={scoredRows.length}
-              icon={<CheckCircle2 className="h-4 w-4" />}
-            />
-            <MetricCard
-              label="Awaiting"
-              value={awaiting}
-              icon={<CalendarClock className="h-4 w-4" />}
-            />
-            <MetricCard
-              label="Avg score"
-              value={avgScore !== null ? avgScore.toFixed(1) : '—'}
-              hint="out of 5"
-              icon={<Gauge className="h-4 w-4" />}
-            />
-          </div>
-        )}
+          {/* ── Metrics (always the unfiltered totals) ──────────────────── */}
+          {rows.length > 0 && (
+            <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <MetricCard
+                label="Total"
+                value={rows.length}
+                hint="All sessions"
+                icon={<Users className="h-4 w-4" />}
+              />
+              <MetricCard
+                label="Scored"
+                value={scoredRows.length}
+                icon={<CheckCircle2 className="h-4 w-4" />}
+              />
+              <MetricCard
+                label="Awaiting"
+                value={awaiting}
+                icon={<CalendarClock className="h-4 w-4" />}
+              />
+              <MetricCard
+                label="Avg score"
+                value={avgScore !== null ? avgScore.toFixed(1) : '—'}
+                hint="out of 5"
+                icon={<Gauge className="h-4 w-4" />}
+              />
+            </div>
+          )}
 
-        {/* ── Interview list (filter + table) ─────────────────────────── */}
-        <InterviewTable rows={rows} error={error ?? null} />
+          {/* ── Interview list (filter + table) ─────────────────────────── */}
+          <InterviewTable rows={rows} error={error ?? null} />
+        </PageContainer>
       </main>
     </div>
   );

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+import { StatusBadge, type BadgeIntent } from '@/components/ds/status-badge';
 import {
   Dialog,
   DialogContent,
@@ -24,11 +24,11 @@ interface ScorecardDialogProps {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const RECOMMENDATION_STYLES: Record<Scorecard['recommendation'], string> = {
-  strong_hire: 'border-success/40 text-success bg-success/10',
-  hire: 'border-primary/40 text-primary bg-primary/10',
-  lean_hire: 'border-primary/30 text-muted-foreground bg-primary/5',
-  no_hire: 'border-destructive/40 text-destructive bg-destructive/10',
+const RECOMMENDATION_INTENT: Record<Scorecard['recommendation'], BadgeIntent> = {
+  strong_hire: 'success',
+  hire: 'info',
+  lean_hire: 'neutral',
+  no_hire: 'danger',
 };
 
 const RECOMMENDATION_LABELS: Record<Scorecard['recommendation'], string> = {
@@ -83,20 +83,17 @@ export function ScorecardDialog({ scorecard, candidateName }: ScorecardDialogPro
               {candidateName && <p className="text-xs text-muted-foreground">{candidateName}</p>}
             </div>
             {scorecard.scoringFailed ? (
-              <Badge
-                variant="outline"
-                className="shrink-0 gap-1 border-border bg-muted text-xs text-foreground"
-              >
+              <StatusBadge intent="warning" className="shrink-0 gap-1">
                 <AlertCircle className="h-3 w-3" />
                 Manual review
-              </Badge>
+              </StatusBadge>
             ) : (
-              <Badge
-                variant="outline"
-                className={`text-xs shrink-0 ${RECOMMENDATION_STYLES[scorecard.recommendation]}`}
+              <StatusBadge
+                intent={RECOMMENDATION_INTENT[scorecard.recommendation]}
+                className="shrink-0"
               >
                 {RECOMMENDATION_LABELS[scorecard.recommendation]}
-              </Badge>
+              </StatusBadge>
             )}
           </div>
         </DialogHeader>

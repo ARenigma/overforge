@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { CommandMenuDialog } from '@/components/ds/command-menu';
+import { OPEN_COMMAND_MENU_EVENT } from '@/components/ds/command-menu-trigger';
 
 /**
  * Mounts the global ⌘K / Ctrl+K listener and hosts the Command Menu dialog. Rendered once at
@@ -23,6 +24,13 @@ export function CommandMenuProvider() {
     }
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Visible affordances (CommandMenuTrigger) open the palette via a custom window event.
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener(OPEN_COMMAND_MENU_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_COMMAND_MENU_EVENT, onOpen);
   }, []);
 
   useEffect(() => {

@@ -1,13 +1,16 @@
 'use client';
 
-import { useState } from 'react';
-import { Badge } from '@/components/ui/badge';
+import { useEffect, useState } from 'react';
 import { ScorecardDialog } from './scorecard-dialog';
 import { FilterBar } from './filter-bar';
 import { InterviewRowActions } from './interview-row-actions';
 import { EmptyState, ErrorState } from '@/components/ds/state-block';
+import { Pagination } from '@/components/ds/pagination';
+import { StatusBadge, type BadgeIntent } from '@/components/ds/status-badge';
 import { AlertCircle, CalendarClock, SearchX } from 'lucide-react';
 import { type Scorecard } from '@/lib/api';
+
+const PAGE_SIZE = 20;
 
 export interface InterviewRow {
   id: string;
@@ -21,26 +24,18 @@ export interface InterviewRow {
 // ── Status pill ───────────────────────────────────────────────────────────────
 // Mirrors the backend interview_status enum exactly.
 
-const STATUS_META: Record<string, { label: string; className: string }> = {
-  invited: { label: 'Invited', className: 'border-border bg-transparent text-muted-foreground' },
-  in_progress: { label: 'In progress', className: 'border-primary/40 bg-primary/10 text-primary' },
-  completed: { label: 'Scoring', className: 'border-primary/40 bg-primary/10 text-primary' },
-  scored: { label: 'Scored', className: 'border-success/40 bg-success/10 text-success' },
-  cancelled: {
-    label: 'Cancelled',
-    className: 'border-destructive/40 bg-destructive/10 text-destructive',
-  },
-  expired: { label: 'Expired', className: 'border-border bg-muted text-muted-foreground' },
-  abandoned: { label: 'Abandoned', className: 'border-border bg-muted text-muted-foreground' },
+const STATUS_META: Record<string, { label: string; intent: BadgeIntent }> = {
+  invited: { label: 'Invited', intent: 'neutral' },
+  in_progress: { label: 'In progress', intent: 'info' },
+  completed: { label: 'Scoring', intent: 'info' },
+  scored: { label: 'Scored', intent: 'success' },
+  cancelled: { label: 'Cancelled', intent: 'danger' },
+  expired: { label: 'Expired', intent: 'warning' },
+  abandoned: { label: 'Abandoned', intent: 'warning' },
 };
 
-function statusMeta(status: string) {
-  return (
-    STATUS_META[status.toLowerCase()] ?? {
-      label: status,
-      className: 'border-border bg-transparent text-muted-foreground',
-    }
-  );
+function statusMeta(status: string): { label: string; intent: BadgeIntent } {
+  return STATUS_META[status.toLowerCase()] ?? { label: status, intent: 'neutral' };
 }
 
 function formatDate(iso: string) {
@@ -54,17 +49,11 @@ function formatDate(iso: string) {
 // ── Score badge ───────────────────────────────────────────────────────────────
 
 function ScoreBadge({ score }: { score: number }) {
-  const color =
-    score >= 4
-      ? 'border-success/40 text-success bg-success/10'
-      : score >= 3
-        ? 'border-primary/40 text-primary bg-primary/10'
-        : 'border-destructive/40 text-destructive bg-destructive/10';
-
+  const intent: BadgeIntent = score >= 4 ? 'success' : score >= 3 ? 'info' : 'danger';
   return (
-    <Badge variant="outline" className={`font-mono text-[11px] ${color}`}>
+    <StatusBadge intent={intent} className="font-mono text-[11px]">
       {score}/5
-    </Badge>
+    </StatusBadge>
   );
 }
 
@@ -79,6 +68,12 @@ export function InterviewTable({
 }) {
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+
+  // Reset to the first page whenever the filters change.
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, search]);
 
   // A failed fetch short-circuits before the filter bar — nothing to filter.
   if (error) {
@@ -115,6 +110,10 @@ export function InterviewTable({
     setStatusFilter('all');
     setSearch('');
   }
+
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pageRows = visible.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   return (
     <div className="space-y-4">
@@ -175,7 +174,7 @@ export function InterviewTable({
               </tr>
             </thead>
             <tbody>
-              {visible.map((interview) => (
+              {pageRows.map((interview) => (
                 <tr
                   key={interview.id}
                   className="border-b border-border transition-colors last:border-0 hover:bg-accent/50"
@@ -210,12 +209,9 @@ export function InterviewTable({
 
                   {/* Status */}
                   <td className="px-5 py-3.5 align-middle">
-                    <Badge
-                      variant="outline"
-                      className={`w-fit text-xs ${statusMeta(interview.status).className}`}
-                    >
+                    <StatusBadge intent={statusMeta(interview.status).intent}>
                       {statusMeta(interview.status).label}
-                    </Badge>
+                    </StatusBadge>
                   </td>
 
                   {/* Score / scorecard trigger */}
@@ -224,13 +220,10 @@ export function InterviewTable({
                       {interview.evaluation_score ? (
                         <>
                           {interview.evaluation_score.scoringFailed ? (
-                            <Badge
-                              variant="outline"
-                              className="gap-1 border-border bg-muted text-[11px] text-foreground"
-                            >
+                            <StatusBadge intent="warning" className="gap-1 text-[11px]">
                               <AlertCircle className="h-3 w-3" />
                               Review
-                            </Badge>
+                            </StatusBadge>
                           ) : (
                             <ScoreBadge score={interview.evaluation_score.overall} />
                           )}
@@ -258,6 +251,8 @@ export function InterviewTable({
           </table>
         </div>
       )}
+
+      <Pagination page={safePage} pageCount={pageCount} onPageChange={setPage} />
     </div>
   );
 }
