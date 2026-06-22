@@ -217,6 +217,23 @@ export async function deleteInterview(interviewId: string, interviewerId: string
   await dbDeleteInterview(interviewId);
 }
 
+/**
+ * Re-score an interview: reset to a scorable state and run scoring again. Recovers a stuck
+ * 'completed' (process died mid-score) and regenerates a failed/again scorecard.
+ */
+export async function rescore(interviewId: string, interviewerId: string): Promise<void> {
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  assertOwner(interview, interviewerId);
+  if ((interview.transcript ?? []).length === 0) {
+    throw Object.assign(new Error('This interview has no transcript to score yet'), {
+      status: 409,
+    });
+  }
+  // Reset so finishAndScore's single-flight claim (in_progress -> completed) can run again.
+  await updateInterview(interviewId, { status: 'in_progress' });
+  await finishAndScore(interviewId);
+}
+
 export interface AnswerResult {
   utterance: Utterance;
   phase: string;

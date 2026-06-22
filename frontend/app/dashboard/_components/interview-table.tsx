@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { ScorecardDialog } from './scorecard-dialog';
 import { FilterBar } from './filter-bar';
 import { InterviewRowActions } from './interview-row-actions';
 import { EmptyState, ErrorState } from '@/components/ds/state-block';
 import { Pagination } from '@/components/ds/pagination';
 import { StatusBadge, type BadgeIntent } from '@/components/ds/status-badge';
+import { statusMeta } from '@/lib/interview-status';
 import { AlertCircle, CalendarClock, SearchX } from 'lucide-react';
 import { type Scorecard } from '@/lib/api';
 
@@ -19,23 +21,6 @@ export interface InterviewRow {
   status: string;
   created_at: string;
   evaluation_score: Scorecard | null;
-}
-
-// ── Status pill ───────────────────────────────────────────────────────────────
-// Mirrors the backend interview_status enum exactly.
-
-const STATUS_META: Record<string, { label: string; intent: BadgeIntent }> = {
-  invited: { label: 'Invited', intent: 'neutral' },
-  in_progress: { label: 'In progress', intent: 'info' },
-  completed: { label: 'Scoring', intent: 'info' },
-  scored: { label: 'Scored', intent: 'success' },
-  cancelled: { label: 'Cancelled', intent: 'danger' },
-  expired: { label: 'Expired', intent: 'warning' },
-  abandoned: { label: 'Abandoned', intent: 'warning' },
-};
-
-function statusMeta(status: string): { label: string; intent: BadgeIntent } {
-  return STATUS_META[status.toLowerCase()] ?? { label: status, intent: 'neutral' };
 }
 
 function formatDate(iso: string) {
@@ -66,6 +51,7 @@ export function InterviewTable({
   rows: InterviewRow[];
   error: { message: string } | null;
 }) {
+  const router = useRouter();
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -177,7 +163,12 @@ export function InterviewTable({
               {pageRows.map((interview) => (
                 <tr
                   key={interview.id}
-                  className="border-b border-border transition-colors last:border-0 hover:bg-accent/50"
+                  onClick={() => router.push(`/dashboard/${interview.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') router.push(`/dashboard/${interview.id}`);
+                  }}
+                  tabIndex={0}
+                  className="cursor-pointer border-b border-border transition-colors last:border-0 hover:bg-accent/50 focus-visible:bg-accent/50 focus-visible:outline-none"
                 >
                   {/* Candidate (+ date on mobile, where the Created column is hidden) */}
                   <td className="px-5 py-3.5 align-middle">
@@ -215,7 +206,7 @@ export function InterviewTable({
                   </td>
 
                   {/* Score / scorecard trigger */}
-                  <td className="px-5 py-3.5 align-middle">
+                  <td className="px-5 py-3.5 align-middle" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-2">
                       {interview.evaluation_score ? (
                         <>
@@ -242,7 +233,10 @@ export function InterviewTable({
                   </td>
 
                   {/* Row actions */}
-                  <td className="px-2 py-3.5 align-middle text-right">
+                  <td
+                    className="px-2 py-3.5 align-middle text-right"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <InterviewRowActions id={interview.id} status={interview.status} />
                   </td>
                 </tr>
