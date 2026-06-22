@@ -56,6 +56,34 @@ router.post('/', requireInterviewer, async (req: Request, res: Response): Promis
   }
 });
 
+// ─────────────────────── POST /api/interviews/:id/cancel ───────────────────────
+// Interviewer soft-cancel — keeps the row + transcript; the candidate's link stops working.
+
+router.post(
+  '/:id/cancel',
+  requireInterviewer,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      await orchestrator.cancelInterview(req.params.id, req.userId!);
+      res.json({ ok: true });
+    } catch (err) {
+      sendError(res, err);
+    }
+  }
+);
+
+// ─────────────────────── DELETE /api/interviews/:id ───────────────────────
+// Interviewer hard-delete (erasure) — removes the interview and all of its data.
+
+router.delete('/:id', requireInterviewer, async (req: Request, res: Response): Promise<void> => {
+  try {
+    await orchestrator.deleteInterview(req.params.id, req.userId!);
+    res.json({ ok: true });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 // ─────────────────────── POST /api/interviews/:id/begin ───────────────────────
 
 router.post('/:id/begin', async (req: Request, res: Response): Promise<void> => {

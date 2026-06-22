@@ -16,11 +16,13 @@ import { Input } from '@/components/ui/input';
 
 /**
  * Text-Confirm Dialog fragment (Supabase design-system "Text Confirm Modal"): a high-risk
- * variant that gates the destructive action behind typing an exact phrase. Case-sensitive,
- * matching the Supabase precedent.
+ * variant that gates the destructive action behind typing an exact phrase (case-sensitive).
+ * Works trigger-driven (pass `trigger`) or controlled (pass `open` + `onOpenChange`).
  */
 export function TextConfirmDialog({
   trigger,
+  open: openProp,
+  onOpenChange,
   title,
   description,
   confirmPhrase,
@@ -28,7 +30,9 @@ export function TextConfirmDialog({
   cancelLabel = 'Cancel',
   onConfirm,
 }: {
-  trigger: ReactNode;
+  trigger?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   title: string;
   description?: string;
   confirmPhrase: string;
@@ -36,15 +40,22 @@ export function TextConfirmDialog({
   cancelLabel?: string;
   onConfirm: () => void | Promise<void>;
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [value, setValue] = useState('');
-
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : internalOpen;
   const matches = value === confirmPhrase;
 
-  function reset() {
-    setValue('');
-    setLoading(false);
+  function applyOpen(v: boolean) {
+    if (isControlled) onOpenChange?.(v);
+    else setInternalOpen(v);
+  }
+
+  function setOpen(v: boolean) {
+    if (loading) return;
+    applyOpen(v);
+    if (!v) setValue('');
   }
 
   async function handleConfirm() {
@@ -52,23 +63,16 @@ export function TextConfirmDialog({
     try {
       setLoading(true);
       await onConfirm();
-      setOpen(false);
-      reset();
+      applyOpen(false);
+      setValue('');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <AlertDialog
-      open={open}
-      onOpenChange={(v) => {
-        if (loading) return;
-        setOpen(v);
-        if (!v) reset();
-      }}
-    >
-      <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      {trigger && <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>}
       <AlertDialogContent className="border border-border bg-card">
         <AlertDialogHeader>
           <AlertDialogTitle className="text-base text-foreground">{title}</AlertDialogTitle>

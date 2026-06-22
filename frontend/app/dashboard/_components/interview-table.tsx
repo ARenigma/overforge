@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { ScorecardDialog } from './scorecard-dialog';
 import { FilterBar } from './filter-bar';
+import { InterviewRowActions } from './interview-row-actions';
 import { EmptyState, ErrorState } from '@/components/ds/state-block';
 import { AlertCircle, CalendarClock, SearchX } from 'lucide-react';
 import { type Scorecard } from '@/lib/api';
@@ -11,24 +12,34 @@ import { type Scorecard } from '@/lib/api';
 export interface InterviewRow {
   id: string;
   candidate_email: string | null;
+  candidate_name: string | null;
   status: string;
   created_at: string;
   evaluation_score: Scorecard | null;
 }
 
 // ── Status pill ───────────────────────────────────────────────────────────────
+// Mirrors the backend interview_status enum exactly.
 
-const STATUS_VARIANT: Record<string, string> = {
-  pending: 'border-border text-muted-foreground bg-transparent',
-  active: 'border-primary/40 text-primary bg-primary/10',
-  completed: 'border-success/40 text-success bg-success/10',
-  scored: 'border-success/40 text-success bg-success/10',
-  cancelled: 'border-destructive/40 text-destructive bg-destructive/10',
+const STATUS_META: Record<string, { label: string; className: string }> = {
+  invited: { label: 'Invited', className: 'border-border bg-transparent text-muted-foreground' },
+  in_progress: { label: 'In progress', className: 'border-primary/40 bg-primary/10 text-primary' },
+  completed: { label: 'Scoring', className: 'border-primary/40 bg-primary/10 text-primary' },
+  scored: { label: 'Scored', className: 'border-success/40 bg-success/10 text-success' },
+  cancelled: {
+    label: 'Cancelled',
+    className: 'border-destructive/40 bg-destructive/10 text-destructive',
+  },
+  expired: { label: 'Expired', className: 'border-border bg-muted text-muted-foreground' },
+  abandoned: { label: 'Abandoned', className: 'border-border bg-muted text-muted-foreground' },
 };
 
-function statusVariant(status: string) {
+function statusMeta(status: string) {
   return (
-    STATUS_VARIANT[status.toLowerCase()] ?? 'border-border text-muted-foreground bg-transparent'
+    STATUS_META[status.toLowerCase()] ?? {
+      label: status,
+      className: 'border-border bg-transparent text-muted-foreground',
+    }
   );
 }
 
@@ -93,7 +104,10 @@ export function InterviewTable({
   const q = search.trim().toLowerCase();
   const visible = rows.filter((r) => {
     const matchesStatus = statusFilter === 'all' || r.status.toLowerCase() === statusFilter;
-    const matchesSearch = !q || (r.candidate_email?.toLowerCase().includes(q) ?? false);
+    const matchesSearch =
+      !q ||
+      (r.candidate_email?.toLowerCase().includes(q) ?? false) ||
+      (r.candidate_name?.toLowerCase().includes(q) ?? false);
     return matchesStatus && matchesSearch;
   });
 
@@ -155,6 +169,9 @@ export function InterviewTable({
                 >
                   Score
                 </th>
+                <th scope="col" className="w-10 px-2 py-3">
+                  <span className="sr-only">Actions</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -165,11 +182,22 @@ export function InterviewTable({
                 >
                   {/* Candidate (+ date on mobile, where the Created column is hidden) */}
                   <td className="px-5 py-3.5 align-middle">
-                    <span className="block truncate text-sm text-foreground">
-                      {interview.candidate_email ?? (
-                        <span className="italic text-muted-foreground">No candidate yet</span>
-                      )}
-                    </span>
+                    {interview.candidate_name ? (
+                      <>
+                        <span className="block truncate text-sm text-foreground">
+                          {interview.candidate_name}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {interview.candidate_email ?? 'No email'}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="block truncate text-sm text-foreground">
+                        {interview.candidate_email ?? (
+                          <span className="italic text-muted-foreground">No candidate yet</span>
+                        )}
+                      </span>
+                    )}
                     <span className="mt-0.5 block text-xs tabular-nums text-muted-foreground sm:hidden">
                       {formatDate(interview.created_at)}
                     </span>
@@ -184,9 +212,9 @@ export function InterviewTable({
                   <td className="px-5 py-3.5 align-middle">
                     <Badge
                       variant="outline"
-                      className={`w-fit text-xs capitalize ${statusVariant(interview.status)}`}
+                      className={`w-fit text-xs ${statusMeta(interview.status).className}`}
                     >
-                      {interview.status}
+                      {statusMeta(interview.status).label}
                     </Badge>
                   </td>
 
@@ -209,12 +237,20 @@ export function InterviewTable({
                           <ScorecardDialog
                             interviewId={interview.id}
                             scorecard={interview.evaluation_score}
+                            candidateName={
+                              interview.candidate_name ?? interview.candidate_email ?? undefined
+                            }
                           />
                         </>
                       ) : (
                         <span className="text-xs text-muted-foreground/40">—</span>
                       )}
                     </div>
+                  </td>
+
+                  {/* Row actions */}
+                  <td className="px-2 py-3.5 align-middle text-right">
+                    <InterviewRowActions id={interview.id} status={interview.status} />
                   </td>
                 </tr>
               ))}

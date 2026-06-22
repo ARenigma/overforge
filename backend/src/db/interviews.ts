@@ -16,7 +16,8 @@ export type InterviewStatus =
   | 'completed'
   | 'scored'
   | 'expired'
-  | 'abandoned';
+  | 'abandoned'
+  | 'cancelled';
 export type InterviewPhase =
   | 'greeting'
   | 'oral'
@@ -127,6 +128,13 @@ export async function updateInterview(id: string, patch: UpdateInterviewInput): 
     .eq('id', id);
 
   if (error) throw new Error(`updateInterview: ${error.message}`);
+}
+
+/** Hard-delete an interview row (cascades to interview_events + notify_outbox). */
+export async function deleteInterview(id: string): Promise<void> {
+  const db = createServiceClient();
+  const { error } = await db.from('interviews').delete().eq('id', id);
+  if (error) throw new Error(`deleteInterview: ${error.message}`);
 }
 
 /** Append one event row with a monotonically increasing seq per interview.

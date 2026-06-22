@@ -125,6 +125,28 @@ export async function createInterview(
   });
 }
 
+/**
+ * POST /api/interviews/:id/cancel
+ * Soft-cancel an interview (keeps the record; the candidate's link stops working).
+ */
+export async function cancelInterview(accessToken: string, id: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/api/interviews/${id}/cancel`, {
+    accessToken,
+    body: {},
+  });
+}
+
+/**
+ * DELETE /api/interviews/:id
+ * Permanently delete an interview and all of its data (erasure).
+ */
+export async function deleteInterview(accessToken: string, id: string): Promise<{ ok: boolean }> {
+  return apiFetch<{ ok: boolean }>(`/api/interviews/${id}`, {
+    method: 'DELETE',
+    accessToken,
+  });
+}
+
 // ── Candidate endpoints ───────────────────────────────────────────────────────
 
 /**

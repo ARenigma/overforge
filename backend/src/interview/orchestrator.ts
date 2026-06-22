@@ -12,6 +12,7 @@ import {
   createInterview as dbCreateInterview,
   getById,
   updateInterview,
+  deleteInterview as dbDeleteInterview,
   appendEvent,
   appendCodeRun,
   claimForScoring,
@@ -190,6 +191,30 @@ export async function getCandidateState(interviewId: string): Promise<CandidateS
     transcript: interview.transcript ?? [],
     codeSnapshot: interview.code_snapshot ?? '',
   };
+}
+
+function assertOwner(interview: Interview, interviewerId: string): void {
+  if (interview.interviewer_id !== interviewerId) {
+    throw Object.assign(new Error('You are not authorized for this interview'), { status: 403 });
+  }
+}
+
+/** Soft-cancel — keeps the row + transcript; the candidate's invite link stops working. */
+export async function cancelInterview(interviewId: string, interviewerId: string): Promise<void> {
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  assertOwner(interview, interviewerId);
+  if (interview.status === 'scored') {
+    throw Object.assign(new Error('A scored interview cannot be cancelled'), { status: 409 });
+  }
+  await updateInterview(interviewId, { status: 'cancelled' });
+  await appendEvent(interviewId, 'transition', { from: interview.status, to: 'cancelled' });
+}
+
+/** Hard-delete (erasure) — removes the interview and all of its data. */
+export async function deleteInterview(interviewId: string, interviewerId: string): Promise<void> {
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  assertOwner(interview, interviewerId);
+  await dbDeleteInterview(interviewId);
 }
 
 export interface AnswerResult {

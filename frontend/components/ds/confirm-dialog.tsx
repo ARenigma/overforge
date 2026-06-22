@@ -14,12 +14,15 @@ import {
 import { Button } from '@/components/ui/button';
 
 /**
- * Confirm Dialog fragment (Supabase design-system "Confirmation Modal"): a trigger that opens
- * a two-button alert. The confirm action runs `onConfirm` (may be async) with an in-button
- * spinner, and the dialog stays locked until it resolves.
+ * Confirm Dialog fragment (Supabase design-system "Confirmation Modal"). Works either
+ * trigger-driven (pass `trigger`) or controlled (pass `open` + `onOpenChange`). The confirm
+ * action runs `onConfirm` (may be async) with an in-button spinner, and the dialog stays
+ * locked until it resolves.
  */
 export function ConfirmDialog({
   trigger,
+  open: openProp,
+  onOpenChange,
   title,
   description,
   confirmLabel = 'Confirm',
@@ -27,7 +30,9 @@ export function ConfirmDialog({
   destructive = false,
   onConfirm,
 }: {
-  trigger: ReactNode;
+  trigger?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   title: string;
   description?: string;
   confirmLabel?: string;
@@ -35,22 +40,34 @@ export function ConfirmDialog({
   destructive?: boolean;
   onConfirm: () => void | Promise<void>;
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : internalOpen;
+
+  function applyOpen(v: boolean) {
+    if (isControlled) onOpenChange?.(v);
+    else setInternalOpen(v);
+  }
+
+  function setOpen(v: boolean) {
+    if (loading) return; // don't allow close mid-confirm
+    applyOpen(v);
+  }
 
   async function handleConfirm() {
     try {
       setLoading(true);
       await onConfirm();
-      setOpen(false);
+      applyOpen(false);
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <AlertDialog open={open} onOpenChange={(v) => !loading && setOpen(v)}>
-      <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      {trigger && <AlertDialogTrigger asChild>{trigger}</AlertDialogTrigger>}
       <AlertDialogContent className="border border-border bg-card">
         <AlertDialogHeader>
           <AlertDialogTitle className="text-base text-foreground">{title}</AlertDialogTitle>

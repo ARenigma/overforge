@@ -19,6 +19,7 @@ import { AlertCircle, BarChart2 } from 'lucide-react';
 interface ScorecardDialogProps {
   interviewId: string;
   scorecard: Scorecard;
+  candidateName?: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -58,7 +59,7 @@ function ScoreBar({ score }: { score: number }) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ScorecardDialog({ scorecard }: ScorecardDialogProps) {
+export function ScorecardDialog({ scorecard, candidateName }: ScorecardDialogProps) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -77,7 +78,10 @@ export function ScorecardDialog({ scorecard }: ScorecardDialogProps) {
       <DialogContent className="bg-card border border-border text-card-foreground sm:max-w-lg">
         <DialogHeader>
           <div className="flex items-center justify-between gap-4 pr-6">
-            <DialogTitle className="text-foreground text-base">Interview scorecard</DialogTitle>
+            <div className="space-y-0.5">
+              <DialogTitle className="text-foreground text-base">Interview scorecard</DialogTitle>
+              {candidateName && <p className="text-xs text-muted-foreground">{candidateName}</p>}
+            </div>
             {scorecard.scoringFailed ? (
               <Badge
                 variant="outline"

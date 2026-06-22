@@ -8,13 +8,15 @@ import {
 } from '@/components/ui/select';
 import { Search } from 'lucide-react';
 
+// Mirrors the backend interview_status enum (the transient 'completed' state is omitted).
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All statuses' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'active', label: 'Active' },
-  { value: 'completed', label: 'Completed' },
+  { value: 'invited', label: 'Invited' },
+  { value: 'in_progress', label: 'In progress' },
   { value: 'scored', label: 'Scored' },
   { value: 'cancelled', label: 'Cancelled' },
+  { value: 'expired', label: 'Expired' },
+  { value: 'abandoned', label: 'Abandoned' },
 ];
 
 /**
@@ -40,8 +42,8 @@ export function FilterBar({
           type="text"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search by candidate email"
-          aria-label="Search by candidate email"
+          placeholder="Search by name or email"
+          aria-label="Search by candidate name or email"
           className="h-9 pl-9"
         />
       </div>

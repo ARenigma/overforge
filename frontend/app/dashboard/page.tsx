@@ -24,12 +24,14 @@ export default async function DashboardPage() {
 
   const { data: interviews, error } = await supabase
     .from('interviews')
-    .select('id, candidate_email, status, created_at, evaluation_score')
+    .select('id, candidate_email, candidate_name, status, created_at, evaluation_score')
     .order('created_at', { ascending: false });
 
   const rows = (interviews ?? []) as InterviewRow[];
 
-  const scoredRows = rows.filter((r) => r.evaluation_score);
+  // "Scored" counts only genuinely-scored interviews — a failed-scoring fallback is not a score.
+  const scoredRows = rows.filter((r) => r.evaluation_score && !r.evaluation_score.scoringFailed);
+  const awaiting = rows.filter((r) => r.status === 'invited' || r.status === 'in_progress').length;
   const avgScore = scoredRows.length
     ? scoredRows.reduce((sum, r) => sum + (r.evaluation_score?.overall ?? 0), 0) / scoredRows.length
     : null;
@@ -83,7 +85,7 @@ export default async function DashboardPage() {
             />
             <MetricCard
               label="Awaiting"
-              value={rows.length - scoredRows.length}
+              value={awaiting}
               icon={<CalendarClock className="h-4 w-4" />}
             />
             <MetricCard
