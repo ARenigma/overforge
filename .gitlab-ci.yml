@@ -178,6 +178,9 @@ deploy-backend:
   script:
     - rsync -az --delete --exclude node_modules --exclude '.env*' backend/ beef:overforge/backend/
     - rsync -az --exclude backend.env deploy/ beef:overforge/deploy/
+    # Pre-warm the persistent Go build cache (idempotent) before the backend serves, so the
+    # first Go /run isn't a cold ~10s stdlib compile. See deploy/warm-caches.sh.
+    - ssh beef 'cd ~/overforge && bash deploy/warm-caches.sh'
     - ssh beef 'cd ~/overforge && docker compose -f deploy/docker-compose.yml up -d --build backend && sleep 4 && docker compose -f deploy/docker-compose.yml ps'
     - ssh beef 'curl -fsS --resolve 140.245.14.50.sslip.io:443:127.0.0.1 https://140.245.14.50.sslip.io/health'
     # keep beef's disk bounded: drop dangling images + cap build cache (native rebuilds accumulate otherwise)

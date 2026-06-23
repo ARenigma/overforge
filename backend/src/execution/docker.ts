@@ -25,7 +25,16 @@ interface LangSpec {
   // Extra env beyond COMMON_ENV (e.g. Go's cache/module dirs that otherwise default to the
   // read-only root FS). Merged on top of COMMON_ENV.
   env?: Readonly<Record<string, string>>;
+  // Persistent, pre-warmed build cache mounted into every run (e.g. Go's GOCACHE). Shared
+  // across runs so the toolchain doesn't recompile from cold each time. The volume is warmed
+  // + chowned to the sandbox uid by deploy/warm-caches.sh; it holds only content-addressed
+  // cache entries (no run can hand-pick another's, and the build dir stays the per-run tmpfs).
+  cacheVolume?: { name: string; path: string };
 }
+
+// Name of the persistent Go build-cache volume (see deploy/warm-caches.sh). Overridable so a
+// host can point at its own volume.
+const GO_CACHE_VOLUME = process.env.GO_CACHE_VOLUME ?? 'of-go-cache';
 
 // The container is --read-only with ONLY /work (a tmpfs) writable. Point HOME and the temp
 // dir at /work so toolchains that need scratch space — and programs that open temp files —
@@ -46,13 +55,15 @@ const LANGS: Readonly<Record<string, LangSpec>> = {
     cmd: 'go run main.go',
     // `go run` needs writable cache/module/work dirs; their defaults ($HOME/.cache, the
     // image's GOPATH=/go, and $TMPDIR for the build work dir) all land on the read-only
-    // root FS, so it fails with "mkdir /tmp/go-build…: read-only file system". Redirect
-    // each into the writable /work tmpfs.
+    // root FS. GOCACHE points at the persistent pre-warmed volume so the stdlib isn't
+    // recompiled every run (cold ~10s → warm ~0.3s); GOPATH/GOTMPDIR stay in the per-run
+    // /work tmpfs.
     env: {
-      GOCACHE: '/work/.cache/go-build',
+      GOCACHE: '/gocache',
       GOPATH: '/work/go',
       GOTMPDIR: '/work',
     },
+    cacheVolume: { name: GO_CACHE_VOLUME, path: '/gocache' },
   },
   java: { image: 'eclipse-temurin:21-jdk', file: 'Main.java', cmd: 'javac Main.java && java Main' },
   cpp: { image: 'gcc:13', file: 'main.cpp', cmd: 'g++ -O2 -o app main.cpp && ./app' },
@@ -97,6 +108,12 @@ export function createDockerKernel(config: DockerKernelConfig = {}): ExecutionKe
         `${k}=${v}`,
       ]);
 
+      // Mount the persistent, pre-warmed build cache (Go's GOCACHE) so compilation reuses
+      // the warm stdlib instead of recompiling cold on every run.
+      const cacheArgs = spec.cacheVolume
+        ? ['-v', `${spec.cacheVolume.name}:${spec.cacheVolume.path}`]
+        : [];
+
       // In-container: decode source + stdin from env, then (compile &&) run under `timeout`,
       // piping the decoded stdin to the program. Single-quoted heredoc-free, all data is base64.
       const inner =
@@ -134,6 +151,7 @@ export function createDockerKernel(config: DockerKernelConfig = {}): ExecutionKe
         'ALL',
         '--security-opt',
         'no-new-privileges',
+        ...cacheArgs,
         ...envArgs,
         '-e',
         `B64SRC=${b64(req.source)}`,

@@ -51,22 +51,25 @@ describe('docker execution kernel', () => {
     expect(srcEnv).toBe(`B64SRC=${Buffer.from('print(40+2)').toString('base64')}`);
   });
 
-  test('go run gets writable scratch dirs (HOME/TMPDIR + Go caches → /work)', async () => {
+  test('go run gets writable scratch + a persistent warm GOCACHE volume', async () => {
     let captured: string[] = [];
     onRun((args, cb) => {
       captured = args;
       cb(null, 'ok\n', '');
     });
     await createDockerKernel().run({ language: 'go', source: 'package main' });
-    // Without these, `go run` fails with "mkdir /tmp/go-build…: read-only file system".
+    // Scratch dirs writable (else "mkdir /tmp/go-build…: read-only file system"), and
+    // GOCACHE on the pre-warmed shared volume (else the stdlib recompiles cold every run).
     expect(captured).toEqual(
       expect.arrayContaining([
+        '-v',
+        'of-go-cache:/gocache',
         '-e',
         'HOME=/work',
         '-e',
         'TMPDIR=/work',
         '-e',
-        'GOCACHE=/work/.cache/go-build',
+        'GOCACHE=/gocache',
         '-e',
         'GOPATH=/work/go',
         '-e',
