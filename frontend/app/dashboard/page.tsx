@@ -32,8 +32,11 @@ export default async function DashboardPage() {
 
   const rows = (interviews ?? []) as InterviewRow[];
 
-  // "Scored" counts only genuinely-scored interviews — a failed-scoring fallback is not a score.
-  const scoredRows = rows.filter((r) => r.evaluation_score && !r.evaluation_score.scoringFailed);
+  // "Scored" counts only genuinely-scored interviews — a failed-scoring fallback or an
+  // incomplete (no-show / dropout) result is not a real score and must not skew the average.
+  const scoredRows = rows.filter(
+    (r) => r.evaluation_score && !r.evaluation_score.scoringFailed && !r.evaluation_score.incomplete
+  );
   const awaiting = rows.filter((r) => r.status === 'invited' || r.status === 'in_progress').length;
   const avgScore = scoredRows.length
     ? scoredRows.reduce((sum, r) => sum + (r.evaluation_score?.overall ?? 0), 0) / scoredRows.length

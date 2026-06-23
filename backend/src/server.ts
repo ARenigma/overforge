@@ -7,7 +7,8 @@ import cors from 'cors';
 import { interviewsRouter } from './http/interviews';
 import { SUPPORTED_LANGUAGES } from './execution/docker';
 import { drainOutbox } from './notify/outbox';
-import { makeOutboxStore, sweepExpiredInterviews } from './db/interviews';
+import { makeOutboxStore } from './db/interviews';
+import { closeStaleInterviews } from './interview/orchestrator';
 import { createEmailSender } from './notify/resend';
 
 const app = express();
@@ -83,9 +84,12 @@ function startDrainInterval(): void {
 }
 
 function startSweepInterval(): void {
+  // Close stale interviews so every one reaches the interviewer: a no-show (invited past TTL)
+  // gets an "didn't start" notification; a dropout (in_progress past TTL) gets its partial
+  // transcript scored. Both land via the existing scorecard email path.
   sweepInterval = setInterval(() => {
-    sweepExpiredInterviews().catch((err: unknown) => {
-      console.error('[sweep] expiry sweep error:', err);
+    closeStaleInterviews().catch((err: unknown) => {
+      console.error('[sweep] close-stale error:', err);
     });
   }, 300_000);
   sweepInterval.unref();

@@ -210,7 +210,12 @@ export function InterviewTable({
                     <div className="flex items-center justify-end gap-2">
                       {interview.evaluation_score ? (
                         <>
-                          {interview.evaluation_score.scoringFailed ? (
+                          {interview.evaluation_score.incomplete ? (
+                            <StatusBadge intent="warning" className="gap-1 text-[11px]">
+                              <AlertCircle className="h-3 w-3" />
+                              Incomplete
+                            </StatusBadge>
+                          ) : interview.evaluation_score.scoringFailed ? (
                             <StatusBadge intent="warning" className="gap-1 text-[11px]">
                               <AlertCircle className="h-3 w-3" />
                               Review

@@ -13,9 +13,29 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { createClient } from '@/lib/supabase/client';
 import { createInterview } from '@/lib/api';
-import { Plus, Copy, Check, ExternalLink } from 'lucide-react';
+import { Plus, Copy, Check, ExternalLink, Mail } from 'lucide-react';
+
+// Coding languages the interviewer can assign. 'any' = let the candidate choose in-room
+// (today's behavior); a specific value locks the room to that language.
+const LANGUAGE_OPTIONS = [
+  { value: 'any', label: 'Candidate chooses' },
+  { value: 'python', label: 'Python' },
+  { value: 'javascript', label: 'JavaScript' },
+  { value: 'typescript', label: 'TypeScript' },
+  { value: 'java', label: 'Java' },
+  { value: 'cpp', label: 'C++' },
+  { value: 'go', label: 'Go' },
+  { value: 'ruby', label: 'Ruby' },
+] as const;
 
 export function NewInterviewDialog() {
   const router = useRouter();
@@ -24,6 +44,7 @@ export function NewInterviewDialog() {
   // Form state
   const [candidateEmail, setCandidateEmail] = useState('');
   const [candidateName, setCandidateName] = useState('');
+  const [language, setLanguage] = useState<string>('any');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,6 +55,7 @@ export function NewInterviewDialog() {
   function resetState() {
     setCandidateEmail('');
     setCandidateName('');
+    setLanguage('any');
     setSubmitting(false);
     setError(null);
     setLink(null);
@@ -60,6 +82,7 @@ export function NewInterviewDialog() {
       const result = await createInterview(session.access_token, {
         candidateEmail: candidateEmail.trim(),
         ...(candidateName.trim() ? { candidateName: candidateName.trim() } : {}),
+        ...(language !== 'any' ? { language } : {}),
       });
 
       setLink(result.link);
@@ -141,9 +164,26 @@ export function NewInterviewDialog() {
               </a>
             </div>
 
+            {/* Manual share: opens the interviewer's mail client with the invite pre-filled.
+                No server-side send (that's a future gated feature). */}
+            <a
+              href={`mailto:${encodeURIComponent(candidateEmail)}?subject=${encodeURIComponent(
+                'Your Overforge technical interview'
+              )}&body=${encodeURIComponent(
+                `Hi${candidateName ? ` ${candidateName}` : ''},\n\n` +
+                  `You're invited to a technical interview. Open this link to begin — it's self-paced, ` +
+                  `conducted by our AI interviewer, and the link expires in 72 hours:\n\n${link}\n\nGood luck!`
+              )}`}
+              className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-primary text-sm text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Mail className="h-4 w-4" />
+              Email invite to candidate
+            </a>
+
             <Button
               onClick={handleDone}
-              className="w-full h-9 bg-primary text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98] text-sm"
+              variant="outline"
+              className="w-full h-9 border-border bg-transparent text-muted-foreground hover:text-foreground hover:bg-accent text-sm"
             >
               Done
             </Button>
@@ -179,6 +219,29 @@ export function NewInterviewDialog() {
                 placeholder="Jane Smith"
                 className="bg-background border-input text-foreground placeholder:text-muted-foreground/50 focus-visible:ring-ring h-10"
               />
+            </Field>
+
+            <Field id="ni-language" label="Coding language">
+              <Select value={language} onValueChange={setLanguage}>
+                <SelectTrigger
+                  id="ni-language"
+                  className="h-10 bg-background border-input text-foreground focus-visible:ring-ring"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border text-foreground">
+                  {LANGUAGE_OPTIONS.map((l) => (
+                    <SelectItem key={l.value} value={l.value} className="focus:bg-muted">
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                {language === 'any'
+                  ? 'The candidate picks their language in the room.'
+                  : 'The room is locked to this language.'}
+              </p>
             </Field>
 
             <div className="flex gap-2 pt-1">

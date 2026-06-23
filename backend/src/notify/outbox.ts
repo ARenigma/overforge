@@ -32,26 +32,45 @@ export interface EmailSender {
   send(msg: EmailMessage): Promise<void>;
 }
 
-/** Pure: build the interviewer scorecard email from an interview + scorecard. */
+/** Pure: build the interviewer scorecard email from an interview + scorecard.
+ *  An incomplete interview (no-show / dropout) is framed as a status, not a hire verdict. */
 export function buildScorecardEmail(item: ScorecardOutboxItem): EmailMessage {
-  const who = item.candidateName ? `${item.candidateName} (${item.candidateEmail})` : item.candidateEmail;
+  const who = item.candidateName
+    ? `${item.candidateName} (${item.candidateEmail})`
+    : item.candidateEmail;
   const sc = item.scorecard;
+  const incomplete = sc.incomplete === true;
+  const headline = incomplete ? 'Interview incomplete' : 'Interview complete';
+  // For incomplete/failed runs the recommendation isn't a real judgement — show a status word.
+  const verdict = incomplete
+    ? 'Incomplete'
+    : sc.scoringFailed
+      ? 'Manual review'
+      : sc.recommendation;
   const dims = sc.dimensions.map((d) => `  • ${d.name}: ${d.score}/5 — ${d.notes}`).join('\n');
   const text =
-    `Interview complete for ${who}.\n\n` +
-    `Overall: ${sc.overall}/5\n` +
-    `Recommendation: ${sc.recommendation}\n\n` +
-    `Dimensions:\n${dims || '  (none)'}\n\n` +
+    `${headline} for ${who}.\n\n` +
+    (incomplete ? '' : `Overall: ${sc.overall}/5\n`) +
+    `Status: ${verdict}\n\n` +
+    (sc.dimensions.length ? `Dimensions:\n${dims}\n\n` : '') +
     `Summary:\n${sc.summary}\n\n` +
     `Interview ID: ${item.interviewId}`;
   const html =
-    `<h2>Interview complete — ${escapeHtml(who)}</h2>` +
-    `<p><strong>Overall:</strong> ${sc.overall}/5<br/>` +
-    `<strong>Recommendation:</strong> ${escapeHtml(sc.recommendation)}</p>` +
-    `<ul>${sc.dimensions.map((d) => `<li>${escapeHtml(d.name)}: ${d.score}/5 — ${escapeHtml(d.notes)}</li>`).join('')}</ul>` +
+    `<h2>${escapeHtml(headline)} — ${escapeHtml(who)}</h2>` +
+    `<p>` +
+    (incomplete ? '' : `<strong>Overall:</strong> ${sc.overall}/5<br/>`) +
+    `<strong>Status:</strong> ${escapeHtml(verdict)}</p>` +
+    (sc.dimensions.length
+      ? `<ul>${sc.dimensions.map((d) => `<li>${escapeHtml(d.name)}: ${d.score}/5 — ${escapeHtml(d.notes)}</li>`).join('')}</ul>`
+      : '') +
     `<p><strong>Summary:</strong> ${escapeHtml(sc.summary)}</p>` +
     `<p style="color:#888">Interview ID: ${escapeHtml(item.interviewId)}</p>`;
-  return { to: item.interviewerEmail, subject: `Scorecard: ${who} — ${sc.recommendation}`, text, html };
+  return {
+    to: item.interviewerEmail,
+    subject: `${incomplete ? 'Interview incomplete' : 'Scorecard'}: ${who} — ${verdict}`,
+    text,
+    html,
+  };
 }
 
 export interface DrainResult {
@@ -82,7 +101,8 @@ export async function drainOutbox(
 }
 
 function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string
   );
 }

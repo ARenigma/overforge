@@ -6,6 +6,7 @@ import { Router, Request, Response } from 'express';
 import { requireInterviewer, validateCandidate } from './middleware';
 import { enforceRateLimit } from './rate-limit';
 import { hashToken } from '../interview/token';
+import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
 
 const router = Router();
@@ -25,15 +26,23 @@ function sendError(res: Response, err: unknown): void {
 
 router.post('/', requireInterviewer, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { candidateEmail, candidateName } = req.body as {
+    const { candidateEmail, candidateName, language } = req.body as {
       candidateEmail?: string;
       candidateName?: string;
+      language?: string;
     };
 
     if (!candidateEmail || !candidateEmail.includes('@')) {
       res.status(400).json({ error: 'candidateEmail is required and must be a valid email' });
       return;
     }
+
+    // Optional assigned language: a supported language locks the room to it; anything else
+    // (omitted / 'any' / unknown) means "candidate chooses".
+    const assignedLanguage =
+      typeof language === 'string' && (SUPPORTED_LANGUAGES as readonly string[]).includes(language)
+        ? language
+        : null;
 
     await enforceRateLimit(`create:${req.userId}`, {
       limit: 30,
@@ -45,6 +54,7 @@ router.post('/', requireInterviewer, async (req: Request, res: Response): Promis
       interviewerId: req.userId!,
       candidateEmail,
       candidateName,
+      assignedLanguage,
     });
 
     const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';

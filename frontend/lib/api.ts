@@ -21,6 +21,8 @@ export interface BeginResponse {
   sessionToken: string;
   /** Server-recorded interview start; the client seeds its elapsed timer from this. */
   startedAt: string;
+  /** Interviewer-assigned room language (null = candidate chooses → editor is unlocked). */
+  assignedLanguage: string | null;
 }
 
 export interface TranscriptTurn {
@@ -35,6 +37,8 @@ export interface InterviewState {
   codeSnapshot: string;
   /** Interview start (tnc_accepted_at) — used to re-seed the elapsed timer on resume. */
   startedAt: string | null;
+  /** Interviewer-assigned room language (null = candidate chooses → editor is unlocked). */
+  assignedLanguage: string | null;
   /** Last editor language persisted server-side; null if no run yet. */
   language: string | null;
   /** Most recent code-run output, so the output panel is restored on resume. */
@@ -70,6 +74,8 @@ export interface Scorecard {
   dimensions: ScorecardDimension[];
   /** True when automatic scoring failed — show "manual review", never a real no_hire. */
   scoringFailed?: boolean;
+  /** True when the interview didn't complete (no-show / dropout) — show "Incomplete", not a verdict. */
+  incomplete?: boolean;
 }
 
 export interface CreateInterviewResponse {
@@ -125,7 +131,7 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
  */
 export async function createInterview(
   accessToken: string,
-  body: { candidateEmail: string; candidateName?: string }
+  body: { candidateEmail: string; candidateName?: string; language?: string }
 ): Promise<CreateInterviewResponse> {
   return apiFetch<CreateInterviewResponse>('/api/interviews', {
     accessToken,

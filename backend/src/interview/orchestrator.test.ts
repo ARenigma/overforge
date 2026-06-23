@@ -53,6 +53,33 @@ jest.mock('../db/interviews', () => {
       }
       return false;
     }),
+    findStaleInvited: jest.fn(async () =>
+      [...store.values()].filter(
+        (r) => (r as { status?: string }).status === 'invited' && (r as { stale?: boolean }).stale
+      )
+    ),
+    findStaleInProgress: jest.fn(async () =>
+      [...store.values()].filter(
+        (r) =>
+          (r as { status?: string }).status === 'in_progress' && (r as { stale?: boolean }).stale
+      )
+    ),
+    claimExpire: jest.fn(async (id: string) => {
+      const row = store.get(id) as { status?: string } | undefined;
+      if (row && row.status === 'invited') {
+        row.status = 'expired';
+        return true;
+      }
+      return false;
+    }),
+    claimAbandon: jest.fn(async (id: string) => {
+      const row = store.get(id) as { status?: string } | undefined;
+      if (row && row.status === 'in_progress') {
+        row.status = 'abandoned';
+        return true;
+      }
+      return false;
+    }),
     insertOutbox: jest.fn(async (id: string) => {
       outbox.push(id);
     }),
@@ -163,6 +190,61 @@ describe('orchestrator end-to-end (offline)', () => {
     expect(state.language).toBe('python');
     expect(state.lastRunResult?.status).toBe('Accepted');
     expect(typeof state.startedAt).toBe('string');
+  });
+
+  test('closeStaleInterviews: no-show notified, dropout scored — both incomplete', async () => {
+    // No-show: created, never begun, link expired.
+    const { id: noShowId } = await orch.createInterview({
+      interviewerId: 'u4',
+      candidateEmail: 'noshow@example.com',
+    });
+    // Dropout: begun, has a partial transcript, link expired.
+    const { id: dropId } = await orch.createInterview({
+      interviewerId: 'u5',
+      candidateEmail: 'drop@example.com',
+    });
+    const drop = (await db.getById(dropId)) as Record<string, unknown>;
+    drop.status = 'in_progress';
+    drop.transcript = [
+      { role: 'interviewer', text: 'Hello' },
+      { role: 'candidate', text: 'Hi, I got partway then had to leave.' },
+    ];
+    // Mark both stale (the real query filters on token_expires_at; the mock uses a flag).
+    (drop as { stale?: boolean }).stale = true;
+    ((await db.getById(noShowId)) as { stale?: boolean }).stale = true;
+
+    const res = await orch.closeStaleInterviews();
+    expect(res.noShow).toBe(1);
+    expect(res.abandoned).toBe(1);
+
+    const ns = (await db.getById(noShowId)) as Record<string, unknown>;
+    expect(ns.status).toBe('expired');
+    expect((ns.evaluation_score as { incomplete?: boolean }).incomplete).toBe(true);
+
+    const dr = (await db.getById(dropId)) as Record<string, unknown>;
+    expect(dr.status).toBe('abandoned');
+    expect((dr.evaluation_score as { incomplete?: boolean }).incomplete).toBe(true);
+
+    // Both queued an interviewer notification.
+    expect(db.__outbox).toContain(noShowId);
+    expect(db.__outbox).toContain(dropId);
+  });
+
+  test('rescore refuses a closed-incomplete (abandoned) interview', async () => {
+    const { id } = await orch.createInterview({
+      interviewerId: 'u6',
+      candidateEmail: 'ab@example.com',
+    });
+    const row = (await db.getById(id)) as Record<string, unknown>;
+    row.interviewer_id = 'u6';
+    row.status = 'abandoned';
+    row.transcript = [
+      { role: 'interviewer', text: 'hi' },
+      { role: 'candidate', text: 'had to leave' },
+    ];
+    await expect(orch.rescore(id, 'u6')).rejects.toThrow(/abandoned/);
+    // Must NOT have re-opened it into the sweep's blast radius.
+    expect(((await db.getById(id)) as { status?: string }).status).toBe('abandoned');
   });
 
   test('begin requires T&C acceptance', async () => {

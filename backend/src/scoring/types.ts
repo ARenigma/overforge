@@ -16,6 +16,9 @@ export interface Scorecard {
   summary: string;
   /** True when automatic scoring failed — a human must review. Never a real no_hire. */
   scoringFailed?: boolean;
+  /** True when the interview didn't complete (candidate no-show or dropout): scores reflect
+   *  only a partial transcript (or none), so this is a status note, not a hire judgement. */
+  incomplete?: boolean;
 }
 
 export const RECOMMENDATIONS: readonly Recommendation[] = [

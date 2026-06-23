@@ -23,7 +23,7 @@ import {
   type InterviewPhase,
   type RunResult,
 } from '@/lib/api';
-import { AlertCircle, ArrowUp, CheckCircle, Clock, Loader2, Play } from 'lucide-react';
+import { AlertCircle, ArrowUp, CheckCircle, Clock, Loader2, Lock, Play } from 'lucide-react';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
 import { Kbd } from '@/components/ds/kbd';
@@ -37,6 +37,9 @@ interface Message {
   text: string;
 }
 
+// Must stay in sync with backend SUPPORTED_LANGUAGES and the new-interview dialog's options —
+// a value the interviewer can assign but that's missing here would fail isLanguage() and
+// silently skip the room lock.
 const LANGUAGES = [
   { value: 'python', label: 'Python' },
   { value: 'javascript', label: 'JavaScript' },
@@ -44,6 +47,7 @@ const LANGUAGES = [
   { value: 'java', label: 'Java' },
   { value: 'cpp', label: 'C++' },
   { value: 'go', label: 'Go' },
+  { value: 'ruby', label: 'Ruby' },
 ] as const;
 
 type Language = (typeof LANGUAGES)[number]['value'];
@@ -145,6 +149,9 @@ export default function InterviewPage() {
     const stored = localStorage.getItem(langKey);
     return isLanguage(stored) ? stored : DEFAULT_LANGUAGE;
   });
+  // Interviewer-assigned language (set at creation). When non-null the editor is locked to it
+  // and the in-room language switcher is hidden; null = the candidate picks (localStorage path).
+  const [lockedLanguage, setLockedLanguage] = useState<Language | null>(null);
   const [code, setCode] = useState('');
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<RunResult | null>(null);
@@ -221,9 +228,15 @@ export default function InterviewPage() {
         setElapsed(elapsedSince(s.startedAt));
         // Restore the last run's output so the console isn't blank after a reload.
         if (s.lastRunResult) setRunResult(s.lastRunResult);
-        // Language: the candidate's own (localStorage) choice wins; fall back to the
+        // Language: an interviewer-assigned language locks the room and wins over everything;
+        // otherwise the candidate's own (localStorage) choice wins, falling back to the
         // server's last-used language only when this browser has no stored preference.
-        if (isLanguage(s.language) && !localStorage.getItem(langKey)) setLanguage(s.language);
+        if (isLanguage(s.assignedLanguage)) {
+          setLockedLanguage(s.assignedLanguage);
+          setLanguage(s.assignedLanguage);
+        } else if (isLanguage(s.language) && !localStorage.getItem(langKey)) {
+          setLanguage(s.language);
+        }
         setStage(done ? 'done' : 'interview');
       } catch {
         if (cancelled) return;
@@ -264,6 +277,11 @@ export default function InterviewPage() {
       setMessages([{ role: 'ai', text: res.utterance.text }]);
       // Anchor the timer to the server start (≈0 on a fresh begin, exact after any reload).
       setElapsed(elapsedSince(res.startedAt));
+      // Lock the editor to the interviewer-assigned language, if any.
+      if (isLanguage(res.assignedLanguage)) {
+        setLockedLanguage(res.assignedLanguage);
+        setLanguage(res.assignedLanguage);
+      }
       setStage(res.phase === 'done' ? 'done' : 'interview');
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to start interview.');
@@ -425,29 +443,40 @@ export default function InterviewPage() {
             <div className="h-full flex flex-col overflow-hidden bg-background">
               {/* Code toolbar — language selector + Run pill */}
               <div className="flex h-10 items-center gap-2 px-3 border-b border-border bg-card shrink-0">
-                <Select
-                  value={language}
-                  onValueChange={(v) => {
-                    setLanguage(v as Language);
-                    // Persist so a reload/reconnect restores the candidate's choice.
-                    if (typeof window !== 'undefined') localStorage.setItem(langKey, v);
-                  }}
-                >
-                  <SelectTrigger className="h-7 w-36 text-xs bg-muted border-border text-foreground focus-visible:ring-ring font-mono">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-card border-border text-foreground">
-                    {LANGUAGES.map((l) => (
-                      <SelectItem
-                        key={l.value}
-                        value={l.value}
-                        className="text-xs focus:bg-muted font-mono"
-                      >
-                        {l.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {lockedLanguage ? (
+                  // Interviewer assigned the language at creation — show it read-only.
+                  <div
+                    className="flex h-7 w-36 items-center gap-1.5 rounded-md border border-border bg-muted px-3 font-mono text-xs text-muted-foreground"
+                    title="Language set by the interviewer"
+                  >
+                    <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    {LANGUAGES.find((l) => l.value === lockedLanguage)?.label ?? lockedLanguage}
+                  </div>
+                ) : (
+                  <Select
+                    value={language}
+                    onValueChange={(v) => {
+                      setLanguage(v as Language);
+                      // Persist so a reload/reconnect restores the candidate's choice.
+                      if (typeof window !== 'undefined') localStorage.setItem(langKey, v);
+                    }}
+                  >
+                    <SelectTrigger className="h-7 w-36 text-xs bg-muted border-border text-foreground focus-visible:ring-ring font-mono">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border text-foreground">
+                      {LANGUAGES.map((l) => (
+                        <SelectItem
+                          key={l.value}
+                          value={l.value}
+                          className="text-xs focus:bg-muted font-mono"
+                        >
+                          {l.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
 
                 <Button
                   size="sm"

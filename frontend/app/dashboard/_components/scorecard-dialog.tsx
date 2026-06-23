@@ -90,7 +90,12 @@ export function ScorecardDialog({ scorecard, candidateName }: ScorecardDialogPro
               <DialogTitle className="text-foreground text-base">Interview scorecard</DialogTitle>
               {candidateName && <p className="text-xs text-muted-foreground">{candidateName}</p>}
             </div>
-            {scorecard.scoringFailed ? (
+            {scorecard.incomplete ? (
+              <StatusBadge intent="warning" className="shrink-0 gap-1">
+                <AlertCircle className="h-3 w-3" />
+                Incomplete
+              </StatusBadge>
+            ) : scorecard.scoringFailed ? (
               <StatusBadge intent="warning" className="shrink-0 gap-1">
                 <AlertCircle className="h-3 w-3" />
                 Manual review
@@ -114,7 +119,11 @@ export function ScorecardDialog({ scorecard, candidateName }: ScorecardDialogPro
               tip="Weighted average of all dimension scores, on a 1–5 scale."
               className="text-muted-foreground"
             />
-            {scorecard.scoringFailed ? (
+            {scorecard.incomplete ? (
+              <span className="text-right text-xs text-muted-foreground">
+                Interview incomplete — partial result, not a final verdict.
+              </span>
+            ) : scorecard.scoringFailed ? (
               <span className="text-right text-xs text-muted-foreground">
                 Automatic scoring failed — review the transcript manually.
               </span>

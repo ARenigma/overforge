@@ -41,6 +41,8 @@ export interface Interview {
   tnc_version: string | null;
   transcript: TranscriptTurn[];
   code_snapshot: string;
+  /** Interviewer's chosen room language, set at creation; null = candidate chooses. */
+  assigned_language: string | null;
   code_language: string | null;
   code_runs: RunResult[];
   evaluation_score: Scorecard | null;
@@ -57,6 +59,8 @@ export interface CreateInterviewInput {
   accessTokenHash: string;
   tokenExpiresAt: Date;
   fsmState: InterviewContext;
+  /** Interviewer's chosen room language; omit/null for "candidate chooses". */
+  assignedLanguage?: string | null;
 }
 
 export type UpdateInterviewInput = Partial<{
@@ -94,6 +98,7 @@ export async function createInterview(input: CreateInterviewInput): Promise<Inte
       transcript: [],
       code_snapshot: '',
       code_runs: [],
+      assigned_language: input.assignedLanguage ?? null,
     })
     .select()
     .single();
@@ -221,28 +226,62 @@ export async function claimForScoring(id: string): Promise<boolean> {
   return !!data && data.length > 0;
 }
 
-/** Mark stale interviews: invited past TTL -> expired; in_progress past TTL -> abandoned. */
-export async function sweepExpiredInterviews(): Promise<{ expired: number; abandoned: number }> {
+/** Grace window after expiry before the sweep may close an interview. Any row touched within
+ *  this window (a finishing candidate's answer, or an in-flight re-score) is left alone, so the
+ *  sweep can't race claimForScoring at the TTL boundary. */
+const SWEEP_GRACE_MS = 10 * 60 * 1000;
+
+/** Stale interviews of a given status whose token expired AND that have been quiet for the
+ *  grace window (candidate no-show / dropout). */
+async function findStaleByStatus(status: InterviewStatus): Promise<Interview[]> {
   const db = createServiceClient();
-  const now = new Date().toISOString();
-
-  const { data: exp, error: e1 } = await db
+  const now = Date.now();
+  const { data, error } = await db
     .from('interviews')
-    .update({ status: 'expired' })
-    .eq('status', 'invited')
-    .lt('token_expires_at', now)
-    .select('id');
-  if (e1) throw new Error(`sweepExpired invited: ${e1.message}`);
+    .select('*')
+    .eq('status', status)
+    .lt('token_expires_at', new Date(now).toISOString())
+    .lt('updated_at', new Date(now - SWEEP_GRACE_MS).toISOString());
+  if (error) throw new Error(`findStale ${status}: ${error.message}`);
+  return (data ?? []) as Interview[];
+}
 
-  const { data: ab, error: e2 } = await db
+/** Invited interviews past their TTL — the candidate never started (no-show). */
+export function findStaleInvited(): Promise<Interview[]> {
+  return findStaleByStatus('invited');
+}
+
+/** In-progress interviews past their TTL — the candidate started but never finished (dropout). */
+export function findStaleInProgress(): Promise<Interview[]> {
+  return findStaleByStatus('in_progress');
+}
+
+/** Atomically claim a stale interview for closing (single-flight CAS, like claimForScoring).
+ *  Returns true only for the caller that flips `from` -> `to`; concurrent sweeps get false. */
+async function claimStatus(
+  id: string,
+  from: InterviewStatus,
+  to: InterviewStatus
+): Promise<boolean> {
+  const db = createServiceClient();
+  const { data, error } = await db
     .from('interviews')
-    .update({ status: 'abandoned' })
-    .eq('status', 'in_progress')
-    .lt('token_expires_at', now)
+    .update({ status: to })
+    .eq('id', id)
+    .eq('status', from)
     .select('id');
-  if (e2) throw new Error(`sweepExpired in_progress: ${e2.message}`);
+  if (error) throw new Error(`claimStatus ${from}->${to}: ${error.message}`);
+  return !!data && data.length > 0;
+}
 
-  return { expired: exp?.length ?? 0, abandoned: ab?.length ?? 0 };
+/** Claim a no-show: invited -> expired. */
+export function claimExpire(id: string): Promise<boolean> {
+  return claimStatus(id, 'invited', 'expired');
+}
+
+/** Claim a dropout: in_progress -> abandoned. */
+export function claimAbandon(id: string): Promise<boolean> {
+  return claimStatus(id, 'in_progress', 'abandoned');
 }
 
 // ─────────────────────── Outbox store implementation ───────────────────────

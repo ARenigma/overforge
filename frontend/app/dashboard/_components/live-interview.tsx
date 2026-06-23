@@ -15,7 +15,7 @@ function formatDateTime(iso: string) {
 }
 
 function recommendationIntent(sc: Scorecard): BadgeIntent {
-  if (sc.scoringFailed) return 'warning';
+  if (sc.incomplete || sc.scoringFailed) return 'warning';
   if (sc.recommendation === 'no_hire') return 'danger';
   if (sc.recommendation === 'strong_hire') return 'success';
   return 'info';
@@ -92,7 +92,9 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
   const meta = statusMeta(iv.status);
   const sc = iv.evaluation_score;
   const transcript = (iv.transcript ?? []).filter((t) => t.role !== 'system');
-  const canRescore = transcript.length > 0;
+  // No re-score on an incomplete (no-show / dropout) result — the backend refuses it, and
+  // re-scoring a partial transcript would misrepresent it as a real verdict.
+  const canRescore = transcript.length > 0 && !sc?.incomplete;
 
   return (
     <>
@@ -200,7 +202,11 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
             {sc ? (
               <div className="space-y-4 rounded-xl border border-border bg-card p-4">
                 <div className="flex items-center justify-between gap-3">
-                  {sc.scoringFailed ? (
+                  {sc.incomplete ? (
+                    <span className="text-sm text-muted-foreground">
+                      Interview incomplete — partial result, not a final verdict.
+                    </span>
+                  ) : sc.scoringFailed ? (
                     <span className="text-sm text-muted-foreground">
                       Automatic scoring failed — manual review required.
                     </span>
@@ -211,7 +217,11 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
                     </span>
                   )}
                   <StatusBadge intent={recommendationIntent(sc)} className="shrink-0">
-                    {sc.scoringFailed ? 'Manual review' : RECOMMENDATION_LABEL[sc.recommendation]}
+                    {sc.incomplete
+                      ? 'Incomplete'
+                      : sc.scoringFailed
+                        ? 'Manual review'
+                        : RECOMMENDATION_LABEL[sc.recommendation]}
                   </StatusBadge>
                 </div>
                 {sc.dimensions?.length ? (

@@ -6,7 +6,7 @@
 import { advance, initialContext } from './machine';
 import { DeterministicOracle, Oracle, TranscriptTurn, UtteranceRequest, Utterance } from './oracle';
 import { InterviewContext, Effect } from './types';
-import { createMinimaxClient, MinimaxOracle, minimaxConfigFromEnv } from './minimax';
+import { createMinimaxClient, MinimaxClient, MinimaxOracle, minimaxConfigFromEnv } from './minimax';
 import { generateToken, hashToken } from './token';
 import {
   createInterview as dbCreateInterview,
@@ -16,6 +16,10 @@ import {
   appendEvent,
   appendCodeRun,
   claimForScoring,
+  claimExpire,
+  claimAbandon,
+  findStaleInvited,
+  findStaleInProgress,
   insertOutbox,
   makeOutboxStore,
   Interview,
@@ -23,6 +27,7 @@ import {
 import { createDockerKernel } from '../execution/docker';
 import { RunRequest, RunResult } from '../execution/types';
 import { scoreInterview, CodeRunSummary } from '../scoring/scorer';
+import { Scorecard } from '../scoring/types';
 import { drainOutbox } from '../notify/outbox';
 import { createEmailSender } from '../notify/resend';
 
@@ -39,6 +44,21 @@ export function getOracle(): Oracle {
 
 function getExecutionKernel() {
   return createDockerKernel();
+}
+
+// ─────────────────────── Scoring client factory ───────────────────────
+
+/** The pinned grader client, or a stub that forces scorer's safe fallback when Minimax isn't
+ *  configured. Shared by finishAndScore and closeStaleInterviews. */
+function getScoringClient(): MinimaxClient {
+  if (process.env.MINIMAX_API_KEY) {
+    return createMinimaxClient(minimaxConfigFromEnv());
+  }
+  return {
+    complete: async (): Promise<string> => {
+      throw new Error('Minimax not configured');
+    },
+  } as MinimaxClient;
 }
 
 // ─────────────────────── Token TTL ───────────────────────
@@ -110,6 +130,8 @@ export async function createInterview(input: {
   interviewerId: string;
   candidateEmail: string;
   candidateName?: string;
+  /** Interviewer's chosen room language; omit/null for "candidate chooses". */
+  assignedLanguage?: string | null;
 }): Promise<CreateInterviewResult> {
   const rawToken = generateToken();
   const tokenHash = hashToken(rawToken);
@@ -123,6 +145,7 @@ export async function createInterview(input: {
     accessTokenHash: tokenHash,
     tokenExpiresAt: expiresAt,
     fsmState,
+    assignedLanguage: input.assignedLanguage ?? null,
   });
 
   return { id: interview.id, token: rawToken, expiresAt };
@@ -137,6 +160,9 @@ export interface BeginResult {
   /** Server-recorded interview start (tnc_accepted_at). The client seeds its timer from
    *  this so elapsed time is correct across reloads. */
   startedAt: string;
+  /** Interviewer's chosen room language (null = candidate chooses). When set, the room
+   *  locks the editor to it. */
+  assignedLanguage: string | null;
 }
 
 export async function begin(
@@ -181,7 +207,14 @@ export async function begin(
 
   await persistTransition(interview, newCtx, effect, utterance);
 
-  return { utterance, phase: newCtx.phase, state: newCtx, sessionToken, startedAt };
+  return {
+    utterance,
+    phase: newCtx.phase,
+    state: newCtx,
+    sessionToken,
+    startedAt,
+    assignedLanguage: interview.assigned_language,
+  };
 }
 
 export interface CandidateState {
@@ -191,6 +224,8 @@ export interface CandidateState {
   codeSnapshot: string;
   /** Interview start (tnc_accepted_at) so the client can re-seed its elapsed timer. */
   startedAt: string | null;
+  /** Interviewer's chosen room language (null = candidate chooses → room is unlocked). */
+  assignedLanguage: string | null;
   /** Last editor language, persisted on /run; null if no run yet (client falls back). */
   language: string | null;
   /** Most recent code-run output so the candidate's output panel survives a reload. */
@@ -207,6 +242,7 @@ export async function getCandidateState(interviewId: string): Promise<CandidateS
     transcript: interview.transcript ?? [],
     codeSnapshot: interview.code_snapshot ?? '',
     startedAt: interview.tnc_accepted_at,
+    assignedLanguage: interview.assigned_language,
     language: interview.code_language ?? null,
     lastRunResult: runs.length > 0 ? runs[runs.length - 1] : null,
   };
@@ -247,6 +283,17 @@ export async function rescore(interviewId: string, interviewerId: string): Promi
     throw Object.assign(new Error('This interview has no transcript to score yet'), {
       status: 409,
     });
+  }
+  // Only a finished/stuck interview is re-scorable. Refuse the terminal-incomplete states
+  // (abandoned / expired) — re-scoring would reset them to in_progress, drop the `incomplete`
+  // flag (presenting a partial transcript as a real verdict), and re-arm the expiry sweep to
+  // close + email them a second time.
+  const RESCORABLE = new Set(['scored', 'completed', 'in_progress']);
+  if (!RESCORABLE.has(interview.status)) {
+    throw Object.assign(
+      new Error(`This interview was closed as "${interview.status}" and can't be re-scored.`),
+      { status: 409 }
+    );
   }
   // Reset so finishAndScore's single-flight claim (in_progress -> completed) can run again.
   await updateInterview(interviewId, { status: 'in_progress' });
@@ -392,19 +439,7 @@ export async function finishAndScore(interviewId: string): Promise<void> {
   // claim and be missed.
   const interview = requireInterview(await getById(interviewId), interviewId);
 
-  const { client: minimaxClient } = (() => {
-    if (process.env.MINIMAX_API_KEY) {
-      return { client: createMinimaxClient(minimaxConfigFromEnv()) };
-    }
-    // Fallback — use a stub that forces the fallback scorecard path in scorer.
-    return {
-      client: {
-        complete: async (): Promise<string> => {
-          throw new Error('Minimax not configured');
-        },
-      },
-    };
-  })();
+  const minimaxClient = getScoringClient();
 
   const codeRuns: CodeRunSummary[] = (interview.code_runs ?? []).map((r: RunResult) => ({
     language: r.language ?? 'unknown',
@@ -437,4 +472,79 @@ export async function finishAndScore(interviewId: string): Promise<void> {
   } catch {
     // Drain failure is non-fatal; the scheduled interval will retry.
   }
+}
+
+/** Scorecard for a candidate who never started before the link expired (no-show). Carries the
+ *  `incomplete` flag so the email/UI frame it as a status, not a hire judgement. */
+function noShowScorecard(): Scorecard {
+  return {
+    overall: 0,
+    recommendation: 'no_hire',
+    dimensions: [],
+    summary: 'The candidate did not start the interview before the invite link expired.',
+    incomplete: true,
+  };
+}
+
+/**
+ * Close out interviews stranded past their TTL so EVERY interview reaches the interviewer —
+ * the "fire-and-forget" guarantee. Runs on the periodic sweep:
+ *  - no-show  (invited past TTL)     -> notify with an incomplete "didn't start" scorecard.
+ *  - dropout  (in_progress past TTL) -> score the partial transcript, flagged incomplete.
+ * Both land via the existing scorecard outbox/email. CAS claims make it single-flight, so it
+ * never double-sends and never races a candidate who finishes (claimForScoring) at the wire.
+ */
+export async function closeStaleInterviews(): Promise<{ noShow: number; abandoned: number }> {
+  let noShow = 0;
+  let abandoned = 0;
+
+  // Per-row try/catch: one failed row (a DB hiccup) must not abort the rest of the sweep.
+  for (const iv of await findStaleInvited()) {
+    try {
+      if (!(await claimExpire(iv.id))) continue; // someone else closed it
+      await updateInterview(iv.id, { evaluation_score: noShowScorecard() });
+      await insertOutbox(iv.id);
+      noShow++;
+    } catch (err) {
+      console.error(`[sweep] no-show close failed for ${iv.id}:`, err);
+    }
+  }
+
+  for (const iv of await findStaleInProgress()) {
+    try {
+      if (!(await claimAbandon(iv.id))) continue;
+      // Re-fetch AFTER claiming so we score every turn/run that landed before the claim — a
+      // concurrent /answer or /run could have written after the findStale snapshot (mirrors
+      // finishAndScore).
+      const fresh = requireInterview(await getById(iv.id), iv.id);
+      const codeRuns: CodeRunSummary[] = (fresh.code_runs ?? []).map((r: RunResult) => ({
+        language: r.language ?? 'unknown',
+        status: r.status,
+        stderr: r.stderr,
+      }));
+      const scorecard = await scoreInterview(
+        {
+          transcript: fresh.transcript ?? [],
+          codeRuns,
+          finalCode: fresh.code_snapshot || undefined,
+        },
+        getScoringClient()
+      );
+      scorecard.incomplete = true; // partial transcript — a status note, not a clean grade
+      await updateInterview(iv.id, { evaluation_score: scorecard });
+      await insertOutbox(iv.id);
+      abandoned++;
+    } catch (err) {
+      console.error(`[sweep] dropout close failed for ${iv.id}:`, err);
+    }
+  }
+
+  if (noShow + abandoned > 0) {
+    try {
+      await drainOutbox(makeOutboxStore(), createEmailSender());
+    } catch {
+      // Non-fatal; the scheduled drain retries.
+    }
+  }
+  return { noShow, abandoned };
 }
