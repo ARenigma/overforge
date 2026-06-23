@@ -79,8 +79,10 @@ export function ScorecardDialog({ scorecard, candidateName }: ScorecardDialogPro
         // Don't auto-focus the first control on open — that's the info (ⓘ) button, and a
         // focused Radix tooltip would pop open "by default". Tooltips now show on hover/intent.
         onOpenAutoFocus={(e) => e.preventDefault()}
-        // Cap height so the card never fills the viewport; header + close stay put, the body scrolls.
-        className="flex max-h-[85vh] flex-col overflow-hidden border border-border bg-card text-card-foreground sm:max-w-lg"
+        // Size to content so the whole scorecard is visible at a glance — no scroll in normal
+        // use. The 95vh cap + body scroll is only a last-resort guard so an unusually long card
+        // on a short screen can't render off-screen (it won't trigger for typical scorecards).
+        className="flex max-h-[95vh] flex-col overflow-hidden border border-border bg-card text-card-foreground sm:max-w-lg"
       >
         <DialogHeader className="shrink-0">
           <div className="flex items-center justify-between gap-4 pr-6">
