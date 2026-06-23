@@ -37,7 +37,10 @@ interface LangSpec {
   // across runs so the toolchain doesn't recompile from cold each time. The volume is warmed
   // + chowned to the sandbox uid by deploy/warm-caches.sh; it holds only content-addressed
   // cache entries (no run can hand-pick another's, and the build dir stays the per-run tmpfs).
-  cacheVolume?: { name: string; path: string };
+  //   envVar:   the cache env var the toolchain reads (e.g. GOCACHE).
+  //   fallback: per-run tmpfs path used when the volume isn't writable (wiped / not yet
+  //             warmed+chowned) — a cold compile, but correct instead of a hard failure.
+  cacheVolume?: { name: string; path: string; envVar: string; fallback: string };
 }
 
 // Name of the persistent Go build-cache volume (see deploy/warm-caches.sh). Overridable so a
@@ -75,12 +78,18 @@ const LANGS: Readonly<Record<string, LangSpec>> = {
     // root FS. GOCACHE points at the persistent pre-warmed volume so the stdlib isn't
     // recompiled every run (cold ~10s → warm ~0.3s); GOPATH/GOTMPDIR stay in the per-run
     // /work tmpfs.
+    // GOCACHE is set per-run by the cache preamble (the volume if writable, else the /work
+    // fallback), so it's deliberately not in this static env.
     env: {
-      GOCACHE: '/gocache',
       GOPATH: '/work/go',
       GOTMPDIR: '/work',
     },
-    cacheVolume: { name: GO_CACHE_VOLUME, path: '/gocache' },
+    cacheVolume: {
+      name: GO_CACHE_VOLUME,
+      path: '/gocache',
+      envVar: 'GOCACHE',
+      fallback: '/work/.cache/go-build',
+    },
   },
   java: { image: 'eclipse-temurin:21-jdk', file: 'Main.java', cmd: 'javac Main.java && java Main' },
   cpp: { image: 'gcc:13', file: 'main.cpp', cmd: 'g++ -O2 -o app main.cpp && ./app' },
@@ -131,11 +140,19 @@ export function createDockerKernel(config: DockerKernelConfig = {}): ExecutionKe
         ? ['-v', `${spec.cacheVolume.name}:${spec.cacheVolume.path}`]
         : [];
 
+      // Writability self-check: point the cache env var at the warm volume only if it's
+      // actually writable by this (non-root) user; otherwise fall back to a per-run /work dir.
+      // Guards a wiped / root-owned / not-yet-warmed volume — a cold compile, never a hard fail.
+      const cachePreamble = spec.cacheVolume
+        ? `if [ -w ${spec.cacheVolume.path} ]; then export ${spec.cacheVolume.envVar}=${spec.cacheVolume.path}; else export ${spec.cacheVolume.envVar}=${spec.cacheVolume.fallback}; fi; `
+        : '';
+
       // In-container: decode source + stdin from env, then (compile &&) run under `timeout`,
       // piping the decoded stdin to the program. Single-quoted heredoc-free, all data is base64.
       const inner =
         `printf %s "$B64SRC" | base64 -d > ${spec.file}; ` +
         `printf %s "$B64IN" | base64 -d > .stdin; ` +
+        cachePreamble +
         `timeout -s KILL ${cpuSec} sh -c '${spec.cmd}' < .stdin`;
 
       const args = [

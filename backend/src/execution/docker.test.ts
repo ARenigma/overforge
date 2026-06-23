@@ -58,8 +58,8 @@ describe('docker execution kernel', () => {
       cb(null, 'ok\n', '');
     });
     await createDockerKernel().run({ language: 'go', source: 'package main' });
-    // Scratch dirs writable (else "mkdir /tmp/go-build…: read-only file system"), and
-    // GOCACHE on the pre-warmed shared volume (else the stdlib recompiles cold every run).
+    // Scratch dirs writable (else "mkdir /tmp/go-build…: read-only file system") and the
+    // pre-warmed shared cache volume mounted (else the stdlib recompiles cold every run).
     expect(captured).toEqual(
       expect.arrayContaining([
         '-v',
@@ -69,13 +69,17 @@ describe('docker execution kernel', () => {
         '-e',
         'TMPDIR=/work',
         '-e',
-        'GOCACHE=/gocache',
-        '-e',
         'GOPATH=/work/go',
         '-e',
         'GOTMPDIR=/work',
       ])
     );
+    // Writability self-check: GOCACHE is chosen per-run — the warm volume if writable, else a
+    // per-run /work fallback (cold but correct) — so a wiped/root-owned volume never hard-fails.
+    const inner = captured[captured.length - 1];
+    expect(inner).toContain('[ -w /gocache ]');
+    expect(inner).toContain('export GOCACHE=/gocache');
+    expect(inner).toContain('export GOCACHE=/work/.cache/go-build');
   });
 
   test('host-side kill → Time Limit Exceeded', async () => {

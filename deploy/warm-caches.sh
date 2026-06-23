@@ -3,8 +3,9 @@
 # (backend/src/execution/docker.ts). Without this, Go recompiles the whole standard
 # library on every /run (cold ~10s); with a warm GOCACHE it's ~0.3s.
 #
-# Idempotent: skips if already warmed. Run on the host after `docker compose up` and
-# whenever the Go image changes (deploy/pull-runtimes.sh must have pulled it first).
+# Idempotent + version-aware: the volume records the exact `go version` it was warmed for.
+# A re-run after a Go image bump (tag OR patch) sees the mismatch and re-warms; otherwise it
+# skips. Run on the host after `docker compose up` (pull-runtimes.sh must have pulled the image).
 set -euo pipefail
 
 VOLUME="${GO_CACHE_VOLUME:-of-go-cache}"
@@ -13,18 +14,30 @@ SANDBOX_UID="${SANDBOX_UID:-65534}" # 'nobody' — the uid run containers execut
 
 docker volume create "$VOLUME" >/dev/null
 
-# Already warmed? (marker file written at the end of a successful warm.)
-if docker run --rm -v "$VOLUME:/gocache" "$GO_IMAGE" test -f /gocache/.warmed 2>/dev/null; then
-  echo "Go build cache already warm ($VOLUME)."
+# One container: report the image's current `go version` AND the version this volume was last
+# warmed for (the marker holds that exact string). Compare to decide warm-vs-skip.
+probe="$(docker run --rm -v "$VOLUME:/gocache" "$GO_IMAGE" \
+  sh -c 'echo "VER:$(go version)"; echo "MARK:$(cat /gocache/.warmed 2>/dev/null)"')"
+cur_ver="$(printf '%s\n' "$probe" | sed -n 's/^VER://p')"
+marker_ver="$(printf '%s\n' "$probe" | sed -n 's/^MARK://p')"
+
+if [ -n "$cur_ver" ] && [ "$cur_ver" = "$marker_ver" ]; then
+  echo "Go build cache already warm for: $cur_ver ($VOLUME)."
   exit 0
 fi
 
-echo "Warming Go build cache in volume '$VOLUME' (one-time, ~10s)…"
+if [ -z "$cur_ver" ]; then
+  echo "Could not determine go version from $GO_IMAGE; aborting warm." >&2
+  exit 1
+fi
+echo "Warming Go build cache in '$VOLUME' for: $cur_ver (one-time, ~10s)…"
 
 # Build a program that imports the stdlib packages interview answers commonly use, so those
 # compiled packages land in the cache. Runs as root to populate the (root-owned) volume, then
-# hands ownership to the sandbox uid so jailed non-root run containers can read + extend it.
-docker run --rm -v "$VOLUME:/gocache" --user 0:0 -e SANDBOX_UID="$SANDBOX_UID" "$GO_IMAGE" sh -c '
+# stamps the version marker and hands the whole tree to the sandbox uid so jailed non-root run
+# containers can read + extend it.
+docker run --rm -v "$VOLUME:/gocache" --user 0:0 \
+  -e SANDBOX_UID="$SANDBOX_UID" -e CUR_VER="$cur_ver" "$GO_IMAGE" sh -c '
   set -e
   mkdir -p /tmp/warm && cd /tmp/warm
   cat > main.go <<'"'"'EOF'"'"'
@@ -72,8 +85,8 @@ func main() {
 EOF
   export GOCACHE=/gocache GOPATH=/tmp/warm/go GOTMPDIR=/tmp HOME=/tmp
   go build -o /tmp/warm/app main.go
+  printf "%s" "$CUR_VER" > /gocache/.warmed
   chown -R "${SANDBOX_UID}:${SANDBOX_UID}" /gocache
-  touch /gocache/.warmed
 '
 
-echo "Go build cache warmed ($VOLUME)."
+echo "Go build cache warmed for $cur_ver ($VOLUME)."
