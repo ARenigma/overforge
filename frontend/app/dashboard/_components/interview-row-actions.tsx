@@ -17,8 +17,9 @@ import { cancelInterview, deleteInterview, rescoreInterview } from '@/lib/api';
 
 // States from which a soft-cancel is meaningless (already terminal).
 const TERMINAL = new Set(['scored', 'cancelled', 'expired', 'abandoned']);
-// States with a transcript worth (re)scoring.
-const RESCORABLE = new Set(['scored', 'completed', 'abandoned']);
+// States the backend allows re-scoring (orchestrator.rescore): a finished or stuck-mid-score
+// interview only. NOT abandoned/expired (incomplete) or in_progress (live).
+const RESCORABLE = new Set(['scored', 'completed']);
 
 export function InterviewRowActions({ id, status }: { id: string; status: string }) {
   const router = useRouter();

@@ -135,6 +135,12 @@ export function ScorecardDialog({ scorecard, candidateName }: ScorecardDialogPro
             )}
           </div>
 
+          {scorecard.timeLimited && !scorecard.incomplete && (
+            <p className="-mt-3 text-xs text-muted-foreground">
+              Concluded at the time limit — graded on the work completed.
+            </p>
+          )}
+
           {/* Dimensions */}
           {scorecard.dimensions.length > 0 && (
             <div className="space-y-3">

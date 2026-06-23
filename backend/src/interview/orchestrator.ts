@@ -17,9 +17,8 @@ import {
   appendCodeRun,
   claimForScoring,
   claimExpire,
-  claimAbandon,
   findStaleInvited,
-  findStaleInProgress,
+  findInProgressPastDuration,
   insertOutbox,
   makeOutboxStore,
   Interview,
@@ -70,6 +69,17 @@ function tokenExpiry(): Date {
   const d = new Date();
   d.setHours(d.getHours() + TOKEN_TTL_HOURS);
   return d;
+}
+
+// Wall-clock length of an interview once it starts (separate from the 72h invite TTL). At this
+// limit the room hard-stops + concludes; the sweep concludes an absent candidate. Env-tunable.
+const INTERVIEW_DURATION_MIN = Number(process.env.INTERVIEW_DURATION_MIN ?? 60);
+const INTERVIEW_DURATION_MS = INTERVIEW_DURATION_MIN * 60_000;
+
+/** Whether an interview has run past its duration cap (measured from tnc_accepted_at = begin). */
+function durationExceeded(interview: Interview): boolean {
+  if (!interview.tnc_accepted_at) return false;
+  return Date.now() - new Date(interview.tnc_accepted_at).getTime() >= INTERVIEW_DURATION_MS;
 }
 
 // ─────────────────────── Helpers ───────────────────────
@@ -132,6 +142,8 @@ export async function createInterview(input: {
   candidateName?: string;
   /** Interviewer's chosen room language; omit/null for "candidate chooses". */
   assignedLanguage?: string | null;
+  /** Interviewer-chosen seniority level; defaults to 'mid'. */
+  level?: string;
 }): Promise<CreateInterviewResult> {
   const rawToken = generateToken();
   const tokenHash = hashToken(rawToken);
@@ -146,6 +158,7 @@ export async function createInterview(input: {
     tokenExpiresAt: expiresAt,
     fsmState,
     assignedLanguage: input.assignedLanguage ?? null,
+    level: input.level,
   });
 
   return { id: interview.id, token: rawToken, expiresAt };
@@ -163,6 +176,8 @@ export interface BeginResult {
   /** Interviewer's chosen room language (null = candidate chooses). When set, the room
    *  locks the editor to it. */
   assignedLanguage: string | null;
+  /** Total interview length in seconds — the room counts down from this and hard-stops at 0. */
+  durationSeconds: number;
 }
 
 export async function begin(
@@ -185,7 +200,12 @@ export async function begin(
   const { ctx: newCtx, effect } = advance(ctx, { type: 'start' });
 
   const oracle = getOracle();
-  const req: UtteranceRequest = { effect, ctx: newCtx, transcript: interview.transcript ?? [] };
+  const req: UtteranceRequest = {
+    effect,
+    ctx: newCtx,
+    transcript: interview.transcript ?? [],
+    level: interview.level,
+  };
   const utterance = await oracle.generateUtterance(req);
 
   // Rotate the access token: the invite-link token is consumed here and replaced by a
@@ -214,6 +234,7 @@ export async function begin(
     sessionToken,
     startedAt,
     assignedLanguage: interview.assigned_language,
+    durationSeconds: INTERVIEW_DURATION_MIN * 60,
   };
 }
 
@@ -226,6 +247,8 @@ export interface CandidateState {
   startedAt: string | null;
   /** Interviewer's chosen room language (null = candidate chooses → room is unlocked). */
   assignedLanguage: string | null;
+  /** Total interview length in seconds — the room counts down from this and hard-stops at 0. */
+  durationSeconds: number;
   /** Last editor language, persisted on /run; null if no run yet (client falls back). */
   language: string | null;
   /** Most recent code-run output so the candidate's output panel survives a reload. */
@@ -243,6 +266,7 @@ export async function getCandidateState(interviewId: string): Promise<CandidateS
     codeSnapshot: interview.code_snapshot ?? '',
     startedAt: interview.tnc_accepted_at,
     assignedLanguage: interview.assigned_language,
+    durationSeconds: INTERVIEW_DURATION_MIN * 60,
     language: interview.code_language ?? null,
     lastRunResult: runs.length > 0 ? runs[runs.length - 1] : null,
   };
@@ -284,20 +308,22 @@ export async function rescore(interviewId: string, interviewerId: string): Promi
       status: 409,
     });
   }
-  // Only a finished/stuck interview is re-scorable. Refuse the terminal-incomplete states
-  // (abandoned / expired) — re-scoring would reset them to in_progress, drop the `incomplete`
-  // flag (presenting a partial transcript as a real verdict), and re-arm the expiry sweep to
-  // close + email them a second time.
-  const RESCORABLE = new Set(['scored', 'completed', 'in_progress']);
+  // Only a finished interview (scored) or one stuck mid-score (completed) is re-scorable.
+  // NOT in_progress — re-scoring a live session would claim it out from under the candidate.
+  // NOT abandoned/expired — re-scoring would drop the `incomplete` flag (presenting a partial as
+  // a real verdict) and re-arm the sweep. A truly-stuck in_progress self-heals via the sweep.
+  const RESCORABLE = new Set(['scored', 'completed']);
   if (!RESCORABLE.has(interview.status)) {
     throw Object.assign(
-      new Error(`This interview was closed as "${interview.status}" and can't be re-scored.`),
+      new Error(`This interview can't be re-scored (status: ${interview.status}).`),
       { status: 409 }
     );
   }
   // Reset so finishAndScore's single-flight claim (in_progress -> completed) can run again.
+  // rescore:true preserves the original timeLimited verdict instead of re-deriving it from the
+  // (now stale) wall clock.
   await updateInterview(interviewId, { status: 'in_progress' });
-  await finishAndScore(interviewId);
+  await finishAndScore(interviewId, { rescore: true });
 }
 
 export interface AnswerResult {
@@ -339,6 +365,19 @@ export async function submitAnswer(
 
   if (interview.status !== 'in_progress') {
     throw Object.assign(new Error('Interview is not in progress'), { status: 409 });
+  }
+
+  // Hard time limit: a late answer is NOT accepted (not persisted, not graded) — conclude +
+  // score what's there. Reject with 409 so the client rolls back its optimistic bubble rather
+  // than showing the answer as if it counted. The room normally concludes itself at 0:00; this
+  // is the server-side backstop.
+  if (durationExceeded(interview)) {
+    void finishAndScore(interviewId).catch((err: unknown) => {
+      console.error(`[orchestrator] time-limit scoring failed for ${interviewId}:`, err);
+    });
+    throw Object.assign(new Error('Your interview has concluded — the time limit was reached.'), {
+      status: 409,
+    });
   }
 
   const ctx = interview.fsm_state as InterviewContext;
@@ -389,6 +428,7 @@ export async function submitAnswer(
     ctx: newCtx,
     transcript: [...(interview.transcript ?? []), { role: 'candidate', text: answer }],
     code: interview.code_snapshot,
+    level: interview.level,
   };
   const utterance = await oracle.generateUtterance(req);
 
@@ -402,6 +442,16 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
 
   if (interview.status !== 'in_progress') {
     throw Object.assign(new Error('Interview is not in progress'), { status: 409 });
+  }
+
+  // Hard time limit: don't execute a run past the cap — conclude + score instead.
+  if (durationExceeded(interview)) {
+    void finishAndScore(interviewId).catch((err: unknown) => {
+      console.error(`[orchestrator] time-limit scoring failed for ${interviewId}:`, err);
+    });
+    throw Object.assign(new Error('Your interview has concluded — the time limit was reached.'), {
+      status: 409,
+    });
   }
 
   const kernel = getExecutionKernel();
@@ -425,19 +475,28 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
   return result;
 }
 
-export async function finishAndScore(interviewId: string): Promise<void> {
+export async function finishAndScore(
+  interviewId: string,
+  opts: { rescore?: boolean } = {}
+): Promise<boolean> {
   // Single-flight idempotency: only the caller that atomically flips in_progress -> completed
   // proceeds to score. claimForScoring matches WHERE status = 'in_progress', so a
   // scored/completed/expired/abandoned/cancelled interview yields claimed=false here — the
   // background (post-answer) path and the explicit /finish route can race; exactly one wins,
-  // so there's no double-score / double-email.
+  // so there's no double-score / double-email. Returns false on the no-op (lost-claim) path.
   const claimed = await claimForScoring(interviewId);
-  if (!claimed) return;
+  if (!claimed) return false;
 
   // Re-fetch AFTER claiming so scoring sees every code run that landed before the claim — a
   // concurrent /run's atomic append could otherwise slip in between an earlier read and the
   // claim and be missed.
   const interview = requireInterview(await getById(interviewId), interviewId);
+
+  // Capture the time-limit verdict NOW, before the (slow) scoring call — otherwise a finish in
+  // the last few seconds could be mislabeled when the LLM call pushes the clock past the cap.
+  const timedOut = durationExceeded(interview);
+  const engaged = (interview.transcript ?? []).some((t) => t.role === 'candidate');
+  const priorTimeLimited = interview.evaluation_score?.timeLimited === true;
 
   const minimaxClient = getScoringClient();
 
@@ -452,9 +511,20 @@ export async function finishAndScore(interviewId: string): Promise<void> {
       transcript: interview.transcript ?? [],
       codeRuns,
       finalCode: interview.code_snapshot || undefined,
+      level: interview.level,
     },
     minimaxClient
   );
+
+  // Mutually-exclusive outcome flags: a candidate who never produced an answer is "incomplete"
+  // (a status, excluded from averages); otherwise, if the timer cut them off it's a real but
+  // "time-limited" score. A re-score must NOT re-derive timeLimited from the (now stale) clock —
+  // it preserves the original verdict instead.
+  if (!engaged) {
+    scorecard.incomplete = true;
+  } else if (opts.rescore ? priorTimeLimited : timedOut) {
+    scorecard.timeLimited = true;
+  }
 
   await updateInterview(interviewId, {
     evaluation_score: scorecard,
@@ -472,6 +542,7 @@ export async function finishAndScore(interviewId: string): Promise<void> {
   } catch {
     // Drain failure is non-fatal; the scheduled interval will retry.
   }
+  return true;
 }
 
 /** Scorecard for a candidate who never started before the link expired (no-show). Carries the
@@ -487,16 +558,18 @@ function noShowScorecard(): Scorecard {
 }
 
 /**
- * Close out interviews stranded past their TTL so EVERY interview reaches the interviewer —
- * the "fire-and-forget" guarantee. Runs on the periodic sweep:
- *  - no-show  (invited past TTL)     -> notify with an incomplete "didn't start" scorecard.
- *  - dropout  (in_progress past TTL) -> score the partial transcript, flagged incomplete.
- * Both land via the existing scorecard outbox/email. CAS claims make it single-flight, so it
- * never double-sends and never races a candidate who finishes (claimForScoring) at the wire.
+ * Close out interviews so EVERY interview reaches the interviewer — the "fire-and-forget"
+ * guarantee. Runs on the periodic sweep:
+ *  - no-show (invited past the invite TTL)        -> notify with an incomplete "didn't start" card.
+ *  - time-up (in_progress past the 60-min cap)    -> conclude + score via finishAndScore (which
+ *      flags timeLimited / incomplete and emails). An actively-answering candidate is held out by
+ *      the grace window and concludes itself client-side at 0:00; this catches the absent ones.
+ * CAS claims (claimExpire / claimForScoring inside finishAndScore) make it single-flight, so it
+ * never double-sends and never races a candidate finishing at the wire.
  */
-export async function closeStaleInterviews(): Promise<{ noShow: number; abandoned: number }> {
+export async function closeStaleInterviews(): Promise<{ noShow: number; concluded: number }> {
   let noShow = 0;
-  let abandoned = 0;
+  let concluded = 0;
 
   // Per-row try/catch: one failed row (a DB hiccup) must not abort the rest of the sweep.
   for (const iv of await findStaleInvited()) {
@@ -510,41 +583,24 @@ export async function closeStaleInterviews(): Promise<{ noShow: number; abandone
     }
   }
 
-  for (const iv of await findStaleInProgress()) {
+  const durationCutoff = new Date(Date.now() - INTERVIEW_DURATION_MS).toISOString();
+  for (const iv of await findInProgressPastDuration(durationCutoff)) {
     try {
-      if (!(await claimAbandon(iv.id))) continue;
-      // Re-fetch AFTER claiming so we score every turn/run that landed before the claim — a
-      // concurrent /answer or /run could have written after the findStale snapshot (mirrors
-      // finishAndScore).
-      const fresh = requireInterview(await getById(iv.id), iv.id);
-      const codeRuns: CodeRunSummary[] = (fresh.code_runs ?? []).map((r: RunResult) => ({
-        language: r.language ?? 'unknown',
-        status: r.status,
-        stderr: r.stderr,
-      }));
-      const scorecard = await scoreInterview(
-        {
-          transcript: fresh.transcript ?? [],
-          codeRuns,
-          finalCode: fresh.code_snapshot || undefined,
-        },
-        getScoringClient()
-      );
-      scorecard.incomplete = true; // partial transcript — a status note, not a clean grade
-      await updateInterview(iv.id, { evaluation_score: scorecard });
-      await insertOutbox(iv.id);
-      abandoned++;
+      // claims, scores (with level), flags timeLimited/incomplete, emails. Returns false if a
+      // concurrent /finish or sweep already claimed it — don't count that as our conclusion.
+      if (await finishAndScore(iv.id)) concluded++;
     } catch (err) {
-      console.error(`[sweep] dropout close failed for ${iv.id}:`, err);
+      console.error(`[sweep] time-up conclude failed for ${iv.id}:`, err);
     }
   }
 
-  if (noShow + abandoned > 0) {
+  // finishAndScore drains its own outbox; only the no-show rows need a drain here.
+  if (noShow > 0) {
     try {
       await drainOutbox(makeOutboxStore(), createEmailSender());
     } catch {
       // Non-fatal; the scheduled drain retries.
     }
   }
-  return { noShow, abandoned };
+  return { noShow, concluded };
 }

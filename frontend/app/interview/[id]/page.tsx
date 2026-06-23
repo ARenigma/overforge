@@ -166,9 +166,14 @@ export default function InterviewPage() {
   // Elapsed session timer (count-up) + live editor cursor position
   const [elapsed, setElapsed] = useState(0);
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
+  // Hard time limit: total interview length (seconds, from the server) and whether we ended
+  // because it ran out. The room counts DOWN from this and concludes at 0.
+  const [durationSec, setDurationSec] = useState(0);
+  const [concludedByTime, setConcludedByTime] = useState(false);
 
-  // Whether /finish has been called (idempotent guard)
-  const finishCalledRef = useRef(false);
+  // One guard for /finish across BOTH conclude paths (timer hard-stop and phase→done), so they
+  // can't each fire a redundant /finish if they trip at the same moment.
+  const concludeCalledRef = useRef(false);
 
   // Idempotency: requestId of the last answer attempt, reused on retry so the server dedupes.
   const pendingAnswerRef = useRef<{ text: string; requestId: string } | null>(null);
@@ -197,10 +202,25 @@ export default function InterviewPage() {
     return () => clearInterval(id);
   }, [stage]);
 
+  // Hard time limit: when the countdown hits 0, conclude the interview — freeze the room (switch
+  // to the done state) and fire scoring via /finish. The server also enforces this (rejects late
+  // answers/runs) and concludes an absent candidate via the sweep; this is the in-room stop.
+  useEffect(() => {
+    if (stage !== 'interview' || durationSec <= 0 || concludeCalledRef.current) return;
+    if (elapsed >= durationSec) {
+      setConcludedByTime(true);
+      setStage('done');
+      if (activeToken) {
+        concludeCalledRef.current = true;
+        finishInterview(id, activeToken).catch(() => undefined);
+      }
+    }
+  }, [elapsed, durationSec, stage, activeToken, id]);
+
   // Auto-call /finish when phase reaches done
   useEffect(() => {
-    if (phase === 'done' && !finishCalledRef.current && activeToken) {
-      finishCalledRef.current = true;
+    if (phase === 'done' && !concludeCalledRef.current && activeToken) {
+      concludeCalledRef.current = true;
       finishInterview(id, activeToken).catch(() => {
         // Idempotent — ignore errors silently
       });
@@ -226,6 +246,7 @@ export default function InterviewPage() {
         if (s.codeSnapshot) setCode(s.codeSnapshot);
         // Re-seed the elapsed timer from the server start so it doesn't restart at 0.
         setElapsed(elapsedSince(s.startedAt));
+        setDurationSec(s.durationSeconds);
         // Restore the last run's output so the console isn't blank after a reload.
         if (s.lastRunResult) setRunResult(s.lastRunResult);
         // Language: an interviewer-assigned language locks the room and wins over everything;
@@ -277,6 +298,7 @@ export default function InterviewPage() {
       setMessages([{ role: 'ai', text: res.utterance.text }]);
       // Anchor the timer to the server start (≈0 on a fresh begin, exact after any reload).
       setElapsed(elapsedSince(res.startedAt));
+      setDurationSec(res.durationSeconds);
       // Lock the editor to the interviewer-assigned language, if any.
       if (isLanguage(res.assignedLanguage)) {
         setLockedLanguage(res.assignedLanguage);
@@ -404,7 +426,10 @@ export default function InterviewPage() {
       <header className="h-11 border-b border-border bg-card flex items-center justify-between px-4 shrink-0">
         <Wordmark className="scale-90 origin-left" />
         <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5 font-mono text-xs tabular-nums text-muted-foreground">
+          <span
+            className="flex items-center gap-1.5 font-mono text-xs tabular-nums text-muted-foreground"
+            title="Elapsed time"
+          >
             <Clock className="h-3.5 w-3.5" aria-hidden="true" />
             {formatTime(elapsed)}
           </span>
@@ -425,10 +450,13 @@ export default function InterviewPage() {
         <div className="flex-1 flex items-center justify-center px-4">
           <div className="w-full max-w-md bg-card border border-success/40 rounded-xl p-8 text-center space-y-4">
             <CheckCircle className="w-10 h-10 text-success mx-auto" />
-            <h2 className="text-base font-medium text-foreground">Interview complete</h2>
+            <h2 className="text-base font-medium text-foreground">
+              {concludedByTime ? 'Time’s up — interview concluded' : 'Interview complete'}
+            </h2>
             <p className="text-sm text-muted-foreground">
-              Thank you for completing this interview. Your responses have been submitted and will
-              be reviewed shortly.
+              {concludedByTime
+                ? 'The interview reached its time limit. Your responses so far have been submitted and will be reviewed shortly.'
+                : 'Thank you for completing this interview. Your responses have been submitted and will be reviewed shortly.'}
             </p>
           </div>
         </div>

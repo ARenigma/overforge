@@ -37,6 +37,15 @@ const LANGUAGE_OPTIONS = [
   { value: 'ruby', label: 'Ruby' },
 ] as const;
 
+// Seniority level — calibrates question difficulty/depth AND the grading bar (not the count;
+// the flow is always 2 oral → 2 coding).
+const LEVEL_OPTIONS = [
+  { value: 'junior', label: 'Junior' },
+  { value: 'mid', label: 'Mid' },
+  { value: 'senior', label: 'Senior' },
+  { value: 'staff', label: 'Staff' },
+] as const;
+
 export function NewInterviewDialog() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -45,6 +54,7 @@ export function NewInterviewDialog() {
   const [candidateEmail, setCandidateEmail] = useState('');
   const [candidateName, setCandidateName] = useState('');
   const [language, setLanguage] = useState<string>('any');
+  const [level, setLevel] = useState<string>('mid');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +66,7 @@ export function NewInterviewDialog() {
     setCandidateEmail('');
     setCandidateName('');
     setLanguage('any');
+    setLevel('mid');
     setSubmitting(false);
     setError(null);
     setLink(null);
@@ -83,6 +94,7 @@ export function NewInterviewDialog() {
         candidateEmail: candidateEmail.trim(),
         ...(candidateName.trim() ? { candidateName: candidateName.trim() } : {}),
         ...(language !== 'any' ? { language } : {}),
+        level,
       });
 
       setLink(result.link);
@@ -241,6 +253,27 @@ export function NewInterviewDialog() {
                 {language === 'any'
                   ? 'The candidate picks their language in the room.'
                   : 'The room is locked to this language.'}
+              </p>
+            </Field>
+
+            <Field id="ni-level" label="Seniority level">
+              <Select value={level} onValueChange={setLevel}>
+                <SelectTrigger
+                  id="ni-level"
+                  className="h-10 bg-background border-input text-foreground focus-visible:ring-ring"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border text-foreground">
+                  {LEVEL_OPTIONS.map((l) => (
+                    <SelectItem key={l.value} value={l.value} className="focus:bg-muted">
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Sets question difficulty and the grading bar. The flow stays 2 oral + 2 coding.
               </p>
             </Field>
 

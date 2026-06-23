@@ -14,6 +14,8 @@ export interface UtteranceRequest {
   ctx: InterviewContext;
   transcript: TranscriptTurn[];
   code?: string;
+  /** Interviewer-chosen seniority level — calibrates question difficulty/depth (not count). */
+  level?: string;
 }
 
 export interface Utterance {
@@ -43,15 +45,27 @@ export class DeterministicOracle implements Oracle {
     const e = req.effect;
     switch (e.kind) {
       case 'greet':
-        return { text: "Hi, I'm your interviewer today. Tell me a bit about yourself.", expects: 'voice' };
+        return {
+          text: "Hi, I'm your interviewer today. Tell me a bit about yourself.",
+          expects: 'voice',
+        };
       case 'ask_oral':
-        return { text: `Oral question ${e.index + 1}: walk me through a relevant project.`, expects: 'voice' };
+        return {
+          text: `Oral question ${e.index + 1}: walk me through a relevant project.`,
+          expects: 'voice',
+        };
       case 'handoff':
         return { text: "Great — let's move to the coding portion.", expects: 'text' };
       case 'ask_code':
-        return { text: `Coding question ${e.index + 1}: implement the solution and explain it.`, expects: 'code' };
+        return {
+          text: `Coding question ${e.index + 1}: implement the solution and explain it.`,
+          expects: 'code',
+        };
       case 'ask_followup':
-        return { text: `Follow-up ${e.depth}: why this approach over the alternatives?`, expects: 'code' };
+        return {
+          text: `Follow-up ${e.depth}: why this approach over the alternatives?`,
+          expects: 'code',
+        };
       case 'wrap_up':
         return { text: 'Thanks — that concludes the interview.', expects: 'text' };
       case 'score':
@@ -65,6 +79,10 @@ export class DeterministicOracle implements Oracle {
     // Deterministic rule: thin answers warrant a follow-up; substantial ones don't.
     const followUp = len > 0 && len < 120;
     const signal = Math.max(0, Math.min(1, len / 240));
-    return { followUp, reason: followUp ? 'answer was thin; probe deeper' : 'answer was substantive', signal };
+    return {
+      followUp,
+      reason: followUp ? 'answer was thin; probe deeper' : 'answer was substantive',
+      signal,
+    };
   }
 }

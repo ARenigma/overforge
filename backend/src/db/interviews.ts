@@ -43,6 +43,8 @@ export interface Interview {
   code_snapshot: string;
   /** Interviewer's chosen room language, set at creation; null = candidate chooses. */
   assigned_language: string | null;
+  /** Interviewer-chosen seniority level (junior/mid/senior/staff); calibrates questions + scoring. */
+  level: string;
   code_language: string | null;
   code_runs: RunResult[];
   evaluation_score: Scorecard | null;
@@ -61,6 +63,8 @@ export interface CreateInterviewInput {
   fsmState: InterviewContext;
   /** Interviewer's chosen room language; omit/null for "candidate chooses". */
   assignedLanguage?: string | null;
+  /** Interviewer-chosen seniority level; defaults to 'mid' if omitted. */
+  level?: string;
 }
 
 export type UpdateInterviewInput = Partial<{
@@ -99,6 +103,7 @@ export async function createInterview(input: CreateInterviewInput): Promise<Inte
       code_snapshot: '',
       code_runs: [],
       assigned_language: input.assignedLanguage ?? null,
+      ...(input.level ? { level: input.level } : {}),
     })
     .select()
     .single();
@@ -251,9 +256,20 @@ export function findStaleInvited(): Promise<Interview[]> {
   return findStaleByStatus('invited');
 }
 
-/** In-progress interviews past their TTL — the candidate started but never finished (dropout). */
-export function findStaleInProgress(): Promise<Interview[]> {
-  return findStaleByStatus('in_progress');
+/** In-progress interviews past the interview duration (started ≥ durationCutoff ago) that have
+ *  been quiet for the grace window — ready to be auto-concluded + scored. The duration cutoff
+ *  (now − INTERVIEW_DURATION) is computed by the caller, which owns the env; the grace check is
+ *  on updated_at so an actively-answering candidate is never swept out from under themselves. */
+export async function findInProgressPastDuration(durationCutoffIso: string): Promise<Interview[]> {
+  const db = createServiceClient();
+  const { data, error } = await db
+    .from('interviews')
+    .select('*')
+    .eq('status', 'in_progress')
+    .lt('tnc_accepted_at', durationCutoffIso)
+    .lt('updated_at', new Date(Date.now() - SWEEP_GRACE_MS).toISOString());
+  if (error) throw new Error(`findInProgressPastDuration: ${error.message}`);
+  return (data ?? []) as Interview[];
 }
 
 /** Atomically claim a stale interview for closing (single-flight CAS, like claimForScoring).
@@ -277,11 +293,6 @@ async function claimStatus(
 /** Claim a no-show: invited -> expired. */
 export function claimExpire(id: string): Promise<boolean> {
   return claimStatus(id, 'invited', 'expired');
-}
-
-/** Claim a dropout: in_progress -> abandoned. */
-export function claimAbandon(id: string): Promise<boolean> {
-  return claimStatus(id, 'in_progress', 'abandoned');
 }
 
 // ─────────────────────── Outbox store implementation ───────────────────────

@@ -1,4 +1,4 @@
-import { scoreInterview, validateScorecard, fallbackScorecard } from './scorer';
+import { scoreInterview, validateScorecard, fallbackScorecard, buildScoringPrompt } from './scorer';
 import { MinimaxClient } from '../interview/minimax';
 
 const stub = (raw: string): MinimaxClient => ({ complete: async () => raw });
@@ -53,5 +53,17 @@ describe('validateScorecard', () => {
     const sc = validateScorecard({});
     expect(sc.dimensions).toEqual([]);
     expect(sc.summary).toBe('');
+  });
+});
+
+describe('buildScoringPrompt level calibration', () => {
+  test('injects the chosen seniority level into the grading prompt', () => {
+    const senior = buildScoringPrompt({ transcript: [], codeRuns: [], level: 'senior' });
+    expect(senior).toContain('SENIOR');
+  });
+
+  test('defaults to mid-level calibration when no level is given', () => {
+    const dflt = buildScoringPrompt({ transcript: [], codeRuns: [] });
+    expect(dflt).toContain('MID');
   });
 });

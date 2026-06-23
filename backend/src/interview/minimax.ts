@@ -136,12 +136,29 @@ function utteranceMode(kind: string): Utterance['expects'] {
 // interviewer sees the whole conversation — earlier oral answers inform later questions.
 const TRANSCRIPT_WINDOW = 40;
 
+// Seniority calibration for question generation. Same level count for everyone (2 oral + 2
+// coding, ≤3 follow-ups) — only the difficulty/depth of each question changes.
+const LEVEL_QUESTION_GUIDANCE: Record<string, string> = {
+  junior:
+    'Target level: JUNIOR. Ask fundamentals-level questions; straightforward problems testing basic correctness and clear reasoning.',
+  mid: 'Target level: MID. Ask solid working-engineer questions; expect correct solutions and awareness of basic tradeoffs.',
+  senior:
+    'Target level: SENIOR. Ask non-trivial questions; expect edge-case handling, sound design, and justified tradeoffs.',
+  staff:
+    'Target level: STAFF. Ask ambiguous/complex questions; expect systems thinking, rigor, and depth.',
+};
+
+function levelGuidance(level?: string): string {
+  return LEVEL_QUESTION_GUIDANCE[(level ?? 'mid').toLowerCase()] ?? LEVEL_QUESTION_GUIDANCE.mid;
+}
+
 function buildUtterancePrompt(req: UtteranceRequest): string {
   const recent = req.transcript
     .slice(-TRANSCRIPT_WINDOW)
     .map((t) => `${t.role}: ${t.text}`)
     .join('\n');
   return [
+    levelGuidance(req.level),
     `Phase: ${req.ctx.phase}. Next action: ${req.effect.kind}.`,
     req.code ? `Candidate code so far:\n${req.code.slice(0, 1500)}` : '',
     recent ? `Recent transcript:\n${recent}` : '',

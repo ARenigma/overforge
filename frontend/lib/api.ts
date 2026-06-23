@@ -23,6 +23,8 @@ export interface BeginResponse {
   startedAt: string;
   /** Interviewer-assigned room language (null = candidate chooses → editor is unlocked). */
   assignedLanguage: string | null;
+  /** Total interview length in seconds — the room counts down from this and hard-stops at 0. */
+  durationSeconds: number;
 }
 
 export interface TranscriptTurn {
@@ -39,6 +41,8 @@ export interface InterviewState {
   startedAt: string | null;
   /** Interviewer-assigned room language (null = candidate chooses → editor is unlocked). */
   assignedLanguage: string | null;
+  /** Total interview length in seconds — the room counts down from this and hard-stops at 0. */
+  durationSeconds: number;
   /** Last editor language persisted server-side; null if no run yet. */
   language: string | null;
   /** Most recent code-run output, so the output panel is restored on resume. */
@@ -76,6 +80,8 @@ export interface Scorecard {
   scoringFailed?: boolean;
   /** True when the interview didn't complete (no-show / dropout) — show "Incomplete", not a verdict. */
   incomplete?: boolean;
+  /** True when the interview was cut off by the time limit — a real score, just annotated. */
+  timeLimited?: boolean;
 }
 
 export interface CreateInterviewResponse {
@@ -131,7 +137,7 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
  */
 export async function createInterview(
   accessToken: string,
-  body: { candidateEmail: string; candidateName?: string; language?: string }
+  body: { candidateEmail: string; candidateName?: string; language?: string; level?: string }
 ): Promise<CreateInterviewResponse> {
   return apiFetch<CreateInterviewResponse>('/api/interviews', {
     accessToken,

@@ -22,6 +22,7 @@ jest.mock('../db/interviews', () => {
         code_runs: [],
         code_snapshot: '',
         candidate_email: input.candidateEmail,
+        level: input.level ?? 'mid',
       };
       store.set(id, row);
       return row;
@@ -58,24 +59,18 @@ jest.mock('../db/interviews', () => {
         (r) => (r as { status?: string }).status === 'invited' && (r as { stale?: boolean }).stale
       )
     ),
-    findStaleInProgress: jest.fn(async () =>
+    findInProgressPastDuration: jest.fn(async (cutoffIso: string) =>
       [...store.values()].filter(
         (r) =>
-          (r as { status?: string }).status === 'in_progress' && (r as { stale?: boolean }).stale
+          (r as { status?: string }).status === 'in_progress' &&
+          typeof (r as { tnc_accepted_at?: string }).tnc_accepted_at === 'string' &&
+          (r as { tnc_accepted_at: string }).tnc_accepted_at < cutoffIso
       )
     ),
     claimExpire: jest.fn(async (id: string) => {
       const row = store.get(id) as { status?: string } | undefined;
       if (row && row.status === 'invited') {
         row.status = 'expired';
-        return true;
-      }
-      return false;
-    }),
-    claimAbandon: jest.fn(async (id: string) => {
-      const row = store.get(id) as { status?: string } | undefined;
-      if (row && row.status === 'in_progress') {
-        row.status = 'abandoned';
         return true;
       }
       return false;
@@ -192,38 +187,39 @@ describe('orchestrator end-to-end (offline)', () => {
     expect(typeof state.startedAt).toBe('string');
   });
 
-  test('closeStaleInterviews: no-show notified, dropout scored — both incomplete', async () => {
-    // No-show: created, never begun, link expired.
+  test('closeStaleInterviews: no-show notified (incomplete); time-up dropout scored (time-limited)', async () => {
+    // No-show: created, never begun, link expired (mock uses a `stale` flag for the invited query).
     const { id: noShowId } = await orch.createInterview({
       interviewerId: 'u4',
       candidateEmail: 'noshow@example.com',
     });
-    // Dropout: begun, has a partial transcript, link expired.
+    // Time-up: begun > 60 min ago, engaged (≥1 answer), now idle past the duration cap.
     const { id: dropId } = await orch.createInterview({
       interviewerId: 'u5',
       candidateEmail: 'drop@example.com',
     });
     const drop = (await db.getById(dropId)) as Record<string, unknown>;
     drop.status = 'in_progress';
+    drop.tnc_accepted_at = new Date(Date.now() - 90 * 60_000).toISOString(); // 90 min ago → past 60-min cap
     drop.transcript = [
       { role: 'interviewer', text: 'Hello' },
-      { role: 'candidate', text: 'Hi, I got partway then had to leave.' },
+      { role: 'candidate', text: 'I worked through the first problem.' },
     ];
-    // Mark both stale (the real query filters on token_expires_at; the mock uses a flag).
-    (drop as { stale?: boolean }).stale = true;
     ((await db.getById(noShowId)) as { stale?: boolean }).stale = true;
 
     const res = await orch.closeStaleInterviews();
     expect(res.noShow).toBe(1);
-    expect(res.abandoned).toBe(1);
+    expect(res.concluded).toBe(1);
 
     const ns = (await db.getById(noShowId)) as Record<string, unknown>;
     expect(ns.status).toBe('expired');
     expect((ns.evaluation_score as { incomplete?: boolean }).incomplete).toBe(true);
 
+    // Time-up + engaged → a real, time-limited score (NOT incomplete), status scored.
     const dr = (await db.getById(dropId)) as Record<string, unknown>;
-    expect(dr.status).toBe('abandoned');
-    expect((dr.evaluation_score as { incomplete?: boolean }).incomplete).toBe(true);
+    expect(dr.status).toBe('scored');
+    expect((dr.evaluation_score as { timeLimited?: boolean }).timeLimited).toBe(true);
+    expect((dr.evaluation_score as { incomplete?: boolean }).incomplete).toBeFalsy();
 
     // Both queued an interviewer notification.
     expect(db.__outbox).toContain(noShowId);

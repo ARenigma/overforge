@@ -26,10 +26,11 @@ function sendError(res: Response, err: unknown): void {
 
 router.post('/', requireInterviewer, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { candidateEmail, candidateName, language } = req.body as {
+    const { candidateEmail, candidateName, language, level } = req.body as {
       candidateEmail?: string;
       candidateName?: string;
       language?: string;
+      level?: string;
     };
 
     if (!candidateEmail || !candidateEmail.includes('@')) {
@@ -44,6 +45,11 @@ router.post('/', requireInterviewer, async (req: Request, res: Response): Promis
         ? language
         : null;
 
+    // Optional seniority level (calibrates questions + grading); unknown/omitted → DB default 'mid'.
+    const INTERVIEW_LEVELS = ['junior', 'mid', 'senior', 'staff'];
+    const interviewLevel =
+      typeof level === 'string' && INTERVIEW_LEVELS.includes(level) ? level : undefined;
+
     await enforceRateLimit(`create:${req.userId}`, {
       limit: 30,
       windowMs: 3_600_000,
@@ -55,6 +61,7 @@ router.post('/', requireInterviewer, async (req: Request, res: Response): Promis
       candidateEmail,
       candidateName,
       assignedLanguage,
+      level: interviewLevel,
     });
 
     const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';

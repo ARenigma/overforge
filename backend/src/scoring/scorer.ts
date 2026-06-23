@@ -18,7 +18,21 @@ export interface ScoringInput {
   transcript: TranscriptTurn[];
   codeRuns: CodeRunSummary[];
   finalCode?: string;
+  /** Interviewer-chosen seniority level — the rubric is calibrated to it (a 'hire' at senior is
+   *  a higher bar than at junior). */
+  level?: string;
 }
+
+// Level-relative grading: the same answer should score differently by seniority.
+const LEVEL_GRADING_GUIDANCE: Record<string, string> = {
+  junior:
+    'CANDIDATE LEVEL: JUNIOR. Grade against junior expectations — fundamentals and basic correctness clear the bar.',
+  mid: 'CANDIDATE LEVEL: MID. Grade against mid-level expectations — correct solutions and awareness of tradeoffs.',
+  senior:
+    'CANDIDATE LEVEL: SENIOR. Grade against senior expectations — a "hire" requires strong design, edge cases, and justified tradeoffs.',
+  staff:
+    'CANDIDATE LEVEL: STAFF. Grade against staff expectations — systems thinking, rigor, and depth; the bar is high.',
+};
 
 const RUBRIC_SYSTEM =
   'You are a strict, consistent technical-interview grader. Score 0–5 on each of: ' +
@@ -49,11 +63,14 @@ export function buildScoringPrompt(input: ScoringInput): string {
       (r) => `- ${r.language}: ${r.status}${r.stderr ? ` (stderr: ${r.stderr.slice(0, 120)})` : ''}`
     )
     .join('\n');
+  const levelLine =
+    LEVEL_GRADING_GUIDANCE[(input.level ?? 'mid').toLowerCase()] ?? LEVEL_GRADING_GUIDANCE.mid;
   return [
+    levelLine,
     `TRANSCRIPT:\n${transcript || '(none)'}`,
     input.finalCode ? `FINAL CODE:\n${input.finalCode.slice(0, 4000)}` : '',
     runs ? `CODE RUNS:\n${runs}` : '',
-    'Grade per the rubric. Return the JSON only.',
+    'Grade per the rubric, calibrated to the candidate level above. Return the JSON only.',
   ]
     .filter(Boolean)
     .join('\n\n');

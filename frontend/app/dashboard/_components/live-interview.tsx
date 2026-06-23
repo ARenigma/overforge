@@ -92,9 +92,13 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
   const meta = statusMeta(iv.status);
   const sc = iv.evaluation_score;
   const transcript = (iv.transcript ?? []).filter((t) => t.role !== 'system');
-  // No re-score on an incomplete (no-show / dropout) result — the backend refuses it, and
-  // re-scoring a partial transcript would misrepresent it as a real verdict.
-  const canRescore = transcript.length > 0 && !sc?.incomplete;
+  // Re-score only a finished (scored) or stuck-mid-score (completed) interview — matches the
+  // backend allowlist. Never a live in_progress (would end the candidate's session) or an
+  // incomplete result (would misrepresent a partial as a real verdict).
+  const canRescore =
+    (iv.status === 'scored' || iv.status === 'completed') &&
+    transcript.length > 0 &&
+    !sc?.incomplete;
 
   return (
     <>
@@ -224,6 +228,11 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
                         : RECOMMENDATION_LABEL[sc.recommendation]}
                   </StatusBadge>
                 </div>
+                {sc.timeLimited && !sc.incomplete ? (
+                  <p className="text-xs text-muted-foreground">
+                    Concluded at the time limit — graded on the work completed.
+                  </p>
+                ) : null}
                 {sc.dimensions?.length ? (
                   <ul className="space-y-2">
                     {sc.dimensions.map((d, i) => (
