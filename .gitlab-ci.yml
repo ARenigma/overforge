@@ -178,6 +178,9 @@ deploy-backend:
   script:
     - rsync -az --delete --exclude node_modules --exclude '.env*' backend/ beef:overforge/backend/
     - rsync -az --exclude backend.env deploy/ beef:overforge/deploy/
+    # Ensure every language image the kernel runs is present on the host (--pull never at run
+    # time means a missing image hard-fails). Idempotent; pulls only what's new.
+    - ssh beef 'cd ~/overforge && bash deploy/pull-runtimes.sh'
     # Pre-warm the persistent Go build cache (idempotent) before the backend serves, so the
     # first Go /run isn't a cold ~10s stdlib compile. See deploy/warm-caches.sh.
     - ssh beef 'cd ~/overforge && bash deploy/warm-caches.sh'

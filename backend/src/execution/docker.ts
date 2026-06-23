@@ -15,7 +15,15 @@ import { Semaphore } from './semaphore';
 const EXEC_MAX_CONCURRENCY = Number(process.env.EXEC_MAX_CONCURRENCY ?? 4);
 const execSemaphore = new Semaphore(EXEC_MAX_CONCURRENCY);
 
-export const SUPPORTED_LANGUAGES = ['python', 'javascript', 'java', 'cpp', 'go', 'ruby'] as const;
+export const SUPPORTED_LANGUAGES = [
+  'python',
+  'javascript',
+  'typescript',
+  'java',
+  'cpp',
+  'go',
+  'ruby',
+] as const;
 
 interface LangSpec {
   image: string;
@@ -48,6 +56,15 @@ const COMMON_ENV: Readonly<Record<string, string>> = {
 const LANGS: Readonly<Record<string, LangSpec>> = {
   python: { image: 'python:3.12-slim', file: 'main.py', cmd: 'python3 main.py' },
   javascript: { image: 'node:20-slim', file: 'main.js', cmd: 'node main.js' },
+  // Deno runs TypeScript natively (no separate transpile/install step). --no-prompt makes a
+  // permission request fail instead of hanging; DENO_DIR points at the writable tmpfs since
+  // the image's default cache dir is on the read-only root.
+  typescript: {
+    image: 'denoland/deno:alpine-2.8.3',
+    file: 'main.ts',
+    cmd: 'deno run --no-prompt main.ts',
+    env: { DENO_DIR: '/work/.deno' },
+  },
   ruby: { image: 'ruby:3.3-slim', file: 'main.rb', cmd: 'ruby main.rb' },
   go: {
     image: 'golang:1.22-alpine',

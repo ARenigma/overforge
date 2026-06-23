@@ -8,6 +8,7 @@ set -euo pipefail
 IMAGES=(
   python:3.12-slim
   node:20-slim
+  denoland/deno:alpine-2.8.3
   ruby:3.3-slim
   golang:1.22-alpine
   eclipse-temurin:21-jdk
