@@ -75,8 +75,14 @@ export function ScorecardDialog({ scorecard, candidateName }: ScorecardDialogPro
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="bg-card border border-border text-card-foreground sm:max-w-lg">
-        <DialogHeader>
+      <DialogContent
+        // Don't auto-focus the first control on open — that's the info (ⓘ) button, and a
+        // focused Radix tooltip would pop open "by default". Tooltips now show on hover/intent.
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        // Cap height so the card never fills the viewport; header + close stay put, the body scrolls.
+        className="flex max-h-[85vh] flex-col overflow-hidden border border-border bg-card text-card-foreground sm:max-w-lg"
+      >
+        <DialogHeader className="shrink-0">
           <div className="flex items-center justify-between gap-4 pr-6">
             <div className="space-y-0.5">
               <DialogTitle className="text-foreground text-base">Interview scorecard</DialogTitle>
@@ -98,7 +104,7 @@ export function ScorecardDialog({ scorecard, candidateName }: ScorecardDialogPro
           </div>
         </DialogHeader>
 
-        <div className="space-y-5 pt-1">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto pt-1">
           {/* Overall score */}
           <div className="bg-muted border border-border rounded-md px-4 py-3 flex items-center justify-between gap-3">
             <InfoTooltip
