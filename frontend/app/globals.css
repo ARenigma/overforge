@@ -21,7 +21,7 @@
 
     /* ── Brand accent — ember/lava (THE one place to change it). Same value in BOTH modes so the
        brand reads as ONE color everywhere; dark foreground sits on the bright fill for contrast. ── */
-    --primary: 18 92% 61%;
+    --primary: 15 90% 53%;
     --primary-foreground: 24 40% 10%;
 
     /* Light mode surfaces + text — off-white page so white cards/borders read */
@@ -71,7 +71,7 @@
 
   .dark {
     /* ── Brand accent — ember/lava (same value as light; see :root note above) ── */
-    --primary: 18 92% 61%;
+    --primary: 15 90% 53%;
     --primary-foreground: 24 40% 10%;
 
     /* Dark mode surfaces + text — neutral charcoal (Supabase pattern) */
