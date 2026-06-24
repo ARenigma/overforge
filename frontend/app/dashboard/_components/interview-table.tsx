@@ -232,7 +232,7 @@ export function InterviewTable({
                           />
                         </>
                       ) : (
-                        <span className="text-xs text-muted-foreground/40">—</span>
+                        <span className="text-xs text-foreground-ghost">—</span>
                       )}
                     </div>
                   </td>

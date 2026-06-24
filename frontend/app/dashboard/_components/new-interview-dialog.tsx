@@ -320,14 +320,14 @@ export function NewInterviewDialog() {
             </Field>
 
             {isDev && (
-              <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-warning/40 bg-warning/5 px-3 py-2.5">
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-input border border-warning/40 bg-warning/10 px-3 py-2.5">
                 <input
                   type="checkbox"
                   checked={devMode}
                   onChange={(e) => setDevMode(e.target.checked)}
                   className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
                 />
-                <span className="text-sm text-foreground">
+                <span className="text-sm text-warning-foreground">
                   Dev mode{' '}
                   <span className="text-xs text-muted-foreground">
                     — testing only: allows paste in the room and uses a short duration. Don&apos;t

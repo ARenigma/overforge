@@ -84,7 +84,7 @@ export function Marquee() {
   return (
     <div>
       <div className="py-10">
-        <p className="mb-5 text-center text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground/60">
+        <p className="mb-5 text-center text-xs font-medium uppercase tracking-[0.2em] text-foreground-subtle">
           Trusted by high-growth teams
         </p>
         <div
@@ -102,7 +102,7 @@ export function Marquee() {
                 {BRANDS.map((brand, i) => (
                   <li
                     key={`${group}-${i}`}
-                    className="flex items-center gap-2 whitespace-nowrap text-muted-foreground/50 transition-colors duration-200 hover:text-muted-foreground"
+                    className="flex items-center gap-2 whitespace-nowrap text-foreground-subtle transition-colors duration-200 hover:text-muted-foreground"
                   >
                     {brand.type === 'icon' && (
                       <brand.Icon className="h-5 w-5 shrink-0" aria-hidden="true" />

@@ -44,7 +44,7 @@ export function EmptyState({
   return (
     <StateBlock
       className="border-dashed border-border"
-      icon={<span className="text-muted-foreground/30">{icon}</span>}
+      icon={<span className="text-foreground-ghost">{icon}</span>}
       title={title}
       description={description}
       action={action}

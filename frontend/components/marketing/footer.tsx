@@ -48,7 +48,7 @@ const COMPLIANCE = [
 
 export function Footer() {
   return (
-    <footer className="bg-[hsl(var(--surface-deep))]">
+    <footer className="bg-surface-deep">
       {/* Section 1 — brand, navigation, and the compliance strip */}
       <div className="mx-auto max-w-5xl px-6 py-14">
         <div className="grid grid-cols-2 gap-x-8 gap-y-10 md:grid-cols-6">
@@ -112,7 +112,7 @@ export function Footer() {
           >
             Terms
           </Link>
-          <span className="text-xs text-muted-foreground/70">Candidate data stays isolated.</span>
+          <span className="text-xs text-foreground-subtle">Candidate data stays isolated.</span>
         </div>
       </div>
     </footer>

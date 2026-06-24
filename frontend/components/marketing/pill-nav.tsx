@@ -51,7 +51,7 @@ export function PillNav() {
             <a
               key={l.href}
               href={l.href}
-              className="px-3 py-1.5 text-sm font-semibold text-foreground transition-colors duration-75 hover:text-primary"
+              className="px-3 py-1.5 text-sm font-semibold text-foreground transition-colors duration-fast hover:text-primary"
             >
               {l.label}
             </a>

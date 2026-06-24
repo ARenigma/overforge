@@ -618,9 +618,9 @@ export default function InterviewPage() {
                 <span>
                   Ln {cursor.line}, Col {cursor.col}
                 </span>
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-foreground-ghost">·</span>
                 <span className="capitalize">{language}</span>
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-foreground-ghost">·</span>
                 <span>Spaces: 4</span>
                 <span className="ml-auto">UTF-8</span>
               </div>
@@ -632,7 +632,7 @@ export default function InterviewPage() {
 
           {/* RIGHT — AI chat / oral widget */}
           <ResizablePanel defaultSize={38} minSize={25}>
-            <div className="flex h-full flex-col overflow-hidden bg-[hsl(var(--surface-deep))]">
+            <div className="flex h-full flex-col overflow-hidden bg-surface-deep">
               {/* Pane header — single assistant identity (no per-message labels) */}
               <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
                 <span
@@ -732,7 +732,7 @@ export default function InterviewPage() {
                     placeholder="Type your answer…"
                     rows={1}
                     spellCheck={false}
-                    className="box-border block max-h-64 w-full resize-none rounded-input border border-border bg-foreground/[0.026] px-3 py-2 pb-9 pr-10 text-sm font-normal text-foreground transition-colors placeholder:text-muted-foreground/60 focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border disabled:opacity-50"
+                    className="box-border block max-h-64 w-full resize-none rounded-input border border-border bg-foreground/[0.026] px-3 py-2 pb-9 pr-10 text-sm font-normal text-foreground transition-colors placeholder:text-foreground-subtle focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
                   />
                   {/* Footer overlay — model selector excluded; send button right-aligned. pointer-events
                       pass through the empty area so clicks still land in the textarea. */}

@@ -17,7 +17,11 @@ const config: Config = {
       },
       colors: {
         background: 'hsl(var(--background))',
-        foreground: 'hsl(var(--foreground))',
+        foreground: {
+          DEFAULT: 'hsl(var(--foreground))',
+          subtle: 'hsl(var(--foreground-subtle))',
+          ghost: 'hsl(var(--foreground-ghost))',
+        },
         card: {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
@@ -47,7 +51,12 @@ const config: Config = {
           foreground: 'hsl(var(--destructive-foreground))',
         },
         success: 'hsl(var(--success))',
-        warning: 'hsl(var(--warning))',
+        warning: {
+          DEFAULT: 'hsl(var(--warning))',
+          foreground: 'hsl(var(--warning-foreground))',
+        },
+        'surface-deep': 'hsl(var(--surface-deep))',
+        'overlay-scrim': 'hsl(var(--overlay-scrim))',
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
@@ -68,6 +77,14 @@ const config: Config = {
           border: 'hsl(var(--sidebar-border))',
           ring: 'hsl(var(--sidebar-ring))',
         },
+      },
+      transitionDuration: {
+        fast: '150ms',
+        base: '200ms',
+        slow: '300ms',
+      },
+      transitionTimingFunction: {
+        smooth: 'cubic-bezier(0.16, 1, 0.3, 1)',
       },
       borderRadius: {
         lg: 'var(--radius)',

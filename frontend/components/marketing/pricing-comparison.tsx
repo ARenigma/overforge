@@ -69,7 +69,7 @@ const GROUPS: Group[] = [
 function renderCell(c: Cell) {
   if (c === true) return <Check className="mx-auto h-4 w-4 text-primary" aria-label="Included" />;
   if (c === false)
-    return <Minus className="mx-auto h-4 w-4 text-muted-foreground/30" aria-label="Not included" />;
+    return <Minus className="mx-auto h-4 w-4 text-foreground-ghost" aria-label="Not included" />;
   return <span className="text-sm text-foreground">{c}</span>;
 }
 

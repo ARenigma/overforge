@@ -30,7 +30,7 @@ export function InfoTooltip({
           <button
             type="button"
             aria-label={`More info: ${label}`}
-            className="shrink-0 rounded-sm text-muted-foreground/40 transition-colors hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="shrink-0 rounded-sm text-foreground-ghost transition-colors hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           >
             <Info className="h-3 w-3" aria-hidden="true" />
           </button>

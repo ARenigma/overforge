@@ -42,7 +42,7 @@ export function Hero() {
 
       {/* Scroll cue */}
       <div className="absolute bottom-8 left-1/2 z-10 -translate-x-1/2" aria-hidden="true">
-        <ChevronDown className="h-5 w-5 animate-bounce text-muted-foreground/40" />
+        <ChevronDown className="h-5 w-5 animate-bounce text-foreground-ghost" />
       </div>
     </section>
   );

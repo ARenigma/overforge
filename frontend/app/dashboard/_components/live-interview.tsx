@@ -167,7 +167,7 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
               Code
             </h2>
             {iv.code_snapshot ? (
-              <pre className="overflow-x-auto rounded-xl border border-border bg-[hsl(var(--surface-deep))] p-4 font-mono text-xs leading-relaxed text-foreground">
+              <pre className="overflow-x-auto rounded-xl border border-border bg-surface-deep p-4 font-mono text-xs leading-relaxed text-foreground">
                 {iv.code_snapshot}
               </pre>
             ) : (

@@ -27,10 +27,10 @@ export function EditorShowcase() {
             main.py
           </div>
           <div className="ml-2 hidden items-center gap-2 sm:flex">
-            <span className="rounded-md border border-border bg-background/40 px-3 py-0.5 font-mono text-xs text-muted-foreground/60">
+            <span className="rounded-md border border-border bg-background/40 px-3 py-0.5 font-mono text-xs text-foreground-subtle">
               solution.go
             </span>
-            <span className="rounded-md border border-border bg-background/40 px-3 py-0.5 font-mono text-xs text-muted-foreground/60">
+            <span className="rounded-md border border-border bg-background/40 px-3 py-0.5 font-mono text-xs text-foreground-subtle">
               test_main.py
             </span>
           </div>
@@ -40,18 +40,18 @@ export function EditorShowcase() {
         <div className="grid min-h-[340px] md:min-h-[470px] md:grid-cols-[210px_1fr]">
           {/* File tree */}
           <div className="hidden border-r border-border bg-background/40 py-4 md:block">
-            <p className="mb-2 px-4 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/50">
+            <p className="mb-2 px-4 font-mono text-[10px] uppercase tracking-wider text-foreground-subtle">
               Explorer
             </p>
             <ul className="space-y-0.5 px-3 font-mono text-[12px]">
-              <li className="text-muted-foreground/70">src/</li>
+              <li className="text-foreground-subtle">src/</li>
               <li className="rounded bg-primary/10 px-2 py-0.5 text-primary">
                 &nbsp;&nbsp;main.py
               </li>
-              <li className="px-2 text-muted-foreground/60">&nbsp;&nbsp;solution.go</li>
-              <li className="mt-1 text-muted-foreground/70">tests/</li>
-              <li className="px-2 text-muted-foreground/60">&nbsp;&nbsp;test_main.py</li>
-              <li className="mt-1 text-muted-foreground/60">README.md</li>
+              <li className="px-2 text-foreground-subtle">&nbsp;&nbsp;solution.go</li>
+              <li className="mt-1 text-foreground-subtle">tests/</li>
+              <li className="px-2 text-foreground-subtle">&nbsp;&nbsp;test_main.py</li>
+              <li className="mt-1 text-foreground-subtle">README.md</li>
             </ul>
           </div>
 
@@ -61,7 +61,7 @@ export function EditorShowcase() {
               <tbody>
                 {CODE_LINES.map((line, i) => (
                   <tr key={i} className="group">
-                    <td className="w-12 select-none pr-4 text-right text-muted-foreground/30 group-hover:text-muted-foreground/60">
+                    <td className="w-12 select-none pr-4 text-right text-foreground-ghost group-hover:text-foreground-subtle">
                       {i + 1}
                     </td>
                     <td className="pr-8 whitespace-pre">{renderLine(line)}</td>
@@ -82,9 +82,9 @@ export function EditorShowcase() {
           <div className="mt-1">
             <span className="text-primary">{'✓'} two_sum &middot; basic</span>
             <span className="mx-3 text-primary">{'✓'} two_sum &middot; edge</span>
-            <span className="text-muted-foreground/60">2 passed &middot; 0 failed</span>
+            <span className="text-foreground-subtle">2 passed &middot; 0 failed</span>
           </div>
-          <div className="mt-1 text-muted-foreground/60">{'✓'} 0.21s &middot; network: none</div>
+          <div className="mt-1 text-foreground-subtle">{'✓'} 0.21s &middot; network: none</div>
         </div>
       </Reveal>
     </section>
@@ -158,7 +158,7 @@ function renderLine(segments: CodeLine) {
     }
     if (seg.type === 'comment') {
       return (
-        <span key={i} className="text-muted-foreground/60 italic">
+        <span key={i} className="text-foreground-subtle italic">
           {seg.text}
         </span>
       );

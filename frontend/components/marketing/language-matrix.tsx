@@ -40,12 +40,12 @@ export function LanguageMatrix() {
               className="group flex aspect-square cursor-default select-none flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30"
             >
               <Icon
-                className="h-7 w-7 text-muted-foreground/70 transition-all duration-200 group-hover:scale-110 group-hover:text-primary"
+                className="h-7 w-7 text-foreground-subtle transition-all duration-200 group-hover:scale-110 group-hover:text-primary"
                 aria-hidden="true"
               />
               <div className="flex flex-col items-center gap-0.5">
                 <span className="text-xs font-medium text-foreground">{lang.name}</span>
-                <span className="font-mono text-[10px] text-muted-foreground/60">{lang.ext}</span>
+                <span className="font-mono text-[10px] text-foreground-subtle">{lang.ext}</span>
               </div>
             </div>
           );

@@ -50,7 +50,7 @@ export function Field({
             </span>
           )}
           {optional && (
-            <span className="ml-1 font-sans text-xs normal-case tracking-normal text-muted-foreground/60">
+            <span className="ml-1 font-sans text-xs normal-case tracking-normal text-foreground-subtle">
               (optional)
             </span>
           )}

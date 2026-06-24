@@ -12,7 +12,7 @@ const INTENT: Record<BadgeIntent, string> = {
   neutral: 'border-border bg-transparent text-muted-foreground',
   info: 'border-primary/40 bg-primary/10 text-primary',
   success: 'border-success/40 bg-success/10 text-success',
-  warning: 'border-border bg-muted text-foreground',
+  warning: 'border-warning/40 bg-warning/10 text-warning-foreground',
   danger: 'border-destructive/40 bg-destructive/10 text-destructive',
 };
 

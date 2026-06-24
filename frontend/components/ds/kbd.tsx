@@ -22,7 +22,7 @@ export function Kbd({
   if (!label) return cap;
 
   return (
-    <p className={cn('text-[10px] text-muted-foreground/60', className)}>
+    <p className={cn('text-[10px] text-foreground-subtle', className)}>
       {cap} {label}
     </p>
   );

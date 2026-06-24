@@ -39,7 +39,7 @@ export function MarkdownMessage({ text }: { text: string }) {
             );
           },
           pre: ({ children }) => (
-            <pre className="overflow-x-auto border border-border bg-[hsl(0_0%_6%)] p-3 font-mono text-xs font-normal leading-relaxed">
+            <pre className="overflow-x-auto border border-border bg-surface-deep p-3 font-mono text-xs font-normal leading-relaxed">
               {children}
             </pre>
           ),
