@@ -68,7 +68,16 @@ export function InterviewRowActions({ id, status }: { id: string; status: string
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
+        {/* Radix returns focus to the trigger when the menu (or a dialog it opens) closes.
+            After a pointer-driven close, Chromium's :focus-visible heuristic treats that
+            programmatic refocus as keyboard-like and paints a lingering green ring on the ⋯
+            button. Dropping the auto-refocus removes the stray highlight; keyboard users
+            simply Tab onward from where they were. */}
+        <DropdownMenuContent
+          align="end"
+          className="w-48"
+          onCloseAutoFocus={(e) => e.preventDefault()}
+        >
           {cancellable && (
             <DropdownMenuItem onSelect={() => setTimeout(() => setCancelOpen(true), 0)}>
               Cancel interview

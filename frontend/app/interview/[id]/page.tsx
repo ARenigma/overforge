@@ -26,7 +26,6 @@ import {
 import { AlertCircle, ArrowUp, CheckCircle, Clock, Loader2, Lock, Play } from 'lucide-react';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
-import { Kbd } from '@/components/ds/kbd';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -376,7 +375,9 @@ export default function InterviewPage() {
   }, [id, activeToken, language, code, running]);
 
   function handleAnswerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    // Mirror Supabase's composer: Enter sends, Shift+Enter inserts a newline. Guard IME
+    // composition so committing CJK text with Enter never submits mid-compose.
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSendAnswer();
     }
@@ -702,13 +703,17 @@ export default function InterviewPage() {
                     </AlertDescription>
                   </Alert>
                 )}
-                <div className="relative border border-border bg-background transition-colors focus-within:border-muted-foreground/40">
+                {/* Composer mirrors Supabase Studio's AI assistant input: the border + 6px radius
+                    live on the textarea, a barely-there foreground tint as the surface, weight-400
+                    text, and a 28px circular primary send button inset 6px (model selector omitted).
+                    Enter sends, Shift+Enter newlines — no hint line, matching Supabase. */}
+                <div className="relative">
                   <textarea
                     value={answer}
                     onChange={(e) => {
                       setAnswer(e.target.value);
                       e.target.style.height = 'auto';
-                      e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 256)}px`;
                     }}
                     onKeyDown={handleAnswerKeyDown}
                     onPaste={(e) => {
@@ -726,23 +731,27 @@ export default function InterviewPage() {
                     disabled={aiThinking}
                     placeholder="Type your answer…"
                     rows={1}
-                    className="block max-h-40 min-h-[3rem] w-full resize-none bg-transparent px-3 py-3 pr-14 text-sm font-medium text-foreground placeholder:font-normal placeholder:text-muted-foreground/50 focus:outline-none disabled:opacity-50"
+                    spellCheck={false}
+                    className="box-border block max-h-64 w-full resize-none rounded-md border border-border bg-foreground/[0.026] px-3 py-2 pb-9 pr-10 text-sm font-normal text-foreground transition-colors placeholder:text-muted-foreground/60 focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border disabled:opacity-50"
                   />
-                  <button
-                    type="button"
-                    onClick={handleSendAnswer}
-                    disabled={aiThinking || !answer.trim()}
-                    aria-label="Send answer"
-                    className="absolute bottom-2 right-2 grid h-8 w-8 place-items-center rounded-full bg-primary text-primary-foreground outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-95 disabled:opacity-40"
-                  >
-                    {aiThinking ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <ArrowUp className="h-4 w-4" />
-                    )}
-                  </button>
+                  {/* Footer overlay — model selector excluded; send button right-aligned. pointer-events
+                      pass through the empty area so clicks still land in the textarea. */}
+                  <div className="pointer-events-none absolute inset-x-1.5 bottom-1.5 flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={handleSendAnswer}
+                      disabled={aiThinking || !answer.trim()}
+                      aria-label="Send answer"
+                      className="pointer-events-auto grid h-7 w-7 place-items-center rounded-full bg-primary p-0 text-primary-foreground outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 active:scale-95 disabled:opacity-50"
+                    >
+                      {aiThinking ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </div>
                 </div>
-                <Kbd keys="⌘ ↵" label="to send" className="mt-1.5 px-0.5" />
               </div>
             </div>
           </ResizablePanel>
