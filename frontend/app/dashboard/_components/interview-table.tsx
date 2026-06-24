@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { motion } from 'framer-motion';
 import { ScorecardDialog } from './scorecard-dialog';
 import { FilterBar } from './filter-bar';
 import { InterviewRowActions } from './interview-row-actions';
@@ -11,6 +12,10 @@ import { StatusBadge, type BadgeIntent } from '@/components/ds/status-badge';
 import { statusMeta } from '@/lib/interview-status';
 import { AlertCircle, CalendarClock, SearchX } from 'lucide-react';
 import { type Scorecard } from '@/lib/api';
+
+/** Max stagger delay cap so late rows don't feel broken on large pages. */
+const MAX_STAGGER_MS = 300;
+const STAGGER_PER_ROW_MS = 40;
 
 const PAGE_SIZE = 20;
 
@@ -160,9 +165,16 @@ export function InterviewTable({
               </tr>
             </thead>
             <tbody>
-              {pageRows.map((interview) => (
-                <tr
+              {pageRows.map((interview, idx) => (
+                <motion.tr
                   key={interview.id}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    duration: 0.2,
+                    delay: Math.min(idx * STAGGER_PER_ROW_MS, MAX_STAGGER_MS) / 1000,
+                    ease: [0.16, 1, 0.3, 1],
+                  }}
                   onClick={() => router.push(`/dashboard/${interview.id}`)}
                   onMouseEnter={() => router.prefetch(`/dashboard/${interview.id}`)}
                   onKeyDown={(e) => {
@@ -245,7 +257,7 @@ export function InterviewTable({
                   >
                     <InterviewRowActions id={interview.id} status={interview.status} />
                   </td>
-                </tr>
+                </motion.tr>
               ))}
             </tbody>
           </table>
