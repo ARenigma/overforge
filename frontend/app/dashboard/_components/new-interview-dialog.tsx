@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { createClient } from '@/lib/supabase/client';
-import { createInterview } from '@/lib/api';
+import { createInterview, getMe } from '@/lib/api';
 import { Plus, Copy, Check, ExternalLink, Mail } from 'lucide-react';
 
 // Coding languages the interviewer can assign. 'any' = let the candidate choose in-room
@@ -55,8 +55,32 @@ export function NewInterviewDialog() {
   const [candidateName, setCandidateName] = useState('');
   const [language, setLanguage] = useState<string>('any');
   const [level, setLevel] = useState<string>('mid');
+  const [roleBrief, setRoleBrief] = useState('');
+  const [devMode, setDevMode] = useState(false);
+  const [isDev, setIsDev] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Only dev accounts (DEV_EMAILS) get the dev-mode toggle. Checked when the dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const {
+          data: { session },
+        } = await createClient().auth.getSession();
+        if (!session?.access_token || cancelled) return;
+        const me = await getMe(session.access_token);
+        if (!cancelled) setIsDev(me.isDev);
+      } catch {
+        // non-dev / offline — no toggle, no problem
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   // Result state
   const [link, setLink] = useState<string | null>(null);
@@ -67,6 +91,8 @@ export function NewInterviewDialog() {
     setCandidateName('');
     setLanguage('any');
     setLevel('mid');
+    setRoleBrief('');
+    setDevMode(false);
     setSubmitting(false);
     setError(null);
     setLink(null);
@@ -95,6 +121,8 @@ export function NewInterviewDialog() {
         ...(candidateName.trim() ? { candidateName: candidateName.trim() } : {}),
         ...(language !== 'any' ? { language } : {}),
         level,
+        ...(roleBrief.trim() ? { roleBrief: roleBrief.trim() } : {}),
+        ...(isDev && devMode ? { devMode: true } : {}),
       });
 
       setLink(result.link);
@@ -276,6 +304,38 @@ export function NewInterviewDialog() {
                 Sets question difficulty and the grading bar. The flow stays 2 oral + 2 coding.
               </p>
             </Field>
+
+            <Field id="ni-role" label="Role brief" optional>
+              <textarea
+                id="ni-role"
+                value={roleBrief}
+                onChange={(e) => setRoleBrief(e.target.value)}
+                rows={3}
+                placeholder="e.g. Senior backend engineer — Go, distributed systems, on-call. Probe concurrency and API design."
+                className="block w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              <p className="mt-1.5 text-xs text-muted-foreground">
+                Tailors the questions and grading to this role. Question count is unchanged.
+              </p>
+            </Field>
+
+            {isDev && (
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-warning/40 bg-warning/5 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  checked={devMode}
+                  onChange={(e) => setDevMode(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-primary"
+                />
+                <span className="text-sm text-foreground">
+                  Dev mode{' '}
+                  <span className="text-xs text-muted-foreground">
+                    — testing only: allows paste in the room and uses a short duration. Don&apos;t
+                    use for real candidates.
+                  </span>
+                </span>
+              </label>
+            )}
 
             <div className="flex gap-2 pt-1">
               <Button

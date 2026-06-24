@@ -16,6 +16,8 @@ export interface UtteranceRequest {
   code?: string;
   /** Interviewer-chosen seniority level — calibrates question difficulty/depth (not count). */
   level?: string;
+  /** Free-text role/JD context — steers the topic/domain of questions (not count). */
+  roleBrief?: string | null;
 }
 
 export interface Utterance {

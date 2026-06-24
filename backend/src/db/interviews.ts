@@ -45,6 +45,10 @@ export interface Interview {
   assigned_language: string | null;
   /** Interviewer-chosen seniority level (junior/mid/senior/staff); calibrates questions + scoring. */
   level: string;
+  /** Free-text role/JD context, set at creation; tailors questions + grading. */
+  role_brief: string | null;
+  /** A dev/testing interview (created by a DEV_EMAILS account): paste allowed + short duration. */
+  dev_mode: boolean;
   code_language: string | null;
   code_runs: RunResult[];
   evaluation_score: Scorecard | null;
@@ -65,6 +69,10 @@ export interface CreateInterviewInput {
   assignedLanguage?: string | null;
   /** Interviewer-chosen seniority level; defaults to 'mid' if omitted. */
   level?: string;
+  /** Free-text role/JD context; tailors questions + grading. */
+  roleBrief?: string | null;
+  /** Dev/testing interview (server only honors this for DEV_EMAILS accounts). */
+  devMode?: boolean;
 }
 
 export type UpdateInterviewInput = Partial<{
@@ -104,6 +112,8 @@ export async function createInterview(input: CreateInterviewInput): Promise<Inte
       code_runs: [],
       assigned_language: input.assignedLanguage ?? null,
       ...(input.level ? { level: input.level } : {}),
+      role_brief: input.roleBrief ?? null,
+      dev_mode: input.devMode ?? false,
     })
     .select()
     .single();
@@ -259,15 +269,24 @@ export function findStaleInvited(): Promise<Interview[]> {
 /** In-progress interviews past the interview duration (started ≥ durationCutoff ago) that have
  *  been quiet for the grace window — ready to be auto-concluded + scored. The duration cutoff
  *  (now − INTERVIEW_DURATION) is computed by the caller, which owns the env; the grace check is
- *  on updated_at so an actively-answering candidate is never swept out from under themselves. */
-export async function findInProgressPastDuration(durationCutoffIso: string): Promise<Interview[]> {
+ *  on updated_at so an actively-answering candidate is never swept out from under themselves.
+ *  Dev and prod interviews have different caps, so the caller filters by `devMode` and passes the
+ *  matching cutoff — otherwise a 2-min dev interview would wait the full 60-min prod window. */
+export async function findInProgressPastDuration(
+  durationCutoffIso: string,
+  devMode?: boolean
+): Promise<Interview[]> {
   const db = createServiceClient();
-  const { data, error } = await db
+  let query = db
     .from('interviews')
     .select('*')
     .eq('status', 'in_progress')
     .lt('tnc_accepted_at', durationCutoffIso)
     .lt('updated_at', new Date(Date.now() - SWEEP_GRACE_MS).toISOString());
+  if (devMode !== undefined) {
+    query = query.eq('dev_mode', devMode);
+  }
+  const { data, error } = await query;
   if (error) throw new Error(`findInProgressPastDuration: ${error.message}`);
   return (data ?? []) as Interview[];
 }

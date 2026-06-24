@@ -41,6 +41,10 @@ interface EnhancedCodeMirrorEditorProps {
   onCursorPositionChangeAction?: (line: number, col: number) => void;
   onExecuteAction?: () => void;
   isExecuting?: boolean;
+  /** Block paste + drop into the editor (integrity). */
+  pasteDisabled?: boolean;
+  /** Called when a paste/drop is blocked, so the room can show a hint. */
+  onPasteBlockedAction?: () => void;
 }
 
 export function EnhancedCodeMirrorEditor({
@@ -52,6 +56,8 @@ export function EnhancedCodeMirrorEditor({
   onCursorPositionChangeAction,
   onExecuteAction,
   isExecuting = false,
+  pasteDisabled = false,
+  onPasteBlockedAction,
 }: EnhancedCodeMirrorEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -107,6 +113,25 @@ export function EnhancedCodeMirrorEditor({
       getLanguageExtension(language),
       indentUnit.of(' '.repeat(tabSize)),
       keymap.of([...searchKeymap, ...customKeymap]),
+      // Integrity: block paste + drop into the editor unless explicitly allowed.
+      EditorView.domEventHandlers({
+        paste(event) {
+          if (pasteDisabled) {
+            event.preventDefault();
+            onPasteBlockedAction?.();
+            return true;
+          }
+          return false;
+        },
+        drop(event) {
+          if (pasteDisabled) {
+            event.preventDefault();
+            onPasteBlockedAction?.();
+            return true;
+          }
+          return false;
+        },
+      }),
       highlightSelectionMatches(),
       EditorView.updateListener.of((update) => {
         if (update.docChanged) {
@@ -200,7 +225,7 @@ export function EnhancedCodeMirrorEditor({
         view.destroy();
       }
     };
-  }, [language, tabSize, isExecuting]);
+  }, [language, tabSize, isExecuting, pasteDisabled]);
 
   // Handle value changes (e.g., when switching between questions)
   useEffect(() => {

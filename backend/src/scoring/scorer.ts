@@ -21,6 +21,8 @@ export interface ScoringInput {
   /** Interviewer-chosen seniority level — the rubric is calibrated to it (a 'hire' at senior is
    *  a higher bar than at junior). */
   level?: string;
+  /** Free-text role/JD context — grade relevance against what this role actually needs. */
+  roleBrief?: string | null;
 }
 
 // Level-relative grading: the same answer should score differently by seniority.
@@ -65,8 +67,10 @@ export function buildScoringPrompt(input: ScoringInput): string {
     .join('\n');
   const levelLine =
     LEVEL_GRADING_GUIDANCE[(input.level ?? 'mid').toLowerCase()] ?? LEVEL_GRADING_GUIDANCE.mid;
+  const brief = input.roleBrief?.trim();
   return [
     levelLine,
+    brief ? `ROLE CONTEXT (judge relevance to this role):\n${brief.slice(0, 4000)}` : '',
     `TRANSCRIPT:\n${transcript || '(none)'}`,
     input.finalCode ? `FINAL CODE:\n${input.finalCode.slice(0, 4000)}` : '',
     runs ? `CODE RUNS:\n${runs}` : '',

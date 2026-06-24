@@ -167,9 +167,14 @@ export default function InterviewPage() {
   const [elapsed, setElapsed] = useState(0);
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
   // Hard time limit: total interview length (seconds, from the server) and whether we ended
-  // because it ran out. The room counts DOWN from this and concludes at 0.
+  // because it ran out. The room counts up and hard-stops at this.
   const [durationSec, setDurationSec] = useState(0);
   const [concludedByTime, setConcludedByTime] = useState(false);
+  // Dev/testing interview → paste allowed. Real interviews block paste (integrity).
+  const [devMode, setDevMode] = useState(false);
+  // Transient "Pasting is disabled" hint, shown briefly when a paste is blocked.
+  const [pasteBlocked, setPasteBlocked] = useState(false);
+  const pasteHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // One guard for /finish across BOTH conclude paths (timer hard-stop and phase→done), so they
   // can't each fire a redundant /finish if they trip at the same moment.
@@ -247,6 +252,7 @@ export default function InterviewPage() {
         // Re-seed the elapsed timer from the server start so it doesn't restart at 0.
         setElapsed(elapsedSince(s.startedAt));
         setDurationSec(s.durationSeconds);
+        setDevMode(s.devMode);
         // Restore the last run's output so the console isn't blank after a reload.
         if (s.lastRunResult) setRunResult(s.lastRunResult);
         // Language: an interviewer-assigned language locks the room and wins over everything;
@@ -299,6 +305,7 @@ export default function InterviewPage() {
       // Anchor the timer to the server start (≈0 on a fresh begin, exact after any reload).
       setElapsed(elapsedSince(res.startedAt));
       setDurationSec(res.durationSeconds);
+      setDevMode(res.devMode);
       // Lock the editor to the interviewer-assigned language, if any.
       if (isLanguage(res.assignedLanguage)) {
         setLockedLanguage(res.assignedLanguage);
@@ -345,6 +352,13 @@ export default function InterviewPage() {
       setAiThinking(false);
     }
   }
+
+  // Flash a brief "Pasting is disabled" hint when a paste/drop is blocked.
+  const handlePasteBlocked = useCallback(() => {
+    setPasteBlocked(true);
+    if (pasteHintTimer.current) clearTimeout(pasteHintTimer.current);
+    pasteHintTimer.current = setTimeout(() => setPasteBlocked(false), 2500);
+  }, []);
 
   const handleRunCode = useCallback(async () => {
     if (!activeToken || running) return;
@@ -422,6 +436,16 @@ export default function InterviewPage() {
 
   return (
     <div className="h-[100svh] bg-background text-foreground flex flex-col overflow-hidden">
+      {/* Transient hint when a paste/drop is blocked (integrity). */}
+      {pasteBlocked && (
+        <div
+          role="status"
+          className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-foreground shadow-lg"
+        >
+          Pasting is disabled for this interview.
+        </div>
+      )}
+
       {/* Minimal top strip */}
       <header className="h-11 border-b border-border bg-card flex items-center justify-between px-4 shrink-0">
         <Wordmark className="scale-90 origin-left" />
@@ -527,6 +551,8 @@ export default function InterviewPage() {
                   language={language}
                   onExecuteAction={handleRunCode}
                   isExecuting={running}
+                  pasteDisabled={!devMode}
+                  onPasteBlockedAction={handlePasteBlocked}
                 />
               </div>
 
@@ -685,6 +711,18 @@ export default function InterviewPage() {
                       e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
                     }}
                     onKeyDown={handleAnswerKeyDown}
+                    onPaste={(e) => {
+                      if (!devMode) {
+                        e.preventDefault();
+                        handlePasteBlocked();
+                      }
+                    }}
+                    onDrop={(e) => {
+                      if (!devMode) {
+                        e.preventDefault();
+                        handlePasteBlocked();
+                      }
+                    }}
                     disabled={aiThinking}
                     placeholder="Type your answer…"
                     rows={1}

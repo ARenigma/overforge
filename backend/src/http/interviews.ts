@@ -3,7 +3,7 @@
 // Candidate routes are validated via a single-use hashed access token.
 
 import { Router, Request, Response } from 'express';
-import { requireInterviewer, validateCandidate } from './middleware';
+import { requireInterviewer, validateCandidate, isDevEmail } from './middleware';
 import { enforceRateLimit } from './rate-limit';
 import { hashToken } from '../interview/token';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
@@ -26,11 +26,13 @@ function sendError(res: Response, err: unknown): void {
 
 router.post('/', requireInterviewer, async (req: Request, res: Response): Promise<void> => {
   try {
-    const { candidateEmail, candidateName, language, level } = req.body as {
+    const { candidateEmail, candidateName, language, level, roleBrief, devMode } = req.body as {
       candidateEmail?: string;
       candidateName?: string;
       language?: string;
       level?: string;
+      roleBrief?: string;
+      devMode?: boolean;
     };
 
     if (!candidateEmail || !candidateEmail.includes('@')) {
@@ -50,6 +52,14 @@ router.post('/', requireInterviewer, async (req: Request, res: Response): Promis
     const interviewLevel =
       typeof level === 'string' && INTERVIEW_LEVELS.includes(level) ? level : undefined;
 
+    // Optional role/JD context (free text), capped. Tailors questions + grading.
+    const trimmedBrief =
+      typeof roleBrief === 'string' && roleBrief.trim() ? roleBrief.trim().slice(0, 4000) : null;
+
+    // Dev mode is server-authoritative: only honored for a DEV_EMAILS account, never the client's
+    // say-so — so a real interview can never enable paste / the short test duration.
+    const isDevInterview = devMode === true && isDevEmail(req.userEmail);
+
     await enforceRateLimit(`create:${req.userId}`, {
       limit: 30,
       windowMs: 3_600_000,
@@ -62,6 +72,8 @@ router.post('/', requireInterviewer, async (req: Request, res: Response): Promis
       candidateName,
       assignedLanguage,
       level: interviewLevel,
+      roleBrief: trimmedBrief,
+      devMode: isDevInterview,
     });
 
     const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';

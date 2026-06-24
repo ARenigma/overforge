@@ -23,6 +23,8 @@ jest.mock('../db/interviews', () => {
         code_snapshot: '',
         candidate_email: input.candidateEmail,
         level: input.level ?? 'mid',
+        role_brief: input.roleBrief ?? null,
+        dev_mode: input.devMode ?? false,
       };
       store.set(id, row);
       return row;
@@ -59,12 +61,13 @@ jest.mock('../db/interviews', () => {
         (r) => (r as { status?: string }).status === 'invited' && (r as { stale?: boolean }).stale
       )
     ),
-    findInProgressPastDuration: jest.fn(async (cutoffIso: string) =>
+    findInProgressPastDuration: jest.fn(async (cutoffIso: string, devMode?: boolean) =>
       [...store.values()].filter(
         (r) =>
           (r as { status?: string }).status === 'in_progress' &&
           typeof (r as { tnc_accepted_at?: string }).tnc_accepted_at === 'string' &&
-          (r as { tnc_accepted_at: string }).tnc_accepted_at < cutoffIso
+          (r as { tnc_accepted_at: string }).tnc_accepted_at < cutoffIso &&
+          (devMode === undefined || (r as { dev_mode?: boolean }).dev_mode === devMode)
       )
     ),
     claimExpire: jest.fn(async (id: string) => {
@@ -224,6 +227,34 @@ describe('orchestrator end-to-end (offline)', () => {
     // Both queued an interviewer notification.
     expect(db.__outbox).toContain(noShowId);
     expect(db.__outbox).toContain(dropId);
+  });
+
+  test('closeStaleInterviews: a dev interview is concluded at its 2-min cap, not the 60-min cap', async () => {
+    // dev_mode interview, begun 5 min ago: past the 2-min dev cap but well inside the 60-min
+    // prod window. The old single (60-min) cutoff would have left it in_progress for ~55 more
+    // minutes; the per-tier dev cutoff must collect it now.
+    const { id: devId } = await orch.createInterview({
+      interviewerId: 'u7',
+      candidateEmail: 'dev@example.com',
+      devMode: true,
+    });
+    const dev = (await db.getById(devId)) as Record<string, unknown>;
+    dev.status = 'in_progress';
+    dev.tnc_accepted_at = new Date(Date.now() - 5 * 60_000).toISOString(); // 5 min ago
+    dev.transcript = [
+      { role: 'interviewer', text: 'Hello' },
+      { role: 'candidate', text: 'Started the dev test then closed the tab.' },
+    ];
+
+    const res = await orch.closeStaleInterviews();
+    expect(res.concluded).toBe(1);
+
+    const dr = (await db.getById(devId)) as Record<string, unknown>;
+    expect(dr.status).toBe('scored');
+    // Engaged + past its (dev) cap → a real, time-limited score, not incomplete.
+    expect((dr.evaluation_score as { timeLimited?: boolean }).timeLimited).toBe(true);
+    expect((dr.evaluation_score as { incomplete?: boolean }).incomplete).toBeFalsy();
+    expect(db.__outbox).toContain(devId);
   });
 
   test('rescore refuses a closed-incomplete (abandoned) interview', async () => {

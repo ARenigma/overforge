@@ -5,6 +5,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { interviewsRouter } from './http/interviews';
+import { requireInterviewer, isDevEmail } from './http/middleware';
 import { SUPPORTED_LANGUAGES } from './execution/docker';
 import { drainOutbox } from './notify/outbox';
 import { makeOutboxStore } from './db/interviews';
@@ -56,6 +57,13 @@ app.get('/health', (_req, res) => {
 
 app.get('/api/languages', (_req, res) => {
   res.json({ languages: SUPPORTED_LANGUAGES });
+});
+
+// ─────────────────────── Current interviewer ───────────────────────
+// Whether the signed-in interviewer is a dev account (gates the dev-mode toggle in the UI).
+
+app.get('/api/me', requireInterviewer, (req, res) => {
+  res.json({ isDev: isDevEmail(req.userEmail) });
 });
 
 // ─────────────────────── Interview routes ───────────────────────

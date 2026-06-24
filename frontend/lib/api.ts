@@ -23,8 +23,10 @@ export interface BeginResponse {
   startedAt: string;
   /** Interviewer-assigned room language (null = candidate chooses → editor is unlocked). */
   assignedLanguage: string | null;
-  /** Total interview length in seconds — the room counts down from this and hard-stops at 0. */
+  /** Total interview length in seconds — the room counts up and hard-stops at this. */
   durationSeconds: number;
+  /** Dev/testing interview — the room allows paste (otherwise paste is blocked). */
+  devMode: boolean;
 }
 
 export interface TranscriptTurn {
@@ -41,8 +43,10 @@ export interface InterviewState {
   startedAt: string | null;
   /** Interviewer-assigned room language (null = candidate chooses → editor is unlocked). */
   assignedLanguage: string | null;
-  /** Total interview length in seconds — the room counts down from this and hard-stops at 0. */
+  /** Total interview length in seconds — the room counts up and hard-stops at this. */
   durationSeconds: number;
+  /** Dev/testing interview — the room allows paste (otherwise paste is blocked). */
+  devMode: boolean;
   /** Last editor language persisted server-side; null if no run yet. */
   language: string | null;
   /** Most recent code-run output, so the output panel is restored on resume. */
@@ -137,12 +141,26 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
  */
 export async function createInterview(
   accessToken: string,
-  body: { candidateEmail: string; candidateName?: string; language?: string; level?: string }
+  body: {
+    candidateEmail: string;
+    candidateName?: string;
+    language?: string;
+    level?: string;
+    roleBrief?: string;
+    devMode?: boolean;
+  }
 ): Promise<CreateInterviewResponse> {
   return apiFetch<CreateInterviewResponse>('/api/interviews', {
     accessToken,
     body,
   });
+}
+
+/**
+ * GET /api/me — whether the signed-in interviewer is a dev account (gates the dev-mode toggle).
+ */
+export async function getMe(accessToken: string): Promise<{ isDev: boolean }> {
+  return apiFetch<{ isDev: boolean }>('/api/me', { method: 'GET', accessToken });
 }
 
 /**

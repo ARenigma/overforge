@@ -157,8 +157,12 @@ function buildUtterancePrompt(req: UtteranceRequest): string {
     .slice(-TRANSCRIPT_WINDOW)
     .map((t) => `${t.role}: ${t.text}`)
     .join('\n');
+  const brief = req.roleBrief?.trim();
   return [
     levelGuidance(req.level),
+    brief
+      ? `Role context (tailor questions to this role; keep the same count):\n${brief.slice(0, 4000)}`
+      : '',
     `Phase: ${req.ctx.phase}. Next action: ${req.effect.kind}.`,
     req.code ? `Candidate code so far:\n${req.code.slice(0, 1500)}` : '',
     recent ? `Recent transcript:\n${recent}` : '',

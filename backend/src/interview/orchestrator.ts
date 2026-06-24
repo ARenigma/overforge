@@ -73,13 +73,23 @@ function tokenExpiry(): Date {
 
 // Wall-clock length of an interview once it starts (separate from the 72h invite TTL). At this
 // limit the room hard-stops + concludes; the sweep concludes an absent candidate. Env-tunable.
+// Dev/testing interviews use a short duration so the time-up flow can be exercised in seconds.
 const INTERVIEW_DURATION_MIN = Number(process.env.INTERVIEW_DURATION_MIN ?? 60);
 const INTERVIEW_DURATION_MS = INTERVIEW_DURATION_MIN * 60_000;
+const DEV_INTERVIEW_DURATION_MIN = Number(process.env.DEV_INTERVIEW_DURATION_MIN ?? 2);
+
+/** This interview's length in ms — short for dev-mode (testing), full otherwise. */
+function interviewDurationMs(interview: Interview): number {
+  const min = interview.dev_mode ? DEV_INTERVIEW_DURATION_MIN : INTERVIEW_DURATION_MIN;
+  return min * 60_000;
+}
 
 /** Whether an interview has run past its duration cap (measured from tnc_accepted_at = begin). */
 function durationExceeded(interview: Interview): boolean {
   if (!interview.tnc_accepted_at) return false;
-  return Date.now() - new Date(interview.tnc_accepted_at).getTime() >= INTERVIEW_DURATION_MS;
+  return (
+    Date.now() - new Date(interview.tnc_accepted_at).getTime() >= interviewDurationMs(interview)
+  );
 }
 
 // ─────────────────────── Helpers ───────────────────────
@@ -144,6 +154,10 @@ export async function createInterview(input: {
   assignedLanguage?: string | null;
   /** Interviewer-chosen seniority level; defaults to 'mid'. */
   level?: string;
+  /** Free-text role/JD context; tailors questions + grading. */
+  roleBrief?: string | null;
+  /** Dev/testing interview (the caller must already have verified the creator is a dev). */
+  devMode?: boolean;
 }): Promise<CreateInterviewResult> {
   const rawToken = generateToken();
   const tokenHash = hashToken(rawToken);
@@ -159,6 +173,8 @@ export async function createInterview(input: {
     fsmState,
     assignedLanguage: input.assignedLanguage ?? null,
     level: input.level,
+    roleBrief: input.roleBrief ?? null,
+    devMode: input.devMode ?? false,
   });
 
   return { id: interview.id, token: rawToken, expiresAt };
@@ -176,8 +192,10 @@ export interface BeginResult {
   /** Interviewer's chosen room language (null = candidate chooses). When set, the room
    *  locks the editor to it. */
   assignedLanguage: string | null;
-  /** Total interview length in seconds — the room counts down from this and hard-stops at 0. */
+  /** Total interview length in seconds — the room counts up and hard-stops at this. */
   durationSeconds: number;
+  /** Dev/testing interview — the room allows paste (otherwise paste is blocked). */
+  devMode: boolean;
 }
 
 export async function begin(
@@ -205,6 +223,7 @@ export async function begin(
     ctx: newCtx,
     transcript: interview.transcript ?? [],
     level: interview.level,
+    roleBrief: interview.role_brief,
   };
   const utterance = await oracle.generateUtterance(req);
 
@@ -234,7 +253,8 @@ export async function begin(
     sessionToken,
     startedAt,
     assignedLanguage: interview.assigned_language,
-    durationSeconds: INTERVIEW_DURATION_MIN * 60,
+    durationSeconds: Math.round(interviewDurationMs(interview) / 1000),
+    devMode: interview.dev_mode,
   };
 }
 
@@ -247,8 +267,10 @@ export interface CandidateState {
   startedAt: string | null;
   /** Interviewer's chosen room language (null = candidate chooses → room is unlocked). */
   assignedLanguage: string | null;
-  /** Total interview length in seconds — the room counts down from this and hard-stops at 0. */
+  /** Total interview length in seconds — the room counts up and hard-stops at this. */
   durationSeconds: number;
+  /** Dev/testing interview — the room allows paste (otherwise paste is blocked). */
+  devMode: boolean;
   /** Last editor language, persisted on /run; null if no run yet (client falls back). */
   language: string | null;
   /** Most recent code-run output so the candidate's output panel survives a reload. */
@@ -266,7 +288,8 @@ export async function getCandidateState(interviewId: string): Promise<CandidateS
     codeSnapshot: interview.code_snapshot ?? '',
     startedAt: interview.tnc_accepted_at,
     assignedLanguage: interview.assigned_language,
-    durationSeconds: INTERVIEW_DURATION_MIN * 60,
+    durationSeconds: Math.round(interviewDurationMs(interview) / 1000),
+    devMode: interview.dev_mode,
     language: interview.code_language ?? null,
     lastRunResult: runs.length > 0 ? runs[runs.length - 1] : null,
   };
@@ -429,6 +452,7 @@ export async function submitAnswer(
     transcript: [...(interview.transcript ?? []), { role: 'candidate', text: answer }],
     code: interview.code_snapshot,
     level: interview.level,
+    roleBrief: interview.role_brief,
   };
   const utterance = await oracle.generateUtterance(req);
 
@@ -512,6 +536,7 @@ export async function finishAndScore(
       codeRuns,
       finalCode: interview.code_snapshot || undefined,
       level: interview.level,
+      roleBrief: interview.role_brief,
     },
     minimaxClient
   );
@@ -583,8 +608,17 @@ export async function closeStaleInterviews(): Promise<{ noShow: number; conclude
     }
   }
 
-  const durationCutoff = new Date(Date.now() - INTERVIEW_DURATION_MS).toISOString();
-  for (const iv of await findInProgressPastDuration(durationCutoff)) {
+  // Conclude in-progress interviews past THEIR duration cap. Prod (60 min) and dev (2 min)
+  // interviews have different caps, and the cutoff is a DB-side timestamp filter, so we run one
+  // query per tier — disjoint on dev_mode, so no dedup is needed. Using the single 60-min cutoff
+  // would leave an abandoned 2-min dev interview in_progress for ~58 extra minutes.
+  const prodCutoff = new Date(Date.now() - INTERVIEW_DURATION_MS).toISOString();
+  const devCutoff = new Date(Date.now() - DEV_INTERVIEW_DURATION_MIN * 60_000).toISOString();
+  const pastDuration = [
+    ...(await findInProgressPastDuration(prodCutoff, false)),
+    ...(await findInProgressPastDuration(devCutoff, true)),
+  ];
+  for (const iv of pastDuration) {
     try {
       // claims, scores (with level), flags timeLimited/incomplete, emails. Returns false if a
       // concurrent /finish or sweep already claimed it — don't count that as our conclusion.

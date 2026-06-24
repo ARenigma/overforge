@@ -11,8 +11,20 @@ declare global {
   namespace Express {
     interface Request {
       userId?: string;
+      userEmail?: string;
     }
   }
+}
+
+/** Dev/testing accounts — comma-separated emails in DEV_EMAILS. Empty by default (no devs).
+ *  Only these may create dev-mode interviews (paste allowed + short duration). */
+export function isDevEmail(email: string | undefined | null): boolean {
+  if (!email) return false;
+  const devs = (process.env.DEV_EMAILS ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  return devs.includes(email.toLowerCase());
 }
 
 /**
@@ -22,7 +34,7 @@ declare global {
 export async function requireInterviewer(
   req: Request,
   res: Response,
-  next: NextFunction,
+  next: NextFunction
 ): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
@@ -40,6 +52,7 @@ export async function requireInterviewer(
   }
 
   req.userId = data.user.id;
+  req.userEmail = data.user.email;
   next();
 }
 
@@ -47,10 +60,7 @@ export async function requireInterviewer(
  * Validates a candidate's single-use access token against the stored hash.
  * Throws a structured error that the route handler converts to a 403 response.
  */
-export async function validateCandidate(
-  interviewId: string,
-  rawToken: string,
-): Promise<void> {
+export async function validateCandidate(interviewId: string, rawToken: string): Promise<void> {
   if (!rawToken) {
     throw Object.assign(new Error('Token required'), { status: 403 });
   }
