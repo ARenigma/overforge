@@ -26,7 +26,7 @@ const LANGUAGES = [
 
 export function LanguageMatrix() {
   return (
-    <Section id="languages">
+    <Section id="languages" tone="recessed">
       <SectionHeading
         lead="Interview in any language."
         tail="Real code, in the candidate's stack."

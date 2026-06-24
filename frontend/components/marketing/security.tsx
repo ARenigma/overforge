@@ -60,7 +60,7 @@ const features: { icon: LucideIcon; title: string; description: string }[] = [
 
 export function Security() {
   return (
-    <Section id="security">
+    <Section id="security" tone="recessed">
       <SectionHeading
         lead="Secure by design."
         tail="Enterprise-ready from day one."

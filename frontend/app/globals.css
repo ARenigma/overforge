@@ -44,6 +44,11 @@
     --input: 220 13% 87%;
     /* Deep surface — the bottom/footer band, intentionally darker than the page */
     --surface-deep: 220 16% 94%;
+    /* Section band ramp (multi-band charcoal layering): recessed < base < raised.
+       base = --background; ~2% steps so adjacent bands read as depth, not stripes. */
+    --surface-75: 220 14% 95.5%;
+    --surface-100: 210 20% 98%;
+    --surface-200: 0 0% 100%;
     /* Text hierarchy below muted-foreground (46%): subtle = de-emphasized labels/hints;
        ghost = decorative dots, gutter, placeholder icons. Replaces /30–/70 opacity hacks. */
     --foreground-subtle: 240 4% 55%;
@@ -102,6 +107,9 @@
     --input: 0 0% 20%;
     /* Deep surface — the bottom/footer band, darker than the 6% page */
     --surface-deep: 0 0% 3.5%;
+    --surface-75: 0 0% 4.5%;
+    --surface-100: 0 0% 6%;
+    --surface-200: 0 0% 8%;
     --foreground-subtle: 0 0% 48%;
     --foreground-ghost: 0 0% 32%;
     --overlay-scrim: 0 0% 0% / 0.8;

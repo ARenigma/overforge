@@ -4,19 +4,32 @@ import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { Reveal } from '@/components/marketing/reveal';
 
-/** One spacing + max-width rhythm for every marketing section (coherence). */
+/** Section background band — base sits on the page; recessed/raised create subtle charcoal
+ *  depth between adjacent sections (multi-band layering). base = no override. */
+const SECTION_TONES = {
+  base: '',
+  raised: 'bg-surface-200',
+  recessed: 'bg-surface-75',
+} as const;
+
+/** One spacing + max-width rhythm for every marketing section (coherence). The tonal band is
+ *  full-bleed; the content stays capped at max-w-5xl. */
 export function Section({
   id,
   className,
+  tone = 'base',
   children,
 }: {
   id?: string;
   className?: string;
+  tone?: keyof typeof SECTION_TONES;
   children: ReactNode;
 }) {
   return (
-    <section id={id} className={cn('mx-auto w-full max-w-5xl px-6 py-24 sm:py-28', className)}>
-      {children}
+    <section id={id} className={cn('w-full', SECTION_TONES[tone])}>
+      <div className={cn('mx-auto w-full max-w-5xl px-6 py-24 sm:py-28', className)}>
+        {children}
+      </div>
     </section>
   );
 }
