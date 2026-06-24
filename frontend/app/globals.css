@@ -19,10 +19,10 @@
     --font-mono:
       'Source Code Pro', var(--font-geist-mono), ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-    /* ── Brand accent — ember (THE one place to change it, light mode) ── */
-    /* Burnt ember: deeper in light mode so white foreground clears WCAG AA on fills. */
-    --primary: 16 80% 43%;
-    --primary-foreground: 0 0% 100%;
+    /* ── Brand accent — ember/lava (THE one place to change it). Same value in BOTH modes so the
+       brand reads as ONE color everywhere; dark foreground sits on the bright fill for contrast. ── */
+    --primary: 18 92% 61%;
+    --primary-foreground: 24 40% 10%;
 
     /* Light mode surfaces + text — off-white page so white cards/borders read */
     --background: 210 20% 98%;
@@ -70,8 +70,8 @@
   }
 
   .dark {
-    /* ── Brand accent — ember (THE one place to change it, dark mode) ── */
-    --primary: 16 87% 59%;
+    /* ── Brand accent — ember/lava (same value as light; see :root note above) ── */
+    --primary: 18 92% 61%;
     --primary-foreground: 24 40% 10%;
 
     /* Dark mode surfaces + text — neutral charcoal (Supabase pattern) */
