@@ -23,6 +23,7 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import { createInterview, getMe } from '@/lib/api';
 import { Plus, Copy, Check, ExternalLink, Mail } from 'lucide-react';
+import { toast } from 'sonner';
 
 // Coding languages the interviewer can assign. 'any' = let the candidate choose in-room
 // (today's behavior); a specific value locks the room to that language.
@@ -139,6 +140,7 @@ export function NewInterviewDialog() {
       await navigator.clipboard.writeText(link);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      toast.success('Invite link copied');
     } catch {
       // Clipboard API unavailable — silently ignore
     }

@@ -136,6 +136,14 @@
   }
 }
 
+/* ── Sonner toast accent overrides (token-driven, no hardcoded colours) ── */
+[data-sonner-toast][data-type='success'] [data-icon] {
+  color: hsl(var(--success));
+}
+[data-sonner-toast][data-type='error'] [data-icon] {
+  color: hsl(var(--destructive));
+}
+
 @keyframes marquee {
   from {
     transform: translateX(0);

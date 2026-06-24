@@ -14,6 +14,7 @@ import { ConfirmDialog } from '@/components/ds/confirm-dialog';
 import { TextConfirmDialog } from '@/components/ds/text-confirm-dialog';
 import { createClient } from '@/lib/supabase/client';
 import { cancelInterview, deleteInterview, rescoreInterview } from '@/lib/api';
+import { toast } from 'sonner';
 
 // States from which a soft-cancel is meaningless (already terminal).
 const TERMINAL = new Set(['scored', 'cancelled', 'expired', 'abandoned']);
@@ -41,18 +42,33 @@ export function InterviewRowActions({ id, status }: { id: string; status: string
   }
 
   async function doCancel() {
-    await cancelInterview(await accessToken(), id);
-    router.refresh();
+    try {
+      await cancelInterview(await accessToken(), id);
+      router.refresh();
+      toast.success('Interview cancelled');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to cancel interview');
+    }
   }
 
   async function doDelete() {
-    await deleteInterview(await accessToken(), id);
-    router.refresh();
+    try {
+      await deleteInterview(await accessToken(), id);
+      router.refresh();
+      toast.success('Interview deleted');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete interview');
+    }
   }
 
   async function doRescore() {
-    await rescoreInterview(await accessToken(), id);
-    router.refresh();
+    try {
+      await rescoreInterview(await accessToken(), id);
+      router.refresh();
+      toast.success('Re-scoring started — scorecard will update shortly');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to start re-scoring');
+    }
   }
 
   return (

@@ -5,6 +5,7 @@ import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/ui/toaster';
+import { Toaster as SonnerToaster } from 'sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { CommandMenuProvider } from '@/components/providers/command-menu-provider';
 
@@ -44,6 +45,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         >
           <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
           <Toaster />
+          <SonnerToaster
+            position="bottom-right"
+            toastOptions={{
+              style: {
+                background: 'hsl(var(--card))',
+                border: '1px solid hsl(var(--border))',
+                color: 'hsl(var(--foreground))',
+                borderRadius: '0',
+              },
+              classNames: {
+                success: 'sonner-success',
+                error: 'sonner-error',
+              },
+            }}
+          />
           <CommandMenuProvider />
         </ThemeProvider>
       </body>
