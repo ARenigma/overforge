@@ -110,6 +110,7 @@ function Card({
   lead,
   tail,
   visual,
+  hoverDetail,
   className,
 }: {
   icon: LucideIcon;
@@ -117,12 +118,14 @@ function Card({
   lead: string;
   tail: string;
   visual: ReactNode;
+  /** Optional short label that slides up from below the card on hover — CSS only, no JS. */
+  hoverDetail?: string;
   className?: string;
 }) {
   return (
     <div
       className={cn(
-        'group flex flex-col rounded-xl border border-border bg-card p-6 transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30',
+        'group relative flex flex-col overflow-hidden rounded-xl border border-border bg-card p-6 transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30',
         className
       )}
     >
@@ -133,6 +136,24 @@ function Card({
         <span className="text-muted-foreground">{tail}</span>
       </p>
       <div className="mt-4">{visual}</div>
+
+      {/* Hover-reveal-from-below: parked at translateY(100%), slides to translateY(0) on
+          group-hover. Pure CSS transition — no JS. backface-visibility + translateZ(0)
+          (via transform-gpu) guard against subpixel flicker on webkit. */}
+      {hoverDetail && (
+        <div
+          className={cn(
+            'absolute inset-x-0 bottom-0 transform-gpu',
+            'translate-y-full group-hover:translate-y-0',
+            'bg-primary/10 px-4 py-2.5',
+            'transition-transform duration-300',
+            '[backface-visibility:hidden]'
+          )}
+          style={{ transitionTimingFunction: 'cubic-bezier(.25,.25,0,1)' }}
+        >
+          <p className="font-mono text-[11px] text-primary">{hoverDetail}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -160,6 +181,7 @@ export function Bento() {
             lead="Fixed rubrics, not vibes."
             tail="The same answer earns the same score — emailed the moment it's ready."
             visual={<Scorecard />}
+            hoverDetail="Scores land in your inbox within minutes of session end."
           />
         </Reveal>
         <Reveal className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
