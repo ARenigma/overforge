@@ -12,7 +12,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { EnhancedCodeMirrorEditor } from '@/components/enhanced-code-mirror-editor';
+import dynamic from 'next/dynamic';
+// Code-split the heavy CodeMirror editor out of the room's initial bundle: the chat shell
+// paints immediately while the editor chunk streams in (it's client-only anyway).
+const EnhancedCodeMirrorEditor = dynamic(
+  () => import('@/components/enhanced-code-mirror-editor').then((m) => m.EnhancedCodeMirrorEditor),
+  { ssr: false, loading: () => <div className="h-full w-full bg-background" /> }
+);
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   beginInterview,

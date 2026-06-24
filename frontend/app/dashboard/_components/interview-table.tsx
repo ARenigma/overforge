@@ -164,6 +164,7 @@ export function InterviewTable({
                 <tr
                   key={interview.id}
                   onClick={() => router.push(`/dashboard/${interview.id}`)}
+                  onMouseEnter={() => router.prefetch(`/dashboard/${interview.id}`)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') router.push(`/dashboard/${interview.id}`);
                   }}
