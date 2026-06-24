@@ -312,7 +312,7 @@ export function NewInterviewDialog() {
                 onChange={(e) => setRoleBrief(e.target.value)}
                 rows={3}
                 placeholder="e.g. Senior backend engineer — Go, distributed systems, on-call. Probe concurrency and API design."
-                className="block w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="block w-full resize-none rounded-input border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
                 Tailors the questions and grading to this role. Question count is unchanged.

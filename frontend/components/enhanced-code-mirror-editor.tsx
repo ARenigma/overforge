@@ -11,6 +11,7 @@ import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { keymap } from '@codemirror/view';
 import { indentUnit, HighlightStyle, syntaxHighlighting } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
+import { accentColorCss } from '@/lib/brand';
 
 /**
  * Bespoke dark syntax theme — charcoal background, cyber-green keywords.
@@ -156,7 +157,7 @@ export function EnhancedCodeMirrorEditor({
           padding: '12px',
           minHeight: '100%',
           lineHeight: '1.6',
-          caretColor: 'hsl(153 61% 53%)',
+          caretColor: accentColorCss(),
         },
         '.cm-focused': {
           outline: 'none',
@@ -188,10 +189,10 @@ export function EnhancedCodeMirrorEditor({
           color: 'hsl(0 0% 65%)',
         },
         '.cm-selectionMatch': {
-          backgroundColor: 'hsl(153 61% 53% / 0.18)',
+          backgroundColor: accentColorCss(0.18),
         },
         '.cm-cursor': {
-          borderLeftColor: 'hsl(153 61% 53%)',
+          borderLeftColor: accentColorCss(),
         },
         '.cm-searchMatch': {
           backgroundColor: 'hsl(36 96% 56% / 0.3)',

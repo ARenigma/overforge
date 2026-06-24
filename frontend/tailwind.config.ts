@@ -73,6 +73,7 @@ const config: Config = {
         lg: 'var(--radius)',
         md: 'var(--radius)',
         sm: 'var(--radius)',
+        input: 'var(--radius-input)',
         xl: '0',
         '2xl': '0',
         '3xl': '0',

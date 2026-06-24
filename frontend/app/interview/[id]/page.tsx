@@ -732,9 +732,7 @@ export default function InterviewPage() {
                     placeholder="Type your answer…"
                     rows={1}
                     spellCheck={false}
-                    /* rounded-[6px] (not rounded-md): the app's --radius is 0, so rounded-md
-                       collapses to sharp; 6px is hard-coded to mirror Supabase's composer. */
-                    className="box-border block max-h-64 w-full resize-none rounded-[6px] border border-border bg-foreground/[0.026] px-3 py-2 pb-9 pr-10 text-sm font-normal text-foreground transition-colors placeholder:text-muted-foreground/60 focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border disabled:opacity-50"
+                    className="box-border block max-h-64 w-full resize-none rounded-input border border-border bg-foreground/[0.026] px-3 py-2 pb-9 pr-10 text-sm font-normal text-foreground transition-colors placeholder:text-muted-foreground/60 focus:outline-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border disabled:opacity-50"
                   />
                   {/* Footer overlay — model selector excluded; send button right-aligned. pointer-events
                       pass through the empty area so clicks still land in the textarea. */}
