@@ -8,7 +8,7 @@ import { enforceRateLimit } from './rate-limit';
 import { hashToken } from '../interview/token';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
-import { synthesize, isCartesiaConfigured } from '../voice/cartesia';
+import { synthesize, isCartesiaConfigured, splitSentences } from '../voice/cartesia';
 
 const router = Router();
 
@@ -240,11 +240,15 @@ router.post('/:id/run', async (req: Request, res: Response): Promise<void> => {
 router.post('/:id/speak', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { token, source } = req.body as { token?: string; source?: 'turn' | 'run' };
+    const { token, source, chunk } = req.body as {
+      token?: string;
+      source?: 'turn' | 'run';
+      chunk?: number;
+    };
 
     await validateCandidate(id, token ?? '');
     await enforceRateLimit(`speak:${hashToken(token ?? '')}`, {
-      limit: 80,
+      limit: 160, // chunked mode makes several small requests per turn
       windowMs: 600_000,
       message: 'Too many speech requests; please slow down.',
     });
@@ -260,7 +264,21 @@ router.post('/:id/speak', async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const audio = await synthesize(text);
+    // Chunked mode: synthesize ONE sentence so the room can start playing in ~1–2s. The room
+    // reads the total from X-Chunk-Count (CORS-exposed) and prefetches the rest in parallel.
+    let toSpeak = text;
+    if (typeof chunk === 'number' && Number.isInteger(chunk) && chunk >= 0) {
+      const parts = splitSentences(text);
+      if (chunk >= parts.length) {
+        res.status(204).end();
+        return;
+      }
+      res.setHeader('X-Chunk-Count', String(parts.length));
+      res.setHeader('Access-Control-Expose-Headers', 'X-Chunk-Count');
+      toSpeak = parts[chunk];
+    }
+
+    const audio = await synthesize(toSpeak);
     res.setHeader('Content-Type', 'audio/wav');
     res.setHeader('Cache-Control', 'no-store');
     res.send(audio);

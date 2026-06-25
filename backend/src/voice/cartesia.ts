@@ -6,6 +6,30 @@
 const DEFAULT_MODEL = 'sonic-2';
 const DEFAULT_VERSION = '2024-11-13';
 const MAX_CHARS = 2000; // an interviewer turn is 1–3 sentences; cap defensively
+const SAMPLE_RATE = 22050; // 22k is ample for speech and ~halves bytes vs 44.1k (snappier transfer)
+const MAX_CHUNKS = 8;
+
+/** Split an interviewer turn into sentence-ish chunks so the room can synthesize + start playing
+ *  the FIRST one in ~1–2s instead of waiting ~6–10s for the whole clip. Tiny fragments merge into
+ *  the previous chunk; overflow past MAX_CHUNKS folds into the last so we never fan out unboundedly. */
+export function splitSentences(text: string, maxChunks = MAX_CHUNKS): string[] {
+  const pieces = text
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const chunks: string[] = [];
+  for (const p of pieces) {
+    const prev = chunks[chunks.length - 1];
+    // Merge very short fragments (e.g. "Hi.") into the previous chunk to avoid choppy playback.
+    if (prev && (p.length < 16 || prev.length < 16)) chunks[chunks.length - 1] = `${prev} ${p}`;
+    else chunks.push(p);
+  }
+  if (chunks.length <= maxChunks) return chunks.length ? chunks : [text.trim()];
+  const head = chunks.slice(0, maxChunks - 1);
+  head.push(chunks.slice(maxChunks - 1).join(' '));
+  return head;
+}
 
 export interface CartesiaConfig {
   apiKey: string;
@@ -48,7 +72,7 @@ export async function synthesize(
       model_id: cfg.model,
       transcript: text.slice(0, MAX_CHARS),
       voice: { mode: 'id', id: cfg.voiceId },
-      output_format: { container: 'wav', encoding: 'pcm_s16le', sample_rate: 44100 },
+      output_format: { container: 'wav', encoding: 'pcm_s16le', sample_rate: SAMPLE_RATE },
     }),
   });
   if (!res.ok) {

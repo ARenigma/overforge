@@ -267,23 +267,27 @@ export async function finishInterview(id: string, token: string): Promise<{ ok: 
 
 /**
  * POST /api/interviews/:id/speak (P1 — "the interviewer speaks")
- * Returns WAV audio of the latest interviewer utterance (`source:'turn'`) or the latest
- * run-triggered hint (`source:'run'`). Returns null when voice is off (503) or there's nothing
- * to say (404) — the room stays silent and never surfaces an error for it.
+ * Returns WAV audio for one sentence-chunk of the latest interviewer utterance (`source:'turn'`)
+ * or the latest run-triggered hint (`source:'run'`), plus the total chunk count (X-Chunk-Count) so
+ * the room can prefetch the rest in parallel and start playing fast. Returns null when voice is
+ * off (503), there's nothing to say (404), or the chunk is out of range (204) — the room stays
+ * silent and never surfaces an error for it.
  */
-export async function speakLatest(
+export async function speakChunk(
   id: string,
   token: string,
-  source: 'turn' | 'run' = 'turn'
-): Promise<Blob | null> {
+  source: 'turn' | 'run',
+  chunk: number
+): Promise<{ blob: Blob; count: number } | null> {
   try {
     const res = await fetch(`${BASE_URL}/api/interviews/${id}/speak`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, source }),
+      body: JSON.stringify({ token, source, chunk }),
     });
-    if (!res.ok) return null;
-    return await res.blob();
+    if (!res.ok || res.status === 204) return null;
+    const count = Number(res.headers.get('X-Chunk-Count') || '1') || 1;
+    return { blob: await res.blob(), count };
   } catch {
     return null; // voice is best-effort; never break the interview
   }

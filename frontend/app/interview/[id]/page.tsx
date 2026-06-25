@@ -24,7 +24,7 @@ import {
   beginInterview,
   answerInterview,
   runCode as apiRunCode,
-  speakLatest,
+  speakChunk,
   finishInterview,
   getInterviewState,
   type InterviewPhase,
@@ -196,6 +196,7 @@ export default function InterviewPage() {
   // Voice (P1): the interviewer speaks its turns. Muteable; preference persists per interview.
   const [muted, setMuted] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const speakSeqRef = useRef(0); // bumped to cancel in-flight playback on a new turn / mute
 
   // Answer textarea
   const [answer, setAnswer] = useState('');
@@ -429,17 +430,33 @@ export default function InterviewPage() {
     async (source: 'turn' | 'run', tokenOverride?: string) => {
       const tok = tokenOverride ?? activeToken;
       if (!tok || muted) return;
-      const blob = await speakLatest(id, tok, source);
-      if (!blob) return;
-      try {
-        audioRef.current?.pause();
-        const url = URL.createObjectURL(blob);
-        const a = new Audio(url);
-        audioRef.current = a;
-        a.addEventListener('ended', () => URL.revokeObjectURL(url));
-        await a.play().catch(() => {}); // autoplay may reject; the room stays usable
-      } catch {
-        /* voice is best-effort */
+      const seq = ++speakSeqRef.current; // a newer turn or mute supersedes this playback
+      audioRef.current?.pause();
+
+      const first = await speakChunk(id, tok, source, 0);
+      if (!first || seq !== speakSeqRef.current || muted) return;
+
+      // Prefetch the remaining sentences in parallel so playback is gapless after the first one,
+      // while the first sentence already starts playing in ~1–2s.
+      const pending: Array<ReturnType<typeof speakChunk>> = [Promise.resolve(first)];
+      for (let i = 1; i < first.count; i++) pending.push(speakChunk(id, tok, source, i));
+
+      for (let i = 0; i < first.count; i++) {
+        const r = await pending[i];
+        if (!r || seq !== speakSeqRef.current || muted) return;
+        await new Promise<void>((resolve) => {
+          const url = URL.createObjectURL(r.blob);
+          const a = new Audio(url);
+          audioRef.current = a;
+          const done = () => {
+            URL.revokeObjectURL(url);
+            resolve();
+          };
+          a.addEventListener('ended', done);
+          a.addEventListener('error', done);
+          a.play().catch(done); // autoplay rejection → skip, room stays usable
+        });
+        if (seq !== speakSeqRef.current || muted) return; // cancelled mid-clip
       }
     },
     [activeToken, id, muted]
@@ -449,7 +466,10 @@ export default function InterviewPage() {
     setMuted((prev) => {
       const next = !prev;
       localStorage.setItem(muteKey, next ? '1' : '0');
-      if (next) audioRef.current?.pause(); // muting stops any in-flight speech
+      if (next) {
+        speakSeqRef.current++; // cancel any in-flight chunk playback
+        audioRef.current?.pause();
+      }
       return next;
     });
   }, [muteKey]);
