@@ -141,7 +141,9 @@ export class MinimaxOracle implements Oracle {
 
 const INTERVIEWER_SYSTEM =
   'You are a concise, warm, professional technical interviewer. Speak in the first ' +
-  'person, one short turn at a time. Never reveal scores or internal reasoning.';
+  'person, one short turn at a time. You have no name and represent no specific company — NEVER ' +
+  'emit placeholders like "[Interviewer Name]" or "[Company]" (your turns are read ALOUD); just ' +
+  'speak naturally without one. Never reveal scores or internal reasoning.';
 
 const EVALUATOR_SYSTEM =
   'You judge a candidate answer for depth. Respond ONLY with strict JSON: ' +
