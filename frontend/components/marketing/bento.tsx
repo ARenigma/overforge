@@ -125,10 +125,26 @@ function Card({
   return (
     <div
       className={cn(
-        'group relative flex flex-col overflow-hidden rounded-xl border border-border bg-card p-6 transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30',
+        'group relative isolate flex flex-col overflow-hidden rounded-xl border border-border bg-card p-6 transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30',
         className
       )}
     >
+      {/* Ember glow — lava light blooming from above on hover (CSS opacity fade). */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+        style={{
+          background:
+            'radial-gradient(130% 90% at 50% -20%, hsl(var(--primary) / 0.14), transparent 65%)',
+        }}
+      />
+      {/* Ember sheen — a single diagonal light sweep on hover (motion-safe). */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      >
+        <div className="absolute inset-y-0 -left-1/4 w-1/2 bg-gradient-to-r from-transparent via-primary/15 to-transparent opacity-0 motion-safe:group-hover:animate-ember-sheen" />
+      </div>
       <Icon className="h-5 w-5 text-primary" aria-hidden="true" />
       <h3 className="mt-3 text-sm font-medium text-foreground">{title}</h3>
       <p className="mt-1.5 text-sm leading-relaxed">
