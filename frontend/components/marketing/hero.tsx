@@ -14,13 +14,15 @@ export function Hero() {
 
       <Reveal className="relative z-10 mx-auto max-w-3xl">
         <h1 className="text-balance text-5xl font-semibold leading-[1.05] tracking-tight sm:text-7xl">
-          <span className="text-foreground">Technical interviews,</span>
+          <span className="text-foreground">An AI interviewer</span>
           <br />
-          <span className="text-primary">run by AI.</span>
+          <span className="text-primary">that thinks on its feet.</span>
         </h1>
 
-        <p className="mx-auto mt-6 max-w-lg text-pretty text-base text-muted-foreground sm:text-lg">
-          A spoken oral round, then live coding in a sandboxed IDE — scored deterministically.
+        <p className="mx-auto mt-6 max-w-xl text-pretty text-base text-muted-foreground sm:text-lg">
+          Overforge runs the first-round technical screen end to end — a spoken interview that
+          adapts its follow-ups, hints when a candidate is genuinely stuck, and scores everyone
+          against the same rubric. No scheduling. No panel.
         </p>
 
         <div className="mt-9 flex items-center justify-center gap-3">

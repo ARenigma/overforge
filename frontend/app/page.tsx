@@ -1,5 +1,6 @@
 import { PillNav } from '@/components/marketing/pill-nav';
 import { Hero } from '@/components/marketing/hero';
+import { UspPillars } from '@/components/marketing/usp-pillars';
 import { HowItWorks } from '@/components/marketing/how-it-works';
 import { LanguageMatrix } from '@/components/marketing/language-matrix';
 import { StartInSeconds } from '@/components/marketing/start-in-seconds';
@@ -15,6 +16,7 @@ export default function LandingPage() {
     <main className="relative">
       <PillNav />
       <Hero />
+      <UspPillars />
       <HowItWorks />
       <LanguageMatrix />
       <StartInSeconds />
