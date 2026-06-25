@@ -130,10 +130,11 @@ export class MinimaxOracle implements Oracle {
       { role: 'system', content: INTERVENER_SYSTEM },
       { role: 'user', content: buildInterventionPrompt(req) },
     ];
-    // Slightly cooler than utterance generation (a steer, not a fresh question) and short-capped.
-    const text = (
-      await this.client.complete(messages, { temperature: 0.5, maxTokens: 160 })
-    ).trim();
+    // Slightly cooler than utterance generation (a steer, not a fresh question). NO low token cap:
+    // MiniMax M2 is a reasoning model, so a 160-token cap let the hidden reasoning eat the budget
+    // and truncated the visible hint mid-sentence (seen in prod E2E). Use the client's default
+    // headroom (512) like generateUtterance; the prompt already holds it to 1–2 sentences.
+    const text = (await this.client.complete(messages, { temperature: 0.5 })).trim();
     return { text, expects: 'code' };
   }
 }
