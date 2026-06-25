@@ -8,6 +8,7 @@ import { enforceRateLimit } from './rate-limit';
 import { hashToken } from '../interview/token';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
+import { synthesize, isCartesiaConfigured } from '../voice/cartesia';
 
 const router = Router();
 
@@ -225,6 +226,44 @@ router.post('/:id/run', async (req: Request, res: Response): Promise<void> => {
 
     const result = await orchestrator.recordRun(id, { language, source, stdin });
     res.json(result);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ─────────────────────── POST /api/interviews/:id/speak ───────────────────────
+// Candidate TTS for P1 ("the interviewer speaks"). Server-authoritative: voices the LATEST
+// interviewer transcript turn (never client-supplied text), so it can't be used as a free TTS
+// oracle. Returns WAV audio; the room plays it. Voice OFF (503) when Cartesia isn't configured —
+// the room silently stays text-only.
+
+router.post('/:id/speak', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { token, source } = req.body as { token?: string; source?: 'turn' | 'run' };
+
+    await validateCandidate(id, token ?? '');
+    await enforceRateLimit(`speak:${hashToken(token ?? '')}`, {
+      limit: 80,
+      windowMs: 600_000,
+      message: 'Too many speech requests; please slow down.',
+    });
+
+    if (!isCartesiaConfigured()) {
+      res.status(503).json({ error: 'Voice is not enabled for this interview.' });
+      return;
+    }
+
+    const text = await orchestrator.latestSpeakable(id, source === 'run' ? 'run' : 'turn');
+    if (!text) {
+      res.status(404).json({ error: 'Nothing to speak yet.' });
+      return;
+    }
+
+    const audio = await synthesize(text);
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(audio);
   } catch (err) {
     sendError(res, err);
   }

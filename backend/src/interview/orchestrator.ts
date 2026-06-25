@@ -300,6 +300,26 @@ export async function getCandidateState(interviewId: string): Promise<CandidateS
   };
 }
 
+/** Server-authoritative text for TTS (P1 "interviewer speaks"). Reading server-side state — not
+ *  client-supplied text — keeps /speak from being a free TTS oracle. `turn` = the latest
+ *  interviewer transcript turn (greeting / question / follow-up); `run` = the latest code-run
+ *  hint (run-triggered interventions ride on code_runs, not the transcript). Null when nothing
+ *  is voiceable yet. */
+export async function latestSpeakable(
+  interviewId: string,
+  source: 'turn' | 'run' = 'turn'
+): Promise<string | null> {
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  if (source === 'run') {
+    const last = [...(interview.code_runs ?? [])]
+      .reverse()
+      .find((r) => r.intervention?.text?.trim());
+    return last?.intervention?.text ?? null;
+  }
+  const last = [...(interview.transcript ?? [])].reverse().find((t) => t.role === 'interviewer');
+  return last?.text?.trim() ? last.text : null;
+}
+
 function assertOwner(interview: Interview, interviewerId: string): void {
   if (interview.interviewer_id !== interviewerId) {
     throw Object.assign(new Error('You are not authorized for this interview'), { status: 403 });

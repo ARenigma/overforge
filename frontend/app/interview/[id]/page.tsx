@@ -24,6 +24,7 @@ import {
   beginInterview,
   answerInterview,
   runCode as apiRunCode,
+  speakLatest,
   finishInterview,
   getInterviewState,
   type InterviewPhase,
@@ -38,6 +39,8 @@ import {
   Lock,
   Play,
   Sparkles,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
@@ -163,6 +166,7 @@ export default function InterviewPage() {
   const urlToken = searchParams.get('t');
   const sessionKey = `of_session_${id}`;
   const langKey = `of_lang_${id}`;
+  const muteKey = `of_mute_${id}`;
 
   const [stage, setStage] = useState<Stage>('loading_token');
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -189,6 +193,9 @@ export default function InterviewPage() {
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<RunResult | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  // Voice (P1): the interviewer speaks its turns. Muteable; preference persists per interview.
+  const [muted, setMuted] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Answer textarea
   const [answer, setAnswer] = useState('');
@@ -347,6 +354,7 @@ export default function InterviewPage() {
       setActiveToken(res.sessionToken);
       setPhase(res.phase);
       setMessages([{ role: 'ai', text: res.utterance.text }]);
+      void speak('turn', res.sessionToken); // the interviewer greets out loud (P1)
       // Anchor the timer to the server start (≈0 on a fresh begin, exact after any reload).
       setElapsed(elapsedSince(res.startedAt));
       setDurationSec(res.durationSeconds);
@@ -382,6 +390,7 @@ export default function InterviewPage() {
       pendingAnswerRef.current = null;
       setPhase(res.phase);
       setMessages((prev) => [...prev, { role: 'ai', text: res.utterance.text }]);
+      void speak('turn'); // speak the interviewer's reply (P1)
       if (res.phase === 'done') {
         setStage('done');
       }
@@ -405,6 +414,46 @@ export default function InterviewPage() {
     pasteHintTimer.current = setTimeout(() => setPasteBlocked(false), 2500);
   }, []);
 
+  // Load the mute preference once.
+  useEffect(() => {
+    if (typeof window !== 'undefined') setMuted(localStorage.getItem(muteKey) === '1');
+  }, [muteKey]);
+
+  // Stop any audio on unmount.
+  useEffect(() => () => audioRef.current?.pause(), []);
+
+  // Speak the latest interviewer utterance (P1). Best-effort — never throws into the flow. A token
+  // override is needed right after begin() (the state token hasn't flushed yet). source='run'
+  // voices a run-triggered hint (which lives on the code run, not the transcript).
+  const speak = useCallback(
+    async (source: 'turn' | 'run', tokenOverride?: string) => {
+      const tok = tokenOverride ?? activeToken;
+      if (!tok || muted) return;
+      const blob = await speakLatest(id, tok, source);
+      if (!blob) return;
+      try {
+        audioRef.current?.pause();
+        const url = URL.createObjectURL(blob);
+        const a = new Audio(url);
+        audioRef.current = a;
+        a.addEventListener('ended', () => URL.revokeObjectURL(url));
+        await a.play().catch(() => {}); // autoplay may reject; the room stays usable
+      } catch {
+        /* voice is best-effort */
+      }
+    },
+    [activeToken, id, muted]
+  );
+
+  const toggleMute = useCallback(() => {
+    setMuted((prev) => {
+      const next = !prev;
+      localStorage.setItem(muteKey, next ? '1' : '0');
+      if (next) audioRef.current?.pause(); // muting stops any in-flight speech
+      return next;
+    });
+  }, [muteKey]);
+
   const handleRunCode = useCallback(async () => {
     if (!activeToken || running) return;
     setRunning(true);
@@ -414,19 +463,20 @@ export default function InterviewPage() {
       const result = await apiRunCode(id, activeToken, language, code);
       setRunResult(result);
       // The autonomous interviewer may step in on a struggling run — surface it in the chat
-      // immediately (it's also persisted to the transcript, so it survives a reload).
+      // immediately. It rides on the code run (not the transcript); resume() restores the latest.
       if (result.intervention?.text) {
         setMessages((prev) => [
           ...prev,
           { role: 'ai', text: result.intervention!.text, assist: result.intervention!.kind },
         ]);
+        void speak('run'); // speak the run-triggered hint (P1)
       }
     } catch (err: unknown) {
       setRunError(err instanceof Error ? err.message : 'Code execution failed.');
     } finally {
       setRunning(false);
     }
-  }, [id, activeToken, language, code, running]);
+  }, [id, activeToken, language, code, running, speak]);
 
   function handleAnswerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     // Mirror Supabase's composer: Enter sends, Shift+Enter inserts a newline. Guard IME
@@ -707,6 +757,19 @@ export default function InterviewPage() {
                   </svg>
                 </span>
                 <span className="text-xs font-semibold text-foreground">Interviewer</span>
+                <button
+                  type="button"
+                  onClick={toggleMute}
+                  aria-label={muted ? 'Unmute interviewer voice' : 'Mute interviewer voice'}
+                  aria-pressed={muted}
+                  className="ml-auto rounded-input p-1 text-foreground-subtle transition-colors hover:text-foreground"
+                >
+                  {muted ? (
+                    <VolumeX className="h-4 w-4" />
+                  ) : (
+                    <Volume2 className="h-4 w-4 text-primary" />
+                  )}
+                </button>
               </div>
 
               {/* Transcript scroll area */}

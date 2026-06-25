@@ -264,3 +264,27 @@ export async function finishInterview(id: string, token: string): Promise<{ ok: 
     body: { token },
   });
 }
+
+/**
+ * POST /api/interviews/:id/speak (P1 — "the interviewer speaks")
+ * Returns WAV audio of the latest interviewer utterance (`source:'turn'`) or the latest
+ * run-triggered hint (`source:'run'`). Returns null when voice is off (503) or there's nothing
+ * to say (404) — the room stays silent and never surfaces an error for it.
+ */
+export async function speakLatest(
+  id: string,
+  token: string,
+  source: 'turn' | 'run' = 'turn'
+): Promise<Blob | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/api/interviews/${id}/speak`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, source }),
+    });
+    if (!res.ok) return null;
+    return await res.blob();
+  } catch {
+    return null; // voice is best-effort; never break the interview
+  }
+}
