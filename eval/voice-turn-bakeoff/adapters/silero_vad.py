@@ -26,6 +26,7 @@ def _load_silero_model() -> Any:
             force_reload=False,
             onnx=False,
             verbose=False,
+            trust_repo=True,
         )
         return model, utils
     except Exception:

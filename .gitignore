@@ -68,3 +68,11 @@ ai_module/simple_api_test.py
 repomix-output.xml
 specstory.md
 .specstory/history/
+
+# Secrets, local eval audio + artifacts — never commit
+api_keys.rtf
+/recordings/
+/eval/voice-turn-bakeoff/.venv/
+/eval/voice-turn-bakeoff/results/
+/eval/voice-turn-bakeoff/.cache/
+/eval/voice-turn-bakeoff/buckeye_extract/
