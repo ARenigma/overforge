@@ -18,7 +18,41 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 from corpora.buckeye import fetch
-from run_closed import LiveKitTextEOU
+
+
+class LiveKitTextEOU:
+    """LiveKit turn-detector text model (Qwen2.5-0.5B ONNX) → P(end-of-utterance | transcript).
+    Inlined from the removed Deepgram batch scorer (run_closed.py) — this is its only remaining user."""
+
+    def __init__(self) -> None:
+        import onnxruntime as ort
+        from huggingface_hub import snapshot_download
+        from transformers import AutoTokenizer
+
+        model_dir = snapshot_download("livekit/turn-detector")
+        self.tok = AutoTokenizer.from_pretrained(model_dir)
+        onnx_files = list(Path(model_dir).glob("*.onnx"))
+        onnx_path = next(
+            (p for p in onnx_files if "quant" in p.name.lower() or "q8" in p.name.lower()),
+            onnx_files[0],
+        )
+        self.sess = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+        self.eou_id = self.tok.encode("<|im_end|>", add_special_tokens=False)[0]
+
+    def score(self, transcript: str) -> float:
+        if not transcript.strip():
+            return 0.0
+        formatted = self.tok.apply_chat_template(
+            [{"role": "user", "content": transcript}], tokenize=False, add_generation_prompt=False
+        )
+        inp = self.tok(
+            formatted, return_tensors="np", max_length=1024, truncation=True, add_special_tokens=False
+        )
+        logits = self.sess.run(["logits"], {"input_ids": inp["input_ids"].astype(np.int64)})[0]
+        last = logits[0, -1]
+        probs = np.exp(last - last.max())
+        probs /= probs.sum()
+        return float(probs[self.eou_id])
 
 _RESULTS = Path(__file__).parent / "results"
 _SCORES = _RESULTS / "fair_scores.json"
