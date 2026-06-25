@@ -12,6 +12,8 @@ export interface CodeRunSummary {
   language: string;
   status: string;
   stderr?: string;
+  /** An autonomous interviewer hint triggered by this run (USP) — factored into the grade. */
+  intervention?: { kind: string; text?: string };
 }
 
 export interface ScoringInput {
@@ -68,12 +70,31 @@ export function buildScoringPrompt(input: ScoringInput): string {
   const levelLine =
     LEVEL_GRADING_GUIDANCE[(input.level ?? 'mid').toLowerCase()] ?? LEVEL_GRADING_GUIDANCE.mid;
   const brief = input.roleBrief?.trim();
+  // Assistance the autonomous interviewer gave (USP). A candidate who needed concrete hints to
+  // arrive at the solution must NOT score as highly as one who got there independently — so the
+  // grader is told exactly what help was provided. Two sources: typed follow-ups live on the
+  // transcript; run-triggered hints live on the code runs that triggered them.
+  const transcriptAssists = input.transcript
+    .filter((t) => t.assist)
+    .map((t) => `- [${t.assist?.kind ?? 'assist'}] ${t.text.slice(0, 160)}`);
+  const runAssists = input.codeRuns
+    .filter((r) => r.intervention)
+    .map(
+      (r) => `- [${r.intervention?.kind ?? 'hint'}] ${(r.intervention?.text ?? '').slice(0, 160)}`
+    );
+  const allAssists = [...transcriptAssists, ...runAssists];
+  const assistLine = allAssists.length
+    ? 'ASSISTANCE GIVEN BY THE INTERVIEWER (weigh this down: independent problem-solving scores ' +
+      'higher than a solution reached only after hints):\n' +
+      allAssists.join('\n')
+    : '';
   return [
     levelLine,
     brief ? `ROLE CONTEXT (judge relevance to this role):\n${brief.slice(0, 4000)}` : '',
     `TRANSCRIPT:\n${transcript || '(none)'}`,
     input.finalCode ? `FINAL CODE:\n${input.finalCode.slice(0, 4000)}` : '',
     runs ? `CODE RUNS:\n${runs}` : '',
+    assistLine,
     'Grade per the rubric, calibrated to the candidate level above. Return the JSON only.',
   ]
     .filter(Boolean)

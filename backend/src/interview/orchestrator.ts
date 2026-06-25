@@ -5,7 +5,9 @@
 
 import { advance, initialContext } from './machine';
 import { DeterministicOracle, Oracle, TranscriptTurn, UtteranceRequest, Utterance } from './oracle';
-import { InterviewContext, Effect } from './types';
+import { InterviewContext, Effect, InterventionKind } from './types';
+import { deriveRunSignals } from './signals';
+import { decideRunIntervention, deriveRunAssistBudget } from './intervention';
 import { createMinimaxClient, MinimaxClient, MinimaxOracle, minimaxConfigFromEnv } from './minimax';
 import { generateToken, hashToken } from './token';
 import {
@@ -105,7 +107,9 @@ async function persistTransition(
   effect: Effect,
   utterance: Utterance | null,
   candidateAnswer?: string,
-  requestId?: string
+  requestId?: string,
+  /** Tags the interviewer turn as an autonomous intervention (USP) so the scorer + room see it. */
+  assist?: { kind: InterventionKind; strength: number }
 ): Promise<void> {
   const transcript: TranscriptTurn[] = interview.transcript ?? [];
 
@@ -114,7 +118,7 @@ async function persistTransition(
   }
 
   if (utterance && utterance.text) {
-    transcript.push({ role: 'interviewer', text: utterance.text });
+    transcript.push({ role: 'interviewer', text: utterance.text, ...(assist ? { assist } : {}) });
   }
 
   await updateInterview(interview.id, {
@@ -134,6 +138,7 @@ async function persistTransition(
     await appendEvent(interview.id, 'utterance', {
       text: utterance.text,
       expects: utterance.expects,
+      ...(assist ? { intervention: true, kind: assist.kind, strength: assist.strength } : {}),
     });
   }
 }
@@ -446,17 +451,51 @@ export async function submitAnswer(
     };
   }
 
+  const transcriptWithAnswer: TranscriptTurn[] = [
+    ...(interview.transcript ?? []),
+    { role: 'candidate', text: answer },
+  ];
   const req: UtteranceRequest = {
     effect,
     ctx: newCtx,
-    transcript: [...(interview.transcript ?? []), { role: 'candidate', text: answer }],
+    transcript: transcriptWithAnswer,
     code: interview.code_snapshot,
     level: interview.level,
     roleBrief: interview.role_brief,
   };
-  const utterance = await oracle.generateUtterance(req);
 
-  await persistTransition(interview, newCtx, effect, utterance, answer, requestId);
+  // A follow-up is voiced as a typed intervention (counter-question / probe / hint) so it reads
+  // like a real interviewer deepening the thread — the FSM still owns whether one happens at all
+  // (within maxFollowUps). Any other effect is a plain scripted utterance. The whole resolution
+  // is wrapped so a live-LLM failure can NEVER leave a half-applied turn (answer event logged but
+  // no transition persisted): the deterministic oracle does no I/O, so it always completes.
+  const followUpKind: InterventionKind = decision?.kind ?? 'probe';
+  const interventionReq = {
+    kind: followUpKind,
+    ctx: newCtx,
+    transcript: transcriptWithAnswer,
+    code: interview.code_snapshot,
+    level: interview.level,
+    roleBrief: interview.role_brief,
+  };
+  let utterance: Utterance;
+  let assist: { kind: InterventionKind; strength: number } | undefined;
+  try {
+    utterance =
+      effect.kind === 'ask_followup'
+        ? await oracle.generateIntervention(interventionReq)
+        : await oracle.generateUtterance(req);
+  } catch (err) {
+    console.error(`[orchestrator] utterance generation failed for ${interviewId}:`, err);
+    const fallback = new DeterministicOracle();
+    utterance =
+      effect.kind === 'ask_followup'
+        ? await fallback.generateIntervention(interventionReq)
+        : await fallback.generateUtterance(req);
+  }
+  if (effect.kind === 'ask_followup') assist = { kind: followUpKind, strength: effect.depth };
+
+  await persistTransition(interview, newCtx, effect, utterance, answer, requestId, assist);
 
   return { utterance, phase: newCtx.phase, state: newCtx };
 }
@@ -478,9 +517,17 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
     });
   }
 
+  const runCtx = interview.fsm_state as InterviewContext;
   const kernel = getExecutionKernel();
   const result = await kernel.run(req);
   result.language = req.language;
+  result.codeIndex = runCtx.codeIndex; // tag with the question in play, for signal scoping
+
+  // ── Autonomous intervention (USP): a balanced interviewer notices repeated failing runs and
+  // steps in. We decide + word the hint BEFORE persisting, so it rides along ON the run in the
+  // SAME atomic append_code_run write — recordRun never touches transcript/fsm_state, so it can
+  // never race a concurrent submitAnswer (no clobbered FSM transition, no dropped transcript turn).
+  await attachRunIntervention(interview, runCtx, result, req.source);
 
   // One atomic write: append the run AND record the snapshot + last-used language together,
   // so code_runs[-1], code_snapshot, and code_language can never describe different runs.
@@ -492,11 +539,55 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
     exitCode: result.exitCode,
     timeMs: result.timeMs,
   });
-
-  // Suppress unused variable lint warning.
-  void interview;
+  if (result.intervention) {
+    await appendEvent(interviewId, 'utterance', {
+      text: result.intervention.text,
+      intervention: true,
+      kind: result.intervention.kind,
+    });
+  }
 
   return result;
+}
+
+/** Decide + (maybe) word an interviewer hint for a struggling run, attaching it to `result` so it
+ *  persists atomically ON the run (and shows immediately in the room). Best-effort: any failure
+ *  here — including the LLM call — must never fail the candidate's run. Writes nothing itself. */
+async function attachRunIntervention(
+  interview: Interview,
+  ctx: InterviewContext,
+  result: RunResult,
+  currentSource: string
+): Promise<void> {
+  try {
+    if (ctx.phase !== 'coding') return;
+    const prior = interview.code_runs ?? [];
+    const withCurrent = [...prior, result];
+    const signals = deriveRunSignals(withCurrent, ctx.codeIndex);
+    const budget = deriveRunAssistBudget(prior, ctx.codeIndex); // prior only — current has no hint yet
+    const decision = decideRunIntervention(signals, ctx.phase, budget);
+    if (!decision.intervene) return;
+
+    const oracle = getOracle();
+    const recentRuns = withCurrent
+      .filter((r) => r.codeIndex === ctx.codeIndex)
+      .slice(-4)
+      .map((r) => ({ status: r.status, stderr: r.stderr }));
+    const utterance = await oracle.generateIntervention({
+      kind: decision.kind,
+      ctx,
+      transcript: interview.transcript ?? [],
+      code: currentSource, // the source that just ran (code_snapshot isn't updated until the append)
+      recentRuns,
+      level: interview.level,
+      roleBrief: interview.role_brief,
+    });
+    if (utterance.text) {
+      result.intervention = { text: utterance.text, kind: decision.kind };
+    }
+  } catch (err) {
+    console.error(`[orchestrator] run-intervention failed for ${interview.id}:`, err);
+  }
 }
 
 export async function finishAndScore(
@@ -528,6 +619,9 @@ export async function finishAndScore(
     language: r.language ?? 'unknown',
     status: r.status,
     stderr: r.stderr,
+    ...(r.intervention
+      ? { intervention: { kind: r.intervention.kind, text: r.intervention.text } }
+      : {}),
   }));
 
   const scorecard = await scoreInterview(

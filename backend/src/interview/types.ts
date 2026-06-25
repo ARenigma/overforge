@@ -31,6 +31,12 @@ export interface InterviewContext {
   config: InterviewConfig;
 }
 
+/** The kind of autonomous interviewer intervention (USP). `counter_question` challenges a
+ *  claim, `probe` digs deeper, `hint` unblocks a stuck candidate, `nudge` is a light prompt.
+ *  Run-triggered hints are recorded ON the code run that triggered them (race-free, atomic) — the
+ *  FSM context stays pure control state. */
+export type InterventionKind = 'counter_question' | 'probe' | 'hint' | 'nudge';
+
 /** What the driver should do next. The machine emits exactly one per step. */
 export type Effect =
   | { kind: 'greet' }
@@ -48,9 +54,11 @@ export interface OracleDecision {
   reason: string;
   /** Answer quality/confidence signal, 0..1 — recorded, not control flow. */
   signal: number;
+  /** When `followUp`, which kind of follow-up to voice — lets the engine challenge a shaky
+   *  claim (counter_question), dig deeper on a thin answer (probe), or unblock (hint). The FSM
+   *  still owns whether a follow-up happens (within `maxFollowUps`); this only shapes its tone. */
+  kind?: InterventionKind;
 }
 
 /** Events the driver feeds the machine. `decision` is only consulted in the coding phase. */
-export type InterviewEvent =
-  | { type: 'start' }
-  | { type: 'answer'; decision?: OracleDecision };
+export type InterviewEvent = { type: 'start' } | { type: 'answer'; decision?: OracleDecision };

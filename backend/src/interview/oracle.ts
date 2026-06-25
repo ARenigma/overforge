@@ -2,11 +2,14 @@
 // else: produce the next interviewer utterance, and judge whether a coding
 // answer warrants a follow-up. It NEVER selects the next state — the machine does.
 
-import { InterviewContext, OracleDecision, Effect } from './types';
+import { InterviewContext, OracleDecision, Effect, InterventionKind } from './types';
 
 export interface TranscriptTurn {
   role: 'interviewer' | 'candidate' | 'system';
   text: string;
+  /** Set on interviewer turns produced by the autonomous intervention engine (USP) — lets the
+   *  scorer discount a hinted solve and the room style hints distinctly from normal questions. */
+  assist?: { kind: InterventionKind; strength: number };
 }
 
 export interface UtteranceRequest {
@@ -32,9 +35,24 @@ export interface EvaluateRequest {
   transcript: TranscriptTurn[];
 }
 
+/** Request to word an autonomous intervention (USP). The policy has already decided IF and WHICH
+ *  kind; the oracle only produces the short, balanced-senior-interviewer utterance. */
+export interface InterventionRequest {
+  kind: InterventionKind;
+  ctx: InterviewContext;
+  transcript: TranscriptTurn[];
+  code?: string;
+  /** Recent run outcomes for the current question (oldest→newest) so a hint can reference them. */
+  recentRuns?: { status: string; stderr?: string }[];
+  level?: string;
+  roleBrief?: string | null;
+}
+
 export interface Oracle {
   generateUtterance(req: UtteranceRequest): Promise<Utterance>;
   evaluateAnswer(req: EvaluateRequest): Promise<OracleDecision>;
+  /** Produce the next interviewer intervention (counter-question / probe / hint / nudge). */
+  generateIntervention(req: InterventionRequest): Promise<Utterance>;
 }
 
 /**
@@ -85,6 +103,17 @@ export class DeterministicOracle implements Oracle {
       followUp,
       reason: followUp ? 'answer was thin; probe deeper' : 'answer was substantive',
       signal,
+      ...(followUp ? { kind: 'probe' as const } : {}),
     };
+  }
+
+  async generateIntervention(req: InterventionRequest): Promise<Utterance> {
+    const canned: Record<InterventionKind, string> = {
+      counter_question: 'Before we move on — what makes you confident that approach is correct?',
+      probe: "Walk me through what you expected to happen versus what you're seeing.",
+      hint: 'Take another look at your edge cases — what happens at the boundaries of your input?',
+      nudge: "Talk me through where you're at — what are you trying right now?",
+    };
+    return { text: canned[req.kind], expects: 'code' };
   }
 }

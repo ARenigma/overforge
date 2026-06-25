@@ -32,6 +32,9 @@ export interface BeginResponse {
 export interface TranscriptTurn {
   role: 'interviewer' | 'candidate' | 'system';
   text: string;
+  /** Set on interviewer turns produced by the autonomous intervention engine — the room styles
+   *  these as hints/probes distinct from scripted questions. */
+  assist?: { kind: string; strength: number };
 }
 
 export interface InterviewState {
@@ -67,6 +70,9 @@ export interface RunResult {
   exitCode: number | null;
   timeMs: number | null;
   memoryKb: number | null;
+  /** An autonomous interviewer hint triggered by this run (USP) — shown immediately in the chat;
+   *  also persisted to the transcript, so it survives a reload. */
+  intervention?: { text: string; kind: string };
 }
 
 export interface ScorecardDimension {

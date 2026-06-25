@@ -89,18 +89,23 @@ jest.mock('../db/interviews', () => {
   };
 });
 
-// Fake execution kernel so recordRun can be driven offline (no Docker).
+// Fake execution kernel so recordRun can be driven offline (no Docker). The result is
+// configurable (mock-prefixed so jest's factory can close over it) — defaults to Accepted, so
+// tests that don't expect interventions are unaffected; the intervention test drives failures.
+const mockRun = {
+  result: {
+    stdout: 'ok\n',
+    stderr: '',
+    compileOutput: '',
+    status: 'Accepted',
+    exitCode: 0 as number | null,
+    timeMs: 5,
+    memoryKb: null as number | null,
+  },
+};
 jest.mock('../execution/docker', () => ({
   createDockerKernel: () => ({
-    run: async () => ({
-      stdout: 'ok\n',
-      stderr: '',
-      compileOutput: '',
-      status: 'Accepted',
-      exitCode: 0,
-      timeMs: 5,
-      memoryKb: null,
-    }),
+    run: async () => ({ ...mockRun.result }),
   }),
 }));
 
@@ -280,5 +285,68 @@ describe('orchestrator end-to-end (offline)', () => {
       candidateEmail: 'c2@example.com',
     });
     await expect(orch.begin(id, { tncAccepted: false })).rejects.toThrow(/T&C/);
+  });
+
+  test('autonomous intervention: repeated failing runs trigger a bounded hint, never advancing the FSM', async () => {
+    const failing = {
+      stdout: '',
+      stderr: 'Traceback (most recent call last): NameError',
+      compileOutput: '',
+      status: 'Runtime Error',
+      exitCode: 1 as number | null,
+      timeMs: 5,
+      memoryKb: null as number | null,
+    };
+    const accepted = { ...mockRun.result };
+
+    const { id } = await orch.createInterview({
+      interviewerId: 'u8',
+      candidateEmail: 'struggler@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true });
+    // Drive greeting → oral → oral → handoff → coding (4 answers).
+    for (let i = 0; i < 4; i++) await orch.submitAnswer(id, 'a non-empty placeholder answer');
+    let row = (await db.getById(id)) as Record<string, unknown>;
+    expect((row.fsm_state as { phase: string }).phase).toBe('coding');
+    const codingTxLen = (row.transcript as unknown[]).length;
+
+    mockRun.result = { ...failing };
+
+    // 1st failure: not jumpy — stays quiet.
+    expect(
+      (await orch.recordRun(id, { language: 'python', source: 'x=' })).intervention
+    ).toBeUndefined();
+    // 2nd consecutive failure: a gentle probe.
+    expect(
+      (await orch.recordRun(id, { language: 'python', source: 'x=' })).intervention?.kind
+    ).toBe('probe');
+
+    // The FSM is untouched — recordRun writes neither fsm_state nor the transcript, so a run can
+    // never clobber a concurrent answer's transition.
+    row = (await db.getById(id)) as Record<string, unknown>;
+    expect((row.fsm_state as { phase: string }).phase).toBe('coding');
+    expect((row.fsm_state as { codeIndex: number }).codeIndex).toBe(0);
+    expect(row.status).toBe('in_progress');
+    // The hint rides ON the code run (atomic), not the transcript.
+    const runs = row.code_runs as Array<{ intervention?: { kind: string } }>;
+    expect(runs.some((r) => r.intervention?.kind === 'probe')).toBe(true);
+
+    // Cooldown blocks the very next run; the one after escalates to a concrete hint.
+    expect(
+      (await orch.recordRun(id, { language: 'python', source: 'x=' })).intervention
+    ).toBeUndefined();
+    expect(
+      (await orch.recordRun(id, { language: 'python', source: 'x=' })).intervention?.kind
+    ).toBe('hint');
+    // Per-question budget (2) is now spent — it goes quiet rather than nagging.
+    expect(
+      (await orch.recordRun(id, { language: 'python', source: 'x=' })).intervention
+    ).toBeUndefined();
+
+    // Five code runs, zero transcript writes — proof the overlay never touched the turn record.
+    const finalTx = ((await db.getById(id)) as { transcript: unknown[] }).transcript;
+    expect(finalTx.length).toBe(codingTxLen);
+
+    mockRun.result = accepted; // reset for any later tests
   });
 });

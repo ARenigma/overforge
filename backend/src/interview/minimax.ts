@@ -6,8 +6,14 @@
 // staged (see docs/ARCHITECTURE_SPEC §4). Until then this typechecks and is unit-
 // tested via the DeterministicOracle; live calls require MINIMAX_API_KEY.
 
-import { Oracle, UtteranceRequest, Utterance, EvaluateRequest } from './oracle';
-import { OracleDecision } from './types';
+import {
+  Oracle,
+  UtteranceRequest,
+  Utterance,
+  EvaluateRequest,
+  InterventionRequest,
+} from './oracle';
+import { OracleDecision, InterventionKind } from './types';
 
 export interface MinimaxConfig {
   apiKey: string;
@@ -111,10 +117,24 @@ export class MinimaxOracle implements Oracle {
     try {
       raw = await this.client.complete(messages, { json: true, temperature: 0 });
       return parseDecision(raw);
-    } catch {
-      // Safe, bounded fallback: never loop on parse/transport failure.
+    } catch (err) {
+      // Safe, bounded fallback: never loop on parse/transport failure. Log it so a persistent
+      // misconfiguration (bad key/model) that silently disables follow-ups stays observable.
+      console.error('[minimax] evaluateAnswer failed; advancing without follow-up:', err);
       return { followUp: false, reason: 'evaluator unavailable; advancing', signal: 0 };
     }
+  }
+
+  async generateIntervention(req: InterventionRequest): Promise<Utterance> {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: INTERVENER_SYSTEM },
+      { role: 'user', content: buildInterventionPrompt(req) },
+    ];
+    // Slightly cooler than utterance generation (a steer, not a fresh question) and short-capped.
+    const text = (
+      await this.client.complete(messages, { temperature: 0.5, maxTokens: 160 })
+    ).trim();
+    return { text, expects: 'code' };
   }
 }
 
@@ -124,7 +144,49 @@ const INTERVIEWER_SYSTEM =
 
 const EVALUATOR_SYSTEM =
   'You judge a candidate answer for depth. Respond ONLY with strict JSON: ' +
-  '{"followUp": boolean, "reason": string, "signal": number between 0 and 1}.';
+  '{"followUp": boolean, "kind": "counter_question"|"probe"|"hint"|null, "reason": string, ' +
+  '"signal": number between 0 and 1}. Set kind only when followUp is true: counter_question to ' +
+  'challenge a questionable claim, probe to dig deeper on a thin answer, hint if they seem stuck.';
+
+// The autonomous interviewer mid-problem. Balanced: present but not overbearing, and it NEVER
+// hands over the solution — it guides the candidate to find it (so the signal stays the candidate's).
+const INTERVENER_SYSTEM =
+  'You are a balanced, senior technical interviewer stepping in mid-problem — present but not ' +
+  'overbearing, like a real human interviewer. Speak in the first person, ONE short turn (1–2 ' +
+  'sentences). Be specific and encouraging. NEVER write code or give away the solution; guide ' +
+  'the candidate to reach it themselves. Never reveal scores or internal reasoning.';
+
+const KIND_GUIDANCE: Record<InterventionKind, string> = {
+  counter_question:
+    'Challenge the claim or design choice the candidate just made — ask them to justify it. Do not give the answer.',
+  probe:
+    'The candidate seems stuck after repeated failing runs. Ask ONE focused question that makes them reason about WHY it is failing — do not tell them the fix.',
+  hint: 'The candidate is still stuck. Give ONE small, concrete nudge toward the issue (e.g. the class of bug, or the specific case to consider) WITHOUT writing the fix or any code.',
+  nudge:
+    'Gently check in and invite the candidate to talk through their current approach in their own words.',
+};
+
+function buildInterventionPrompt(req: InterventionRequest): string {
+  const recent = req.transcript
+    .slice(-TRANSCRIPT_WINDOW)
+    .map((t) => `${t.role}: ${t.text}`)
+    .join('\n');
+  const runs = (req.recentRuns ?? [])
+    .map((r) => `- ${r.status}${r.stderr ? ` (stderr: ${r.stderr.slice(0, 160)})` : ''}`)
+    .join('\n');
+  const brief = req.roleBrief?.trim();
+  return [
+    levelGuidance(req.level),
+    brief ? `Role context:\n${brief.slice(0, 2000)}` : '',
+    KIND_GUIDANCE[req.kind],
+    req.code ? `Candidate's current code:\n${req.code.slice(0, 1500)}` : '',
+    runs ? `Recent run results (oldest→newest):\n${runs}` : '',
+    recent ? `Recent transcript:\n${recent}` : '',
+    'Produce only your single short intervention.',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
 
 function utteranceMode(kind: string): Utterance['expects'] {
   if (kind === 'ask_code' || kind === 'ask_followup') return 'code';
@@ -182,11 +244,19 @@ function buildEvaluatePrompt(req: EvaluateRequest): string {
     .join('\n\n');
 }
 
+const VALID_KINDS: readonly InterventionKind[] = ['counter_question', 'probe', 'hint', 'nudge'];
+
 function parseDecision(raw: string): OracleDecision {
   const obj = JSON.parse(raw) as Partial<OracleDecision>;
+  const followUp = obj.followUp === true;
+  const kind =
+    followUp && VALID_KINDS.includes(obj.kind as InterventionKind)
+      ? (obj.kind as InterventionKind)
+      : undefined;
   return {
-    followUp: obj.followUp === true,
+    followUp,
     reason: typeof obj.reason === 'string' ? obj.reason : '',
     signal: typeof obj.signal === 'number' ? Math.max(0, Math.min(1, obj.signal)) : 0,
+    ...(kind ? { kind } : {}),
   };
 }

@@ -29,7 +29,16 @@ import {
   type InterviewPhase,
   type RunResult,
 } from '@/lib/api';
-import { AlertCircle, ArrowUp, CheckCircle, Clock, Loader2, Lock, Play } from 'lucide-react';
+import {
+  AlertCircle,
+  ArrowUp,
+  CheckCircle,
+  Clock,
+  Loader2,
+  Lock,
+  Play,
+  Sparkles,
+} from 'lucide-react';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
 
@@ -40,6 +49,25 @@ type Stage = 'loading_token' | 'consent' | 'interview' | 'done' | 'error';
 interface Message {
   role: 'ai' | 'candidate';
   text: string;
+  /** Set when this interviewer turn was an autonomous intervention (hint/probe/counter-question)
+   *  — rendered with a distinct ember accent so it reads as the interviewer stepping in. */
+  assist?: string;
+}
+
+/** Short label for an autonomous intervention, shown above the bubble. */
+function assistLabel(kind: string): string {
+  switch (kind) {
+    case 'hint':
+      return 'Hint';
+    case 'probe':
+      return 'Probe';
+    case 'counter_question':
+      return 'Follow-up';
+    case 'nudge':
+      return 'Check-in';
+    default:
+      return 'Interviewer';
+  }
 }
 
 // Must stay in sync with backend SUPPORTED_LANGUAGES and the new-interview dialog's options —
@@ -248,11 +276,23 @@ export default function InterviewPage() {
         if (cancelled) return;
         const done = s.status === 'scored' || s.phase === 'done' || s.phase === 'scoring';
         setPhase(done ? 'done' : (s.phase as InterviewPhase));
-        setMessages(
-          s.transcript
-            .filter((t) => t.role !== 'system')
-            .map((t) => ({ role: t.role === 'candidate' ? 'candidate' : 'ai', text: t.text }))
-        );
+        const resumed: Message[] = s.transcript
+          .filter((t) => t.role !== 'system')
+          .map((t) => ({
+            role: t.role === 'candidate' ? 'candidate' : 'ai',
+            text: t.text,
+            ...(t.assist ? { assist: t.assist.kind } : {}),
+          }));
+        // Run-triggered hints live on the code run (not the transcript) — surface the most recent
+        // one on resume so it isn't lost across a reload.
+        if (s.lastRunResult?.intervention?.text) {
+          resumed.push({
+            role: 'ai',
+            text: s.lastRunResult.intervention.text,
+            assist: s.lastRunResult.intervention.kind,
+          });
+        }
+        setMessages(resumed);
         if (s.codeSnapshot) setCode(s.codeSnapshot);
         // Re-seed the elapsed timer from the server start so it doesn't restart at 0.
         setElapsed(elapsedSince(s.startedAt));
@@ -373,6 +413,14 @@ export default function InterviewPage() {
     try {
       const result = await apiRunCode(id, activeToken, language, code);
       setRunResult(result);
+      // The autonomous interviewer may step in on a struggling run — surface it in the chat
+      // immediately (it's also persisted to the transcript, so it survives a reload).
+      if (result.intervention?.text) {
+        setMessages((prev) => [
+          ...prev,
+          { role: 'ai', text: result.intervention!.text, assist: result.intervention!.kind },
+        ]);
+      }
     } catch (err: unknown) {
       setRunError(err instanceof Error ? err.message : 'Code execution failed.');
     } finally {
@@ -672,10 +720,18 @@ export default function InterviewPage() {
                       className={[
                         'max-w-[88%] px-4 py-2.5 text-sm font-semibold leading-relaxed',
                         msg.role === 'ai'
-                          ? 'bg-card text-foreground'
+                          ? msg.assist
+                            ? 'border-l-2 border-primary bg-primary/5 text-foreground'
+                            : 'bg-card text-foreground'
                           : 'whitespace-pre-wrap border border-primary/30 bg-primary/15 text-foreground',
                       ].join(' ')}
                     >
+                      {msg.role === 'ai' && msg.assist && (
+                        <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                          <Sparkles className="h-3 w-3" aria-hidden="true" />
+                          {assistLabel(msg.assist)}
+                        </div>
+                      )}
                       {msg.role === 'ai' ? <MarkdownMessage text={msg.text} /> : msg.text}
                     </div>
                   </div>
