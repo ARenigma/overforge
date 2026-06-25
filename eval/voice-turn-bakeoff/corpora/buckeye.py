@@ -160,6 +160,125 @@ def extract_clips_from_track(
     return clips
 
 
+@dataclass
+class Turn:
+    """A full interviewee turn with intra-turn structure preserved for STREAMING replay.
+
+    Unlike the pre-cut HOLD/EOT clips above, a Turn carries the whole run of speech as ONE
+    contiguous audio slice plus the timeline a streaming detector needs:
+      - `audio`       : the turn's audio from first word to ~1s after the last word (16 kHz mono).
+      - `hold_pauses` : (start, end) of each INTRA-turn pause >= _MIN_HOLD_SIL, RELATIVE to audio
+                        start. Smart Turn firing inside one of these = a false cutoff.
+      - `last_word_end`: time of the final word, relative to audio start (the true turn boundary).
+      - `transcript_words`: the corpus word labels, a reference to sanity-check the STT output.
+    """
+
+    turn_id: str
+    audio: np.ndarray
+    sample_rate: int
+    hold_pauses: list[tuple[float, float]]
+    last_word_end: float  # seconds, relative to audio[0]
+    n_words: int
+    transcript_words: str
+    source: str
+
+
+def extract_turns_from_track(
+    wav: np.ndarray, segs: list[Seg], track_id: str, max_turns: int = 30
+) -> list[Turn]:
+    """Whole interviewee turns (between <IVER> blocks) with intra-turn pause structure preserved.
+
+    A turn qualifies only if it has >= _MIN_TURN_WORDS real words AND at least one intra-turn
+    thinking-pause >= _MIN_HOLD_SIL — otherwise there is nothing to false-cutoff on, so the turn
+    doesn't exercise the interview-killing failure mode this harness exists to measure.
+    """
+    runs: list[list[Seg]] = []
+    cur: list[Seg] = []
+    for s in segs:
+        if s.kind == "iver":
+            if cur:
+                runs.append(cur)
+                cur = []
+        else:
+            cur.append(s)
+    if cur:
+        runs.append(cur)
+
+    turns: list[Turn] = []
+    for run in runs:
+        if len(turns) >= max_turns:
+            break
+        words = [s for s in run if s.kind == "word"]
+        if len(words) < _MIN_TURN_WORDS:
+            continue
+        turn_start = words[0].start
+        last_word_end = words[-1].end
+
+        # Intra-turn pauses: silences that END before the last word (speaker resumed after).
+        hold_pauses: list[tuple[float, float]] = []
+        for s in run:
+            if s.kind != "sil" or s.end >= last_word_end:
+                continue
+            if (s.end - s.start) < _MIN_HOLD_SIL:
+                continue
+            hold_pauses.append((s.start - turn_start, s.end - turn_start))
+        if not hold_pauses:
+            continue  # no thinking-pause → nothing to test false-cutoff against
+
+        # Audio = first word → ~1s past the last word (the trailing silence that signals EOT).
+        audio_end = min(last_word_end + 1.0, len(wav) / _SR)
+        a = wav[int(turn_start * _SR) : int(audio_end * _SR)].astype(np.float32)
+        if len(a) < int(1.0 * _SR):
+            continue
+
+        turns.append(
+            Turn(
+                turn_id=f"{track_id}_turn{int(turn_start)}",
+                audio=a,
+                sample_rate=_SR,
+                hold_pauses=hold_pauses,
+                last_word_end=last_word_end - turn_start,
+                n_words=len(words),
+                transcript_words=" ".join(w.label for w in words),
+                source=f"buckeye/{track_id}",
+            )
+        )
+    return turns
+
+
+def fetch_turns(
+    n_turns: int = 10, max_tracks: int = 12, speakers: list[str] | None = None
+) -> list[Turn]:
+    """Fetch up to `n_turns` whole interviewee turns (each with >=1 intra-turn pause) for
+    streaming replay. Walks tracks until enough qualifying turns are collected, taking at most a
+    few per track so the sample spans multiple speakers."""
+    spk_dirs = sorted(
+        d for d in _RECORDINGS.iterdir() if d.is_dir() and re.match(r"s\d{2}$", d.name)
+    )
+    if speakers:
+        spk_dirs = [d for d in spk_dirs if d.name in speakers]
+
+    turns: list[Turn] = []
+    n_tracks = 0
+    for sd in spk_dirs:
+        if len(turns) >= n_turns:
+            break
+        for zp in sorted(sd.glob("*.zip")):
+            if len(turns) >= n_turns or n_tracks >= max_tracks:
+                break
+            loaded = _load_track_from_zip(zp)
+            if loaded is None:
+                continue
+            wav, segs, tid = loaded
+            track_turns = extract_turns_from_track(wav, segs, tid, max_turns=3)
+            turns.extend(track_turns)
+            n_tracks += 1
+            logger.info("Track %s: %d qualifying turns", tid, len(track_turns))
+    turns = turns[:n_turns]
+    logger.info("Buckeye: %d streaming turns from %d tracks", len(turns), n_tracks)
+    return turns
+
+
 def _load_track_from_zip(zip_path: Path):
     try:
         with zipfile.ZipFile(zip_path) as z:
