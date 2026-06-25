@@ -36,7 +36,8 @@ import { createEmailSender } from '../notify/resend';
 
 export function getOracle(): Oracle {
   if (process.env.MINIMAX_API_KEY) {
-    return new MinimaxOracle(createMinimaxClient(minimaxConfigFromEnv()));
+    // Conversational turns use the FAST model (low latency); the scorer keeps the reasoning model.
+    return new MinimaxOracle(createMinimaxClient(minimaxConfigFromEnv({ fast: true })));
   }
   return new DeterministicOracle();
 }

@@ -39,10 +39,19 @@ export interface MinimaxClient {
 
 const DEFAULT_BASE_URL = 'https://api.minimax.io/v1/text/chatcompletion_v2';
 
-export function minimaxConfigFromEnv(): MinimaxConfig {
+/**
+ * Model selection by role:
+ *  - `fast` (oracle: questions / follow-ups / interventions — and future voice turns) →
+ *    MINIMAX_FAST_MODEL (e.g. MiniMax-Text-01, ~1.7s TTFT). Conversational, low-latency.
+ *  - default (scorer) → MINIMAX_LLM_MODEL (e.g. MiniMax-M3, a reasoning model) for careful,
+ *    reproducible grading.
+ * Falls back to MINIMAX_LLM_MODEL when MINIMAX_FAST_MODEL is unset, so it's a no-op until staged.
+ */
+export function minimaxConfigFromEnv(opts: { fast?: boolean } = {}): MinimaxConfig {
+  const reasoningModel = process.env.MINIMAX_LLM_MODEL ?? '';
   return {
     apiKey: process.env.MINIMAX_API_KEY ?? '',
-    model: process.env.MINIMAX_LLM_MODEL ?? '',
+    model: opts.fast ? process.env.MINIMAX_FAST_MODEL || reasoningModel : reasoningModel,
     baseUrl: process.env.MINIMAX_BASE_URL || DEFAULT_BASE_URL,
     groupId: process.env.MINIMAX_GROUP_ID || undefined,
   };
