@@ -3,42 +3,46 @@ import { ShieldCheck, Lock, Globe, Database } from 'lucide-react';
 import { Wordmark } from './wordmark';
 import { SectionDivider } from './section';
 
-const COLUMNS = [
+type LiveLink = { label: string; href: string; soon?: false };
+type SoonLink = { label: string; href?: never; soon: true };
+type FooterLink = LiveLink | SoonLink;
+
+const COLUMNS: { title: string; links: FooterLink[] }[] = [
   {
     title: 'Product',
     links: [
       { label: 'How it works', href: '/how-it-works' },
       { label: 'Features', href: '/product' },
-      { label: 'Languages', href: '#languages' },
       { label: 'Pricing', href: '/pricing' },
     ],
   },
   {
     title: 'Company',
     links: [
-      { label: 'About', href: '#' },
-      { label: 'Blog', href: '#' },
-      { label: 'Careers', href: '#' },
+      { label: 'About', href: '/about' },
+      { label: 'Blog', soon: true },
+      { label: 'Careers', soon: true },
     ],
   },
   {
     title: 'Resources',
     links: [
-      { label: 'Docs', href: '#' },
-      { label: 'Status', href: '#' },
-      { label: 'Changelog', href: '#' },
+      { label: 'Docs', soon: true },
+      { label: 'Status', soon: true },
+      { label: 'Changelog', soon: true },
     ],
   },
   {
     title: 'Legal',
     links: [
-      { label: 'Privacy', href: '#' },
-      { label: 'Terms', href: '#' },
+      { label: 'Privacy', href: '/privacy' },
+      { label: 'Terms', href: '/terms' },
     ],
   },
-] as const;
+];
 
-// Placeholder compliance/security claims — confirm formal certifications (e.g. SOC 2) before production.
+// Note: SOC 2 Type II certification is aspirational — confirm formal audit completion before
+// displaying this claim to customers.
 const COMPLIANCE = [
   { icon: ShieldCheck, label: 'SOC 2 Type II' },
   { icon: Lock, label: 'Encrypted in transit & at rest' },
@@ -65,16 +69,27 @@ export function Footer() {
             <nav key={col.title} aria-label={col.title}>
               <p className="text-sm font-medium text-foreground">{col.title}</p>
               <ul className="mt-3 space-y-2.5">
-                {col.links.map((l) => (
-                  <li key={l.label}>
-                    <Link
-                      href={l.href}
-                      className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      {l.label}
-                    </Link>
-                  </li>
-                ))}
+                {col.links.map((l) =>
+                  l.soon ? (
+                    <li key={l.label}>
+                      <span className="text-sm text-foreground-subtle cursor-default select-none">
+                        {l.label}
+                        <span className="ml-1.5 text-[10px] font-medium uppercase tracking-wide opacity-60">
+                          soon
+                        </span>
+                      </span>
+                    </li>
+                  ) : (
+                    <li key={l.label}>
+                      <Link
+                        href={l.href}
+                        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        {l.label}
+                      </Link>
+                    </li>
+                  )
+                )}
               </ul>
             </nav>
           ))}
@@ -101,13 +116,13 @@ export function Footer() {
         </p>
         <div className="flex items-center gap-4">
           <Link
-            href="#"
+            href="/privacy"
             className="text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             Privacy
           </Link>
           <Link
-            href="#"
+            href="/terms"
             className="text-xs text-muted-foreground transition-colors hover:text-foreground"
           >
             Terms
