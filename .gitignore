@@ -23,6 +23,9 @@ env.rtf
 *_token
 glpat-*
 
+# graphify knowledge graph — generated local brain, regenerate with `graphify update .`
+graphify-out/
+
 # Build outputs
 build/
 dist/

@@ -57,12 +57,26 @@ circular-buffer read.
 
 ## How Next Phases Plug In
 
-### P2-B.2 — Backend FSM wiring
-On `EotEvent`:
-1. Collect all PCM frames accumulated since the last `reset()` into `committed_audio`.
-2. Call `WhisperSTT.transcribe(committed_audio)` (async, off the hot-path).
-3. POST `{ answer: text }` to the backend FSM route `POST /api/interview/{id}/submit-answer`.
-4. Stream the oracle utterance text back.
+### P2-B.2 — Backend FSM wiring ✅ (implemented)
+`VoiceSession` (session.py) is the transport- and TTS-agnostic turn orchestrator. Per turn:
+1. `feed_frame(frame)` appends each 512-sample frame to its OWN full-turn accumulator (the
+   endpointer's ring only holds the trailing 8 s — never feed that to STT) and forwards it to the
+   endpointer.
+2. On `EotEvent` (or a 120 s max-turn safety cap), it snapshots the audio and runs
+   `WhisperSTT.transcribe(...)` via `asyncio.to_thread` (off the event loop).
+3. An empty transcript (false-fire EOT) short-circuits — re-arm, never submit a blank answer.
+4. Otherwise it submits to the brain over the EXISTING one-shot route
+   `POST /api/interviews/{id}/answer` `{token, answer, requestId}` via `RestBrainClient`
+   (brain_client.py) — same verified, idempotent path the typed room uses.
+5. The returned `Utterance` is voiced through the injected `TtsSink` (B.2 ships `NoopTtsSink`),
+   then the caller calls `arm_next_turn()` after TTS finishes (which resets the endpointer) or
+   `close()` on a terminal turn (`phase == 'done'` / HTTP 409 / 403).
+
+Contracts (`Utterance`, `AnswerResult`, `TurnResult`, `TerminalError`, `BrainTransientError`,
+and the `BrainClient` / `TtsSink` / endpointer / STT Protocols) live in contracts.py so B.3/B.4
+depend on stable types, not `VoiceSession` internals. Idempotency: one `requestId` per turn, reused
+on the in-turn retry (server replays — no double-submit), preserved on transient failure, fresh on
+the next turn. Fail-open: STT/TTS/transport faults re-arm the session rather than strand it.
 
 ### P2-B.3 — Cartesia TTS + filler backchannel
 - On `EotEvent`, immediately play a ~200 ms acknowledgement sound ("uh-huh", "right") via
@@ -79,10 +93,14 @@ On `EotEvent`:
 
 ```
 voice/
-├── endpointing.py        — SilenceGatedEndpointer (this file)
+├── endpointing.py        — SilenceGatedEndpointer (P2-B.1)
 ├── stt.py                — WhisperSTT (faster-whisper small, CPU int8)
+├── contracts.py          — shared dataclasses + Protocols (P2-B.2)
+├── brain_client.py       — RestBrainClient over POST /api/interviews/:id/answer (P2-B.2)
+├── session.py            — VoiceSession turn orchestrator (P2-B.2)
 ├── test_endpointing.py   — streaming replay test against Buckeye corpus
-├── pyproject.toml        — uv project (reuses eval deps)
+├── test_session.py       — offline unit tests for the turn glue (no models/network)
+├── pyproject.toml        — uv project (reuses eval deps + httpx)
 └── README.md             — this file
 ```
 

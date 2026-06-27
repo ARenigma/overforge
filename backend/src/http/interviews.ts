@@ -9,6 +9,8 @@ import { hashToken } from '../interview/token';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
 import { synthesize, isCartesiaConfigured, splitSentences } from '../voice/cartesia';
+import { pickFillerIndex } from '../voice/fillers';
+import { getFillerAudio } from '../voice/fillerCache';
 
 const router = Router();
 
@@ -19,7 +21,14 @@ function sendError(res: Response, err: unknown): void {
   const e = err as { status?: number; message?: string; retryAfterSec?: number };
   const status = e?.status ?? 500;
   if (e?.retryAfterSec) res.setHeader('Retry-After', String(e.retryAfterSec));
-  const message = e?.message ?? 'Internal server error';
+  // Only surface messages from errors we constructed deliberately (they carry a `status` and a safe
+  // message). For unexpected, status-less throws — e.g. an upstream Cartesia error whose message
+  // embeds the vendor name + raw response body — log the real error and return a generic message, so
+  // infrastructure/vendor detail never leaks to the candidate's browser.
+  if (e?.status === undefined) {
+    console.error('[interviews] unexpected error:', err);
+  }
+  const message = e?.status !== undefined && e?.message ? e.message : 'Internal server error';
   res.status(status).json({ error: message });
 }
 
@@ -279,6 +288,40 @@ router.post('/:id/speak', async (req: Request, res: Response): Promise<void> => 
     }
 
     const audio = await synthesize(toSpeak);
+    res.setHeader('Content-Type', 'audio/wav');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(audio);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ─────────────────────── POST /api/interviews/:id/filler ───────────────────────
+// Voice backchannel (P2-B.3): a short "thinking" acknowledgement ("Hmm.", "Let me think.") played
+// the instant the candidate stops speaking, masking STT + LLM latency before the real reply.
+// Server-authoritative like /speak — the body carries NO text; ONE phrase is chosen at random from
+// a fixed in-code list (never client input, never written to the transcript). 503 when Cartesia is
+// off (the room stays silent). The clip is synthesized once per process then served from cache.
+
+router.post('/:id/filler', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { token } = req.body as { token?: string };
+
+    await validateCandidate(id, token ?? '');
+    await enforceRateLimit(`filler:${hashToken(token ?? '')}`, {
+      // One request per turn; its OWN bucket so filler can't starve /speak's budget (and vice-versa).
+      limit: 60,
+      windowMs: 600_000,
+      message: 'Too many requests; please slow down.',
+    });
+
+    if (!isCartesiaConfigured()) {
+      res.status(503).json({ error: 'Voice is not enabled for this interview.' });
+      return;
+    }
+
+    const audio = await getFillerAudio(pickFillerIndex());
     res.setHeader('Content-Type', 'audio/wav');
     res.setHeader('Cache-Control', 'no-store');
     res.send(audio);
