@@ -794,31 +794,46 @@ export default function InterviewPage() {
 
               {/* Transcript scroll area */}
               <div className="flex-1 space-y-4 overflow-y-auto p-4">
-                {messages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex ${msg.role === 'candidate' ? 'justify-end' : 'justify-start'}`}
-                  >
+                {messages.map((msg, idx) => {
+                  const isCandidate = msg.role === 'candidate';
+                  return (
                     <div
-                      className={[
-                        'max-w-[88%] px-4 py-2.5 text-sm font-semibold leading-relaxed',
-                        msg.role === 'ai'
-                          ? msg.assist
-                            ? 'border-l-2 border-primary bg-primary/5 text-foreground'
-                            : 'bg-card text-foreground'
-                          : 'whitespace-pre-wrap border border-primary/30 bg-primary/15 text-foreground',
-                      ].join(' ')}
+                      key={idx}
+                      className={`flex flex-col gap-1 ${isCandidate ? 'items-end' : 'items-start'}`}
                     >
-                      {msg.role === 'ai' && msg.assist && (
-                        <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
-                          <Sparkles className="h-3 w-3" aria-hidden="true" />
-                          {assistLabel(msg.assist)}
-                        </div>
-                      )}
-                      {msg.role === 'ai' ? <MarkdownMessage text={msg.text} /> : msg.text}
+                      {/* Per-message speaker label — the clearest contrast cue (who said what). */}
+                      <span
+                        className={`px-0.5 text-[10px] font-mono uppercase tracking-wider ${
+                          isCandidate ? 'text-primary/80' : 'text-foreground-subtle'
+                        }`}
+                      >
+                        {isCandidate ? 'You' : 'Interviewer'}
+                      </span>
+                      <div
+                        className={[
+                          'max-w-[88%] px-4 py-2.5 text-sm leading-relaxed',
+                          isCandidate
+                            ? // You: ember-tinted, right-aligned, medium weight.
+                              'whitespace-pre-wrap border border-primary/40 bg-primary/15 font-medium text-foreground'
+                            : msg.assist
+                              ? // Autonomous intervention: ember left-accent.
+                                'border-l-2 border-primary bg-primary/5 font-normal text-foreground'
+                              : // Interviewer: neutral bordered card, prose weight — distinct from
+                                // both the panel and the candidate bubble.
+                                'border border-border bg-surface-200 font-normal text-foreground',
+                        ].join(' ')}
+                      >
+                        {msg.role === 'ai' && msg.assist && (
+                          <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-primary">
+                            <Sparkles className="h-3 w-3" aria-hidden="true" />
+                            {assistLabel(msg.assist)}
+                          </div>
+                        )}
+                        {msg.role === 'ai' ? <MarkdownMessage text={msg.text} /> : msg.text}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 {aiThinking && (
                   <div className="flex justify-start">

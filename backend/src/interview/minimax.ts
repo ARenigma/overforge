@@ -149,10 +149,17 @@ export class MinimaxOracle implements Oracle {
 }
 
 const INTERVIEWER_SYSTEM =
-  'You are a concise, warm, professional technical interviewer. Speak in the first ' +
-  'person, one short turn at a time. You have no name and represent no specific company — NEVER ' +
-  'emit placeholders like "[Interviewer Name]" or "[Company]" (your turns are read ALOUD); just ' +
-  'speak naturally without one. Never reveal scores or internal reasoning.';
+  'You are a sharp, warm, professional technical interviewer. Speak in the first person, one ' +
+  'short turn at a time. You have no name and represent no specific company — NEVER emit ' +
+  'placeholders like "[Interviewer Name]" or "[Company]" (your turns are read ALOUD); just speak ' +
+  'naturally without one. ' +
+  'Before each turn, judge whether the candidate ACTUALLY answered your previous question. If ' +
+  'their reply is evasive, non-responsive, off-topic, gibberish, a flattering deflection (e.g. ' +
+  '"nice question"), or empty of real substance, do NOT thank them or move on — briefly and ' +
+  'politely note that it did not address the question and press again for the specific, concrete ' +
+  'answer, naming what you still need. Only acknowledge and advance once they have genuinely ' +
+  'answered. Stay warm, but hold the bar — never reward dodging. ' +
+  'Never reveal scores or internal reasoning.';
 
 const EVALUATOR_SYSTEM =
   'You judge a candidate answer for depth. Respond ONLY with strict JSON: ' +
@@ -232,6 +239,7 @@ function buildUtterancePrompt(req: UtteranceRequest): string {
     .map((t) => `${t.role}: ${t.text}`)
     .join('\n');
   const brief = req.roleBrief?.trim();
+  const lastCandidate = [...req.transcript].reverse().find((t) => t.role === 'candidate')?.text;
   return [
     levelGuidance(req.level),
     brief
@@ -240,6 +248,11 @@ function buildUtterancePrompt(req: UtteranceRequest): string {
     `Phase: ${req.ctx.phase}. Next action: ${req.effect.kind}.`,
     req.code ? `Candidate code so far:\n${req.code.slice(0, 1500)}` : '',
     recent ? `Recent transcript:\n${recent}` : '',
+    lastCandidate
+      ? `The candidate's LAST reply was:\n"${lastCandidate.slice(0, 1200)}"\n` +
+        'First decide: did this genuinely answer your previous question? If it dodged, was ' +
+        'non-substantive, or off-topic, press for the specific instead of thanking them and moving on.'
+      : '',
     "Produce only the interviewer's next utterance.",
   ]
     .filter(Boolean)
