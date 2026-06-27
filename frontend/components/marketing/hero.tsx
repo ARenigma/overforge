@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
-import { HeroShowcase } from '@/components/marketing/hero-showcase';
 import { Reveal } from '@/components/marketing/reveal';
 
 export function Hero() {
@@ -48,11 +47,6 @@ export function Hero() {
         <p className="mt-6 font-mono text-xs text-foreground-subtle">
           Python · JavaScript · Go · Java · C++ · Ruby — run sandboxed, scored deterministically.
         </p>
-      </Reveal>
-
-      {/* Lead with the product: a real interview moment, not a headline in a void. */}
-      <Reveal className="relative z-10 mx-auto mt-14 max-w-5xl sm:mt-16">
-        <HeroShowcase />
       </Reveal>
     </section>
   );
