@@ -1,18 +1,22 @@
-'use client';
-
 import Link from 'next/link';
-import { ArrowRight, ChevronDown } from 'lucide-react';
-import { HeroBackdrop } from '@/components/marketing/hero-backdrop';
+import { ArrowRight } from 'lucide-react';
+import { HeroShowcase } from '@/components/marketing/hero-showcase';
 import { Reveal } from '@/components/marketing/reveal';
 
 export function Hero() {
   return (
-    <section className="relative isolate flex h-screen min-h-screen flex-col items-center justify-center overflow-hidden px-6 text-center">
-      <HeroBackdrop />
-      {/* Fade the dots out at the bottom for a clean break into the next section */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-48 bg-gradient-to-b from-transparent to-background" />
+    <section className="relative isolate overflow-hidden px-6 pt-20 pb-20 sm:pt-28">
+      {/* Intentional ember glow from the top — replaces the generic three.js dotted field. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10"
+        style={{
+          background:
+            'radial-gradient(58% 44% at 50% -4%, hsl(var(--primary) / 0.13), transparent 70%)',
+        }}
+      />
 
-      <Reveal className="relative z-10 mx-auto max-w-3xl">
+      <Reveal className="relative z-10 mx-auto max-w-3xl text-center">
         <h1 className="text-balance text-5xl font-semibold leading-[1.05] tracking-tight sm:text-7xl">
           <span className="text-foreground">An AI interviewer</span>
           <br />
@@ -40,12 +44,16 @@ export function Hero() {
             See how it works
           </Link>
         </div>
+
+        <p className="mt-6 font-mono text-xs text-foreground-subtle">
+          Python · JavaScript · Go · Java · C++ · Ruby — run sandboxed, scored deterministically.
+        </p>
       </Reveal>
 
-      {/* Scroll cue */}
-      <div className="absolute bottom-8 left-1/2 z-10 -translate-x-1/2" aria-hidden="true">
-        <ChevronDown className="h-5 w-5 animate-bounce text-foreground-ghost" />
-      </div>
+      {/* Lead with the product: a real interview moment, not a headline in a void. */}
+      <Reveal className="relative z-10 mx-auto mt-14 max-w-5xl sm:mt-16">
+        <HeroShowcase />
+      </Reveal>
     </section>
   );
 }
