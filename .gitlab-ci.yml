@@ -191,3 +191,39 @@ deploy-backend:
   environment:
     name: backend-beef
     url: https://140.245.14.50.sslip.io
+
+# ─────────────────────── 7. Deploy voice → beef VPS (ARM, native build) ───
+# Same SSH path as deploy-backend, but gated on `changes:` so the heavy torch+models image
+# (CPU-only wheels: see voice/pyproject.toml) only rebuilds when voice/ or the routing files
+# actually change — every other main push skips it. Not interruptible: a half-built image is
+# worse than a queued one. Caddy is force-recreated (single-file bind-mounts keep the OLD
+# inode on rsync-in-place, so `reload` reads stale config — recreate picks up the /voice route).
+deploy-voice:
+  stage: deploy
+  image: alpine:3.20
+  interruptible: false
+  timeout: 45m
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $BEEF_SSH_KEY'
+      changes:
+        - voice/**/*
+        - deploy/docker-compose.yml
+        - deploy/Caddyfile
+  before_script:
+    - apk add --no-cache openssh-client rsync curl
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    - echo "$BEEF_SSH_KEY" | base64 -d > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+    - printf 'Host beef\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/id_ed25519\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$BEEF_HOST" "$BEEF_USER" > ~/.ssh/config
+  script:
+    # Ship source only — the venv (wrong platform), caches, and tests never belong on the host.
+    - rsync -az --delete --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.pytest_cache' --exclude '.ruff_cache' --exclude '.mypy_cache' --exclude '.fixtures' voice/ beef:overforge/voice/
+    - rsync -az --exclude backend.env deploy/ beef:overforge/deploy/
+    - ssh beef 'cd ~/overforge && docker compose -f deploy/docker-compose.yml up -d --build voice'
+    - ssh beef 'cd ~/overforge && docker compose -f deploy/docker-compose.yml up -d --force-recreate caddy && docker compose -f deploy/docker-compose.yml ps'
+    # Wait for the service to finish warming the baked models (lifespan ~30 s) before declaring success.
+    # The trailing test makes the job FAIL if it never goes healthy (a bare loop would exit 0 on timeout).
+    - ssh beef 'ok=0; for i in $(seq 1 40); do if curl -fsS --resolve 140.245.14.50.sslip.io:443:127.0.0.1 https://140.245.14.50.sslip.io/voice/healthz; then ok=1; break; fi; sleep 5; done; [ "$ok" = 1 ]'
+    - ssh beef 'docker image prune -f >/dev/null; docker builder prune -f --keep-storage=5GB >/dev/null; echo pruned'
+  environment:
+    name: voice-beef
+    url: https://140.245.14.50.sslip.io/voice/healthz
