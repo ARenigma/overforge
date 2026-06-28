@@ -175,7 +175,10 @@ export function NewInterviewDialog() {
 
         {link ? (
           // ── Result view ──────────────────────────────────────────────────
-          <div className="space-y-5 pt-1">
+          // min-w-0: this is a CSS-grid item (DialogContent is `grid`); without it the item's
+          // default `min-width:auto` sizes to the long invite-URL's min-content and blows out past
+          // the dialog, defeating the link row's `truncate`. min-w-0 lets the track cap at the dialog.
+          <div className="min-w-0 space-y-5 pt-1">
             <p className="text-sm text-muted-foreground">
               Share this link with the candidate. It contains their session token and expires
               automatically.
@@ -232,7 +235,7 @@ export function NewInterviewDialog() {
           </div>
         ) : (
           // ── Create form ──────────────────────────────────────────────────
-          <form onSubmit={handleSubmit} className="space-y-5 pt-1">
+          <form onSubmit={handleSubmit} className="min-w-0 space-y-5 pt-1">
             {error && (
               <Alert className="border-destructive/40 bg-destructive/10 py-2 px-3">
                 <AlertDescription className="text-destructive text-sm">{error}</AlertDescription>
