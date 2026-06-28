@@ -14,4 +14,3 @@ load_ws.py
 harness/
 Dockerfile
 .dockerignore
-README.md

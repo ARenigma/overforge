@@ -28,16 +28,18 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
-# 1) Resolve + install runtime deps first (cached on the lockfile, not on app code).
+# 1) Resolve + install runtime deps into the venv (cached on the lockfile, not on app code).
+# --no-install-project: the service runs the flat modules directly (uv run --no-sync), so we never
+# build/install the overforge-voice package itself — avoids a needless hatchling build in the image.
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 # 2) App code (adapters + service modules; tests/harness/.venv excluded via .dockerignore).
 COPY . .
-RUN uv sync --frozen --no-dev
 
-# 3) Bake the models so the first (and every) cold start is fully offline.
-RUN uv run python -c "import numpy as np; \
+# 3) Bake the models so the first (and every) cold start is fully offline. --no-sync: use the venv
+# as-is (deps already installed); never re-sync/build the project.
+RUN uv run --no-sync python -c "import numpy as np; \
 from adapters.silero_vad import get_silero_model; get_silero_model(); \
 from adapters.smart_turn_v3 import _get_onnx_path, _load_onnx_session; _load_onnx_session(_get_onnx_path()); \
 from stt import WhisperSTT; w = WhisperSTT(); w.transcribe(np.zeros(8000, dtype=np.float32))"
@@ -48,4 +50,4 @@ EXPOSE 5002
 HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
     CMD curl -fsS http://localhost:5002/healthz || exit 1
 
-CMD ["uv", "run", "uvicorn", "ws_app:app", "--host", "0.0.0.0", "--port", "5002", "--workers", "1"]
+CMD ["uv", "run", "--no-sync", "uvicorn", "ws_app:app", "--app-dir", "/app", "--host", "0.0.0.0", "--port", "5002", "--workers", "1"]
