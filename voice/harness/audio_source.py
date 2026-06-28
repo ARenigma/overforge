@@ -2,9 +2,12 @@
 
 Streams genuine Buckeye interviewee turns (16 kHz mono, WITH real intra-turn pauses) so the live
 Silero + Smart-Turn endpointer fires on its own — a synthetic/TTS clip with unnatural pauses
-wouldn't validate end-of-turn detection. Each turn is tail-padded with ~1.2 s of silence so the
-trailing-silence run reliably crosses the 0.8 s hold (+ 3 s backstop) and commits. Audio is encoded
-to the wire format the browser uses: little-endian Int16, exactly 512 samples (1024 bytes)/frame.
+wouldn't validate end-of-turn detection. Each turn is tail-padded with silence PAST the 3.0 s
+backstop so EVERY turn reliably commits — turns whose ending Smart Turn is confident about fire at
+the 0.8 s hold; the rest fire at the backstop. (A real open mic streams silence indefinitely, so the
+backstop always fires; the harness must pad enough to mimic that — a short pad would just run out of
+frames mid-silence and never commit.) Audio is encoded to the wire format the browser uses:
+little-endian Int16, exactly 512 samples (1024 bytes)/frame.
 """
 
 from __future__ import annotations
@@ -22,7 +25,8 @@ if str(_EVAL_DIR) not in sys.path:
 
 _SR = 16_000
 _FRAME = 512
-_TAIL_PAD_S = 1.2
+# > the endpointer's 3.0 s backstop, so a turn always commits even if Smart Turn never confirms.
+_TAIL_PAD_S = 3.6
 
 
 def _to_int16_frames(
