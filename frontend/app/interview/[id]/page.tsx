@@ -37,6 +37,8 @@ import {
   Clock,
   Loader2,
   Lock,
+  Mic,
+  MicOff,
   Play,
   Sparkles,
   Volume2,
@@ -44,6 +46,12 @@ import {
 } from 'lucide-react';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
+import { useVoiceMic } from '@/lib/voice/use-voice-mic';
+import { useVoiceSocket } from '@/lib/voice/use-voice-socket';
+import { playFiller } from '@/lib/voice/play-filler';
+import type { ServerReady, ServerTurnReady } from '@/lib/voice/types';
+
+const VOICE_WS_URL = process.env.NEXT_PUBLIC_VOICE_WS_URL ?? '';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -217,6 +225,21 @@ export default function InterviewPage() {
   const [pasteBlocked, setPasteBlocked] = useState(false);
   const pasteHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Voice (P2-B.4b) ──────────────────────────────────────────────────────────
+  // voiceMode: true = browser is in spoken-interview mode (WS + mic active).
+  // Automatically entered when NEXT_PUBLIC_VOICE_WS_URL is set and the mic is granted.
+  const [voiceMode, setVoiceMode] = useState(false);
+  // Whether the mic should forward frames (suppressed during TTS playback).
+  const [micForwarding, setMicForwarding] = useState(false);
+  // The most-recent `expects` value received from the server — gates mic vs typing.
+  const lastExpectsRef = useRef<'voice' | 'text' | 'code'>('voice');
+  // True while TTS is playing a voice-mode turn (suppresses mic frames).
+  const voiceSpeakingRef = useRef(false);
+  // The requestId of the turn we are currently playing/acking.
+  const pendingVoiceRequestRef = useRef<string | null>(null);
+  // Whether the voice WS should be connected (set false on fatal / voice toggle).
+  const [voiceSocketEnabled, setVoiceSocketEnabled] = useState(false);
+
   // One guard for /finish across BOTH conclude paths (timer hard-stop and phase→done), so they
   // can't each fire a redundant /finish if they trip at the same moment.
   const concludeCalledRef = useRef(false);
@@ -226,6 +249,138 @@ export default function InterviewPage() {
 
   // Transcript scroll ref
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+
+  // ── Voice hooks ───────────────────────────────────────────────────────────────
+  // sendFrameRef breaks the forward-reference cycle: the mic hook captures the ref,
+  // the socket hook populates it once instantiated below.
+  const sendFrameRef = useRef<((buf: ArrayBuffer) => void) | null>(null);
+
+  const {
+    micState,
+    start: startMic,
+    stop: stopMic,
+  } = useVoiceMic({
+    onFrame: useCallback(
+      (buf: ArrayBuffer) => {
+        if (!micForwarding) return;
+        sendFrameRef.current?.(buf);
+      },
+      [micForwarding]
+    ),
+  });
+
+  // speak() is defined below but the socket cue handlers need it — use a ref.
+  const speakRef = useRef<
+    ((source: 'turn' | 'run', tokenOverride?: string) => Promise<void>) | null
+  >(null);
+  const activeTokenRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeTokenRef.current = activeToken;
+  }, [activeToken]);
+
+  const handleVoiceReady = useCallback((cue: ServerReady) => {
+    lastExpectsRef.current = cue.expects;
+    // Arm mic forwarding if the server expects voice immediately.
+    if (cue.expects === 'voice') setMicForwarding(true);
+  }, []);
+
+  const handleVoiceThinking = useCallback(() => {
+    setMicForwarding(false);
+    const tok = activeTokenRef.current;
+    if (tok) void playFiller(id, tok, speakSeqRef);
+  }, [id]);
+
+  const handleVoiceTurnReady = useCallback(
+    (cue: ServerTurnReady) => {
+      lastExpectsRef.current = cue.utterance.expects;
+      pendingVoiceRequestRef.current = cue.requestId;
+
+      // Append candidate transcript bubble + interviewer utterance bubble.
+      setMessages((prev) => [
+        ...prev,
+        { role: 'candidate' as const, text: cue.transcript },
+        { role: 'ai' as const, text: cue.utterance.text },
+      ]);
+      setPhase(cue.phase as InterviewPhase);
+      if (cue.phase === 'done') setStage('done');
+
+      // Stop mic capture and play the interviewer's TTS via the existing speak() path.
+      setMicForwarding(false);
+      voiceSpeakingRef.current = true;
+
+      const doSpeak = async () => {
+        try {
+          await speakRef.current?.('turn');
+        } finally {
+          voiceSpeakingRef.current = false;
+          // Ack playback so the server arms the next turn.
+          sendSpokenRef.current?.(cue.requestId);
+          // Re-arm mic if next phase is still voice.
+          if (cue.utterance.expects === 'voice' && !cue.isTerminal) {
+            setMicForwarding(true);
+          } else if (cue.utterance.expects !== 'voice') {
+            // Coding/text phase — disarm mic and notify server.
+            stopMic();
+            sendMicOffRef.current?.();
+          }
+        }
+      };
+      void doSpeak();
+    },
+    [stopMic]
+  );
+
+  const handleVoiceFatal = useCallback(() => {
+    setVoiceMode(false);
+    setVoiceSocketEnabled(false);
+    stopMic();
+  }, [stopMic]);
+
+  // These are populated once the socket hook is instantiated below.
+  const sendSpokenRef = useRef<((requestId: string) => void) | null>(null);
+  const sendMicOffRef = useRef<(() => void) | null>(null);
+
+  const {
+    socketStatus,
+    sendFrame,
+    sendSpoken,
+    sendMicOff,
+    disconnect: disconnectVoice,
+  } = useVoiceSocket({
+    interviewId: id,
+    token: activeToken,
+    enabled: voiceSocketEnabled && !!VOICE_WS_URL,
+    onReady: handleVoiceReady,
+    onThinking: handleVoiceThinking,
+    onTurnReady: handleVoiceTurnReady,
+    onError: useCallback(() => {
+      /* surfaced via fatal/disconnect */
+    }, []),
+    onClosing: useCallback(() => {
+      setMicForwarding(false);
+      stopMic();
+    }, [stopMic]),
+    onFatal: handleVoiceFatal,
+  });
+
+  // Wire the ref so the mic onFrame callback can call sendFrame.
+  useEffect(() => {
+    sendFrameRef.current = sendFrame;
+  }, [sendFrame]);
+  useEffect(() => {
+    sendSpokenRef.current = sendSpoken;
+  }, [sendSpoken]);
+  useEffect(() => {
+    sendMicOffRef.current = sendMicOff;
+  }, [sendMicOff]);
+
+  // When micState goes denied/error while voiceMode is requested, fall back to typed.
+  useEffect(() => {
+    if (micState === 'denied' || micState === 'error') {
+      setVoiceMode(false);
+      setVoiceSocketEnabled(false);
+    }
+  }, [micState]);
 
   // Scroll to bottom whenever messages change
   useEffect(() => {
@@ -365,6 +520,23 @@ export default function InterviewPage() {
         setLockedLanguage(res.assignedLanguage);
         setLanguage(res.assignedLanguage);
       }
+
+      // Voice-first: the "I agree & start" click is a user gesture — request the mic now.
+      // If NEXT_PUBLIC_VOICE_WS_URL is unset, voice is simply unavailable (typed only).
+      if (VOICE_WS_URL && res.phase !== 'done') {
+        try {
+          await startMic(); // getUserMedia — rides the user gesture
+          // startMic sets micState; if granted we enable the socket.
+          // We check navigator.mediaDevices succeeded by attempting the call; if it
+          // throws we fall through to typed mode silently.
+          setVoiceMode(true);
+          setVoiceSocketEnabled(true);
+          lastExpectsRef.current = res.utterance.expects;
+        } catch {
+          // Mic denied or AudioContext failed — typed fallback, no error shown.
+        }
+      }
+
       setStage(res.phase === 'done' ? 'done' : 'interview');
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to start interview.');
@@ -462,6 +634,11 @@ export default function InterviewPage() {
     [activeToken, id, muted]
   );
 
+  // Keep speakRef in sync so voice cue handlers always call the latest speak().
+  useEffect(() => {
+    speakRef.current = speak;
+  }, [speak]);
+
   const toggleMute = useCallback(() => {
     setMuted((prev) => {
       const next = !prev;
@@ -473,6 +650,29 @@ export default function InterviewPage() {
       return next;
     });
   }, [muteKey]);
+
+  /** Toggle voice mode on/off. Entering voice re-requests the mic; leaving stops it. */
+  const toggleVoiceMode = useCallback(async () => {
+    if (!VOICE_WS_URL) return;
+    if (voiceMode) {
+      // Turn voice off — revert to typed.
+      setVoiceMode(false);
+      setVoiceSocketEnabled(false);
+      setMicForwarding(false);
+      stopMic();
+      disconnectVoice();
+    } else {
+      // Turn voice on — request mic (requires a user gesture; this button click qualifies).
+      try {
+        await startMic();
+        setVoiceMode(true);
+        setVoiceSocketEnabled(true);
+        if (lastExpectsRef.current === 'voice') setMicForwarding(true);
+      } catch {
+        // Mic denied — stay in typed mode silently.
+      }
+    }
+  }, [voiceMode, stopMic, disconnectVoice, startMic]);
 
   const handleRunCode = useCallback(async () => {
     if (!activeToken || running) return;
@@ -777,19 +977,80 @@ export default function InterviewPage() {
                   </svg>
                 </span>
                 <span className="text-xs font-semibold text-foreground">Interviewer</span>
-                <button
-                  type="button"
-                  onClick={toggleMute}
-                  aria-label={muted ? 'Unmute interviewer voice' : 'Mute interviewer voice'}
-                  aria-pressed={muted}
-                  className="ml-auto rounded-input p-1 text-foreground-subtle transition-colors hover:text-foreground"
-                >
-                  {muted ? (
-                    <VolumeX className="h-4 w-4" />
-                  ) : (
-                    <Volume2 className="h-4 w-4 text-primary" />
+
+                {/* Voice status pill — only visible when voice mode is active */}
+                {voiceMode && (
+                  <span
+                    className={[
+                      'flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-mono font-medium',
+                      micForwarding
+                        ? 'bg-primary/15 text-primary border border-primary/30'
+                        : voiceSpeakingRef.current
+                          ? 'bg-muted text-muted-foreground border border-border'
+                          : socketStatus === 'connecting'
+                            ? 'bg-muted text-muted-foreground border border-border'
+                            : 'bg-muted text-muted-foreground border border-border',
+                    ].join(' ')}
+                    aria-live="polite"
+                  >
+                    {micForwarding ? (
+                      <>
+                        <span className="relative flex h-1.5 w-1.5">
+                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+                          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
+                        </span>
+                        Listening
+                      </>
+                    ) : socketStatus === 'connecting' ? (
+                      <>
+                        <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                        Connecting
+                      </>
+                    ) : socketStatus === 'failed' ? (
+                      'Voice off'
+                    ) : (
+                      'Speaking'
+                    )}
+                  </span>
+                )}
+
+                <div className="ml-auto flex items-center gap-1">
+                  {/* Mic toggle — only rendered when VOICE_WS_URL is configured */}
+                  {!!VOICE_WS_URL && (
+                    <button
+                      type="button"
+                      onClick={() => void toggleVoiceMode()}
+                      aria-label={voiceMode ? 'Switch to typed mode' : 'Switch to voice mode'}
+                      aria-pressed={voiceMode}
+                      title={
+                        voiceMode
+                          ? 'Voice on — click to use keyboard'
+                          : 'Click to speak your answers'
+                      }
+                      className={[
+                        'rounded-input p-1 transition-colors',
+                        voiceMode
+                          ? 'text-primary hover:text-primary/80'
+                          : 'text-foreground-subtle hover:text-foreground',
+                      ].join(' ')}
+                    >
+                      {voiceMode ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+                    </button>
                   )}
-                </button>
+                  <button
+                    type="button"
+                    onClick={toggleMute}
+                    aria-label={muted ? 'Unmute interviewer voice' : 'Mute interviewer voice'}
+                    aria-pressed={muted}
+                    className="rounded-input p-1 text-foreground-subtle transition-colors hover:text-foreground"
+                  >
+                    {muted ? (
+                      <VolumeX className="h-4 w-4" />
+                    ) : (
+                      <Volume2 className="h-4 w-4 text-primary" />
+                    )}
+                  </button>
+                </div>
               </div>
 
               {/* Transcript scroll area */}
