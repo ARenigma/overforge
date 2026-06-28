@@ -14,6 +14,9 @@ dependencies = [
     "faster-whisper>=1.2.1",
     "librosa>=0.10",
     "httpx>=0.28.1",
+    "fastapi>=0.138.1",
+    "uvicorn[standard]>=0.49.0",
+    "websockets>=16.0",
 ]
 
 [build-system]
@@ -44,6 +47,7 @@ ignore_missing_imports = true
 [dependency-groups]
 dev = [
     "mypy>=2.1.0",
+    "psutil>=7.2.2",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
 ]

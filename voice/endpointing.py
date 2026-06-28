@@ -183,44 +183,21 @@ class SilenceGatedEndpointer:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _eval_dir() -> str:
-        from pathlib import Path  # noqa: PLC0415
-        return str(Path(__file__).parent.parent / "eval" / "voice-turn-bakeoff")
-
     def _ensure_vad(self) -> Any:
         if self._vad_model is None:
-            import sys  # noqa: PLC0415
-            eval_dir = self._eval_dir()
-            if eval_dir not in sys.path:
-                sys.path.insert(0, eval_dir)
-            try:
-                from adapters.silero_vad import get_silero_model as _get  # noqa: PLC0415
-                self._vad_model, _ = _get()
-            except ImportError:
-                logger.exception(
-                    "Cannot import Silero VAD — eval/voice-turn-bakeoff must be on sys.path"
-                )
-                raise
+            # Imported lazily (torch is heavy) from the vendored voice/adapters package, which is
+            # importable whenever the process runs with voice/ on sys.path (tests, the WS service,
+            # and the Docker image WORKDIR). No eval/ path hack — adapters ship with the service.
+            from adapters.silero_vad import get_silero_model  # noqa: PLC0415
+
+            self._vad_model, _ = get_silero_model()
         return self._vad_model
 
     def _ensure_smart_turn(self) -> Any:
         if self._smart_turn_session is None:
-            import sys  # noqa: PLC0415
-            eval_dir = self._eval_dir()
-            if eval_dir not in sys.path:
-                sys.path.insert(0, eval_dir)
-            try:
-                from adapters.smart_turn_v3 import (  # noqa: PLC0415
-                    _get_onnx_path,
-                    _load_onnx_session,
-                )
-                self._smart_turn_session = _load_onnx_session(_get_onnx_path())
-            except ImportError:
-                logger.exception(
-                    "Cannot import Smart Turn — eval/voice-turn-bakeoff must be on sys.path"
-                )
-                raise
+            from adapters.smart_turn_v3 import _get_onnx_path, _load_onnx_session  # noqa: PLC0415
+
+            self._smart_turn_session = _load_onnx_session(_get_onnx_path())
         return self._smart_turn_session
 
     def _run_vad(self, frame: np.ndarray) -> bool:
@@ -251,10 +228,6 @@ class SilenceGatedEndpointer:
 
     def _run_smart_turn(self) -> float:
         """Run Smart Turn on the current 8-second window. Returns P(complete) in [0, 1]."""
-        import sys  # noqa: PLC0415
-        eval_dir = self._eval_dir()
-        if eval_dir not in sys.path:
-            sys.path.insert(0, eval_dir)
         from adapters.smart_turn_v3 import compute_whisper_log_mel  # noqa: PLC0415
 
         window = self._get_window()

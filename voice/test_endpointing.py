@@ -34,9 +34,10 @@ if str(_EVAL_DIR) not in sys.path:
     sys.path.insert(0, str(_EVAL_DIR))
 
 # Now we can import the eval modules
+from corpora.buckeye import Turn, fetch_turns  # noqa: E402
+
 from adapters.silero_vad import get_silero_model  # noqa: E402
 from adapters.smart_turn_v3 import _get_onnx_path, _load_onnx_session  # noqa: E402
-from corpora.buckeye import Turn, fetch_turns  # noqa: E402
 
 # And the module under test
 _VOICE_DIR = Path(__file__).parent
