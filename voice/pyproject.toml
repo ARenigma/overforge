@@ -8,7 +8,13 @@ dependencies = [
     "onnxruntime>=1.18",
     "numpy>=1.26",
     "soundfile>=0.12",
-    "torch>=2.3",
+    # Cap <2.12 so torch's minor matches torchaudio's latest (2.11.x): torchaudio ships a prebuilt
+    # native ext bound to a specific libtorch ABI, and a cpu-index torch 2.12 against torchaudio 2.11
+    # fails to load _torchaudio.abi3.so at import. See the cpu-index pin in [tool.uv.sources] below.
+    "torch>=2.3,<2.12",
+    # torchaudio is pulled by silero-vad, but it must be a DIRECT dep for the cpu-index source
+    # override below to apply (uv only marker-splits sources for direct deps). Same <2.12 cap as torch.
+    "torchaudio>=2.3,<2.12",
     "silero-vad>=5.1",
     "pipecat-ai>=1.4.0",
     "faster-whisper>=1.2.1",
@@ -22,7 +28,13 @@ dependencies = [
 # Pin torch + torchaudio to CPU-only wheels ON LINUX (the beef arm64 deploy target). The default
 # PyPI torch wheel drags in ~1.5 GB of CUDA libraries (nvidia-cuda-*, cudnn, …) that a CPU-only VPS
 # can never use — the cpu index ships the same torch with NO cuda deps. macOS local dev is excluded
-# by the sys_platform marker, so it keeps the default build (which is already CPU there).
+# by the sys_platform marker, so it keeps the default PyPI build (already CPU there).
+#
+# BOTH must come from the cpu index: torchaudio ships a prebuilt _torchaudio.abi3.so bound to a
+# specific libtorch ABI, and the cpu-index and PyPI torch wheels are built by different pipelines
+# with incompatible C++ ABIs — mixing them (cpu-index torch + PyPI torchaudio) fails to load the ext
+# at import, even at the same version. The torch<2.12 cap (see dependencies) lands on 2.11.0, the
+# version for which the cpu index carries a matching torchaudio aarch64 wheel.
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
