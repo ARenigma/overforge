@@ -70,8 +70,9 @@ class ServerReady(TypedDict):
 
 
 class ServerThinking(TypedDict):
+    # Payload-less: fired pre-STT (before a turn requestId exists). The browser plays a filler and
+    # cancels it via its own playback sequence when the next turn_ready arrives — no id needed.
     type: Literal["thinking"]
-    requestId: str
 
 
 class WireUtterance(TypedDict):
