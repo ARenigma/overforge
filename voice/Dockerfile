@@ -34,15 +34,21 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# 2) App code (adapters + service modules; tests/harness/.venv excluded via .dockerignore).
-COPY . .
+# 2) Bake the models into the image caches (TORCH_HOME / HF_HOME + the wheel-bundled Smart Turn ONNX)
+# using ONLY installed deps — NO app code — so this layer's cache key is the lockfile, not app code.
+# The GitHub (Silero) + HF (whisper-small) fetch then re-runs only when deps change, never on a code
+# edit (previously COPY . . sat above the bake, so every edit re-downloaded the models). These calls
+# mirror adapters/silero_vad.py::_load_silero_model, adapters/smart_turn_v3.py::_get_onnx_path, and
+# stt.py::WhisperSTT — keep them in sync; the runtime lifespan re-warms via the real adapters, so any
+# drift trips the deploy health check. --no-sync: use the venv as-is; never re-sync/build the project.
+RUN uv run --no-sync python -c "\
+import torch; torch.hub.load(repo_or_dir='snakers4/silero-vad', model='silero_vad', force_reload=False, onnx=False, verbose=False, trust_repo=True); \
+import importlib.resources as ir, pipecat.audio.turn.smart_turn.data as _d, onnxruntime as ort; ort.InferenceSession(str(ir.files(_d).joinpath('smart-turn-v3.2-cpu.onnx'))); \
+from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
 
-# 3) Bake the models so the first (and every) cold start is fully offline. --no-sync: use the venv
-# as-is (deps already installed); never re-sync/build the project.
-RUN uv run --no-sync python -c "import numpy as np; \
-from adapters.silero_vad import get_silero_model; get_silero_model(); \
-from adapters.smart_turn_v3 import _get_onnx_path, _load_onnx_session; _load_onnx_session(_get_onnx_path()); \
-from stt import WhisperSTT; w = WhisperSTT(); w.transcribe(np.zeros(8000, dtype=np.float32))"
+# 3) App code (adapters + service modules; tests/harness/.venv excluded via .dockerignore). Last so an
+# edit only busts this cheap layer — the deps + baked-model layers above stay cached.
+COPY . .
 
 EXPOSE 5002
 
