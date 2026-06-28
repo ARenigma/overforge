@@ -24,6 +24,7 @@ services:
       - caddy_config:/config
     depends_on:
       - backend
+      - voice
 
   backend:
     image: ${BACKEND_IMAGE:-overforge-backend:latest}
@@ -44,6 +45,26 @@ services:
       - '111'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+
+  # Python real-time voice service (P2-B): browser WS → endpointer → whisper STT → /answer → cues.
+  # No secrets of its own — it reaches the brain over the internal network and the candidate token
+  # is supplied per-connection by the browser. Models are baked into the image (offline cold start).
+  voice:
+    image: ${VOICE_IMAGE:-overforge-voice:latest}
+    build:
+      context: ../voice
+    restart: unless-stopped
+    environment:
+      OVERFORGE_API_URL: http://backend:5001 # internal compose DNS — NOT the public TLS host
+      FRONTEND_URL: https://overforge.vercel.app # allowed WS Origin (the deployed frontend)
+      PORT: '5002'
+      MAX_CONNECTIONS: '4'
+      STT_CONCURRENCY: '2'
+      OMP_NUM_THREADS: '2'
+    expose:
+      - '5002'
+    depends_on:
+      - backend
 
 volumes:
   caddy_data: {}

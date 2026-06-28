@@ -1,0 +1,17 @@
+# The service image needs only the runtime modules + vendored adapters + lockfile.
+# Exclude the local venv (wrong platform / huge), tests, the test harness, and caches.
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.fixtures/
+test_*.py
+load_ws.py
+harness/
+Dockerfile
+.dockerignore
+README.md

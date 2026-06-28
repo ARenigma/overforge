@@ -3,5 +3,16 @@
 # (point its A record at the VPS and change this one line).
 140.245.14.50.sslip.io {
 	encode zstd gzip
-	reverse_proxy backend:5001
+
+	# Real-time voice WebSocket (P2-B). handle_path strips the /voice prefix, so the browser
+	# connects to wss://<host>/voice/ws/interview/<id> and the voice service sees /ws/interview/<id>.
+	# Caddy proxies the WebSocket Upgrade automatically. MUST come before the catch-all below.
+	handle_path /voice/* {
+		reverse_proxy voice:5002
+	}
+
+	# Everything else → the TS backend API.
+	handle {
+		reverse_proxy backend:5001
+	}
 }
