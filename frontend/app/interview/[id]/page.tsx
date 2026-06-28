@@ -521,23 +521,26 @@ export default function InterviewPage() {
         setLanguage(res.assignedLanguage);
       }
 
-      // Voice-first: the "I agree & start" click is a user gesture — request the mic now.
-      // If NEXT_PUBLIC_VOICE_WS_URL is unset, voice is simply unavailable (typed only).
-      if (VOICE_WS_URL && res.phase !== 'done') {
-        try {
-          await startMic(); // getUserMedia — rides the user gesture
-          // startMic sets micState; if granted we enable the socket.
-          // We check navigator.mediaDevices succeeded by attempting the call; if it
-          // throws we fall through to typed mode silently.
-          setVoiceMode(true);
-          setVoiceSocketEnabled(true);
-          lastExpectsRef.current = res.utterance.expects;
-        } catch {
-          // Mic denied or AudioContext failed — typed fallback, no error shown.
-        }
-      }
-
+      // Render the room IMMEDIATELY — the typed experience must NEVER be blocked by mic setup.
+      // (A slow/denied mic, a user lingering on the permission prompt, or an AudioContext stall must
+      // not leave the candidate stuck on a loading screen.)
       setStage(res.phase === 'done' ? 'done' : 'interview');
+
+      // Voice-first: the "I agree & start" click is the user gesture, so INITIATE the mic now
+      // (synchronously, to preserve the gesture) but do NOT await it — voice attaches asynchronously.
+      // startMic() resolves either way and sets micState; the micState watcher reverts to typed on
+      // denied/error. If NEXT_PUBLIC_VOICE_WS_URL is unset, voice is simply unavailable (typed only).
+      if (VOICE_WS_URL && res.phase !== 'done') {
+        lastExpectsRef.current = res.utterance.expects;
+        void startMic()
+          .then(() => {
+            setVoiceMode(true);
+            setVoiceSocketEnabled(true);
+          })
+          .catch(() => {
+            /* mic setup failed — typed fallback stays fully usable, no error shown */
+          });
+      }
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to start interview.');
       setStage('error');
