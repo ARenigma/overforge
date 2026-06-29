@@ -31,6 +31,7 @@ from brain_client import RestBrainClient  # noqa: E402
 from contracts import AudioArray  # noqa: E402
 from endpointing import SilenceGatedEndpointer  # noqa: E402
 from session import VoiceSession  # noqa: E402
+from telemetry import RestTelemetrySink  # noqa: E402
 from ws_connection import ConnectionDeps, WsConnection  # noqa: E402
 from ws_protocol import CLOSE_AT_CAPACITY, CLOSE_ORIGIN_DENIED  # noqa: E402
 from ws_sink import WsTtsSink  # noqa: E402
@@ -84,10 +85,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         interview_id: str, token: str, language: str, sink: WsTtsSink
     ) -> VoiceSession:
         # Each connection gets its OWN endpointer (VAD state is per-speaker) over the SHARED,
-        # read-mostly warm models; one shared SemaphoreStt; a brain over the shared HTTP client.
+        # read-mostly warm models; one shared SemaphoreStt; a brain and telemetry sink both
+        # using the shared HTTP client (no second connection opened).
         endpointer = SilenceGatedEndpointer(
             vad_model=vad_model, smart_turn_session=smart_turn_session
         )
+        telemetry_sink = RestTelemetrySink(interview_id, token, client=http_client)
         return VoiceSession(
             interview_id=interview_id,
             session_token=token,
@@ -96,6 +99,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             brain=RestBrainClient(client=http_client),
             sink=sink,
             language=language,
+            telemetry=telemetry_sink,
         )
 
     app.state.deps = ConnectionDeps(http_client=http_client, build_session=build_session)

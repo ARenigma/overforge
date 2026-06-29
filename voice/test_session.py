@@ -624,3 +624,243 @@ async def test_malformed_brain_response_rearms_session_not_bricks() -> None:
     with pytest.raises(BrainTransientError):
         await _drive(session, 5)
     assert session.state == "listening"  # not bricked in processing
+
+
+# ─────────────────────────── Telemetry sink ───────────────────────────
+
+from telemetry import NoopTelemetrySink, RestTelemetrySink, TurnTelemetry  # noqa: E402
+
+
+class FakeTelemetrySink:
+    """Records every TurnTelemetry it receives; never raises."""
+
+    def __init__(self) -> None:
+        self.records: list[TurnTelemetry] = []
+
+    async def record(self, t: TurnTelemetry) -> None:
+        self.records.append(t)
+
+
+async def test_telemetry_sink_receives_one_record_per_turn() -> None:
+    """A normal (non-empty, non-terminal) turn fires exactly one telemetry record."""
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("hello world")
+    brain = FakeBrain(results=[AnswerResult(Utterance("next q", "voice"), "oral", {})])
+    tel = FakeTelemetrySink()
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        telemetry=tel,
+    )
+    await _drive(session, 5)
+    # The task is fire-and-forget; yield control so it executes.
+    await asyncio.sleep(0)
+    assert len(tel.records) == 1
+    rec = tel.records[0]
+    assert rec.commit == "smartturn"
+    assert rec.phase == "oral"
+    assert rec.empty is False
+    assert rec.terminal is False
+    assert rec.stt_ms >= 0.0
+    assert rec.audio_s > 0.0
+
+
+async def test_telemetry_sink_receives_record_for_false_fire() -> None:
+    """An empty-transcript (false-fire) commit still produces a telemetry record."""
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("   ")  # whitespace → empty after strip
+    brain = FakeBrain()
+    tel = FakeTelemetrySink()
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        telemetry=tel,
+    )
+    await _drive(session, 5)
+    await asyncio.sleep(0)
+    assert len(tel.records) == 1
+    rec = tel.records[0]
+    assert rec.empty is True
+    # commit carries the EOT reason from the endpointer (e.g. "smartturn"); phase is "false-fire".
+    assert rec.phase == "false-fire"
+    assert rec.oracle_ms is None
+    assert rec.tts_ms is None
+
+
+async def test_telemetry_sink_receives_record_for_terminal_turn() -> None:
+    """A terminal turn fires a telemetry record with terminal=True."""
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("final answer")
+    brain = FakeBrain(results=[AnswerResult(Utterance("done.", "text"), "done", {})])
+    tel = FakeTelemetrySink()
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        telemetry=tel,
+    )
+    await _drive(session, 5)
+    await asyncio.sleep(0)
+    assert len(tel.records) == 1
+    assert tel.records[0].terminal is True
+    assert tel.records[0].phase == "done"
+
+
+async def test_existing_tests_pass_without_telemetry_kwarg() -> None:
+    """VoiceSession constructed without telemetry= defaults to NoopTelemetrySink — no crash."""
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("answer")
+    brain = FakeBrain(results=[AnswerResult(Utterance("q2", "voice"), "oral", {})])
+    # No telemetry= kwarg — must work exactly as before.
+    session = _session(ep, stt, brain)
+    assert isinstance(session._telemetry, NoopTelemetrySink)
+    turn = await _drive(session, 5)
+    assert turn is not None
+    assert session.state == "speaking"
+
+
+async def test_telemetry_failure_does_not_break_turn() -> None:
+    """A crashing telemetry sink must be swallowed — the turn completes normally."""
+
+    class CrashTelemetry:
+        async def record(self, t: TurnTelemetry) -> None:
+            raise RuntimeError("telemetry service down")
+
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("answer")
+    brain = FakeBrain(results=[AnswerResult(Utterance("q2", "voice"), "oral", {})])
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        telemetry=CrashTelemetry(),
+    )
+    turn = await _drive(session, 5)
+    await asyncio.sleep(0)  # let the failing task run
+    assert turn is not None
+    assert session.state == "speaking"  # session not bricked
+
+
+async def test_telemetry_close_cancels_inflight_task() -> None:
+    """close() cancels an in-flight telemetry task (it is tracked in _bg_tasks)."""
+    started = asyncio.Event()
+
+    class HangTelemetry:
+        async def record(self, t: TurnTelemetry) -> None:
+            started.set()
+            await asyncio.sleep(3600)
+
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("answer")
+    brain = FakeBrain(results=[AnswerResult(Utterance("q2", "voice"), "oral", {})])
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        telemetry=HangTelemetry(),
+    )
+    await _drive(session, 5)
+    await started.wait()
+    tasks = list(session._bg_tasks)
+    session.close()
+    await asyncio.sleep(0)
+    assert all(t.cancelled() for t in tasks)
+
+
+# ─────────────────────────── RestTelemetrySink ───────────────────────────
+
+
+async def test_rest_telemetry_sink_posts_correct_path_and_body() -> None:
+    """RestTelemetrySink POSTs to the right path with the right camelCase body."""
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["path"] = request.url.path
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(204)
+
+    client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(handler))
+    sink = RestTelemetrySink("iv1", "tok", client=client)
+    t = TurnTelemetry(
+        request_id="rid-1",
+        commit="smartturn",
+        audio_s=2.5,
+        stt_ms=120.0,
+        oracle_ms=350.0,
+        tts_ms=80.0,
+        gap_ms=550.0,
+        phase="oral",
+        empty=False,
+        terminal=False,
+    )
+    await sink.record(t)
+    assert seen["path"] == "/api/interviews/iv1/voice-turn"
+    body = seen["body"]
+    assert isinstance(body, dict)
+    assert body["token"] == "tok"
+    assert body["requestId"] == "rid-1"
+    assert body["commit"] == "smartturn"
+    assert body["audioS"] == pytest.approx(2.5)
+    assert body["sttMs"] == pytest.approx(120.0)
+    assert body["oracleMs"] == pytest.approx(350.0)
+    assert body["ttsMs"] == pytest.approx(80.0)
+    assert body["gapMs"] == pytest.approx(550.0)
+    assert body["phase"] == "oral"
+    assert body["empty"] is False
+    assert body["terminal"] is False
+
+
+async def test_rest_telemetry_sink_swallows_500() -> None:
+    """A 500 from the backend must be swallowed — record() must not raise."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "db down"})
+
+    client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(handler))
+    sink = RestTelemetrySink("iv1", "tok", client=client)
+    t = TurnTelemetry("r", "backstop", 1.0, 100.0, None, None, 100.0, "oral", False, False)
+    # Must not raise despite the 500.
+    await sink.record(t)
+
+
+async def test_rest_telemetry_sink_swallows_transport_error() -> None:
+    """A transport-level failure must be swallowed — record() must not raise."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("no route")
+
+    client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(handler))
+    sink = RestTelemetrySink("iv1", "tok", client=client)
+    t = TurnTelemetry("r", "maxlen", 5.0, 200.0, None, None, 200.0, "coding", False, False)
+    await sink.record(t)  # must not raise
+
+
+async def test_rest_telemetry_sink_null_optional_fields() -> None:
+    """oracle_ms and tts_ms may be None (false-fire); they must be serialised as JSON null."""
+    seen: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(204)
+
+    client = httpx.AsyncClient(base_url="http://test", transport=httpx.MockTransport(handler))
+    sink = RestTelemetrySink("iv1", "tok", client=client)
+    t = TurnTelemetry("r", "false-fire", 0.5, 50.0, None, None, 50.0, "oral", True, False)
+    await sink.record(t)
+    body = seen["body"]
+    assert isinstance(body, dict)
+    assert body["oracleMs"] is None
+    assert body["ttsMs"] is None
+    assert body["empty"] is True

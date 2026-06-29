@@ -8,6 +8,7 @@ import { enforceRateLimit } from './rate-limit';
 import { hashToken } from '../interview/token';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
+import { recordVoiceTurn } from '../db/interviews';
 import { synthesize, isCartesiaConfigured, splitSentences } from '../voice/cartesia';
 import { pickFillerIndex } from '../voice/fillers';
 import { getFillerAudio } from '../voice/fillerCache';
@@ -341,6 +342,80 @@ router.post('/:id/finish', async (req: Request, res: Response): Promise<void> =>
 
     await orchestrator.finishAndScore(id);
     res.json({ ok: true });
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ─────────────────────── POST /api/interviews/:id/voice-turn ───────────────────────
+// Durable sink for per-turn voice pipeline telemetry emitted by the Python voice service.
+// The voice service has no Supabase credentials; it POSTs here and the backend (which owns
+// the service-role client) writes the row.  Best-effort: the voice side fires-and-forgets,
+// so a 500 here is harmless.  Rate-limited to 120 req/10 min per token (≈ one per turn).
+
+const VALID_COMMITS = new Set(['smartturn', 'backstop', 'maxlen', 'false-fire']);
+
+router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const {
+      token,
+      requestId,
+      commit,
+      audioS,
+      sttMs,
+      oracleMs,
+      ttsMs,
+      gapMs,
+      phase,
+      empty,
+      terminal,
+    } = req.body as {
+      token?: string;
+      requestId?: string;
+      commit?: string;
+      audioS?: unknown;
+      sttMs?: unknown;
+      oracleMs?: unknown;
+      ttsMs?: unknown;
+      gapMs?: unknown;
+      phase?: string;
+      empty?: unknown;
+      terminal?: unknown;
+    };
+
+    await validateCandidate(id, token ?? '');
+    await enforceRateLimit(`voiceturn:${hashToken(token ?? '')}`, {
+      limit: 120,
+      windowMs: 600_000,
+    });
+
+    if (typeof commit !== 'string' || !VALID_COMMITS.has(commit)) {
+      res.status(400).json({ error: `commit must be one of: ${[...VALID_COMMITS].join(', ')}` });
+      return;
+    }
+
+    // Coerce numeric fields: accept number or null/undefined; reject non-finite values → null.
+    const toNum = (v: unknown): number | null => {
+      if (v == null) return null;
+      const n = Number(v);
+      return isFinite(n) ? Math.max(0, n) : null;
+    };
+
+    await recordVoiceTurn(id, {
+      requestId: typeof requestId === 'string' ? requestId : null,
+      commit,
+      audioS: toNum(audioS),
+      sttMs: toNum(sttMs),
+      oracleMs: toNum(oracleMs),
+      ttsMs: toNum(ttsMs),
+      gapMs: toNum(gapMs),
+      phase: typeof phase === 'string' ? phase : null,
+      empty: empty === true,
+      terminal: terminal === true,
+    });
+
+    res.status(204).end();
   } catch (err) {
     sendError(res, err);
   }

@@ -41,6 +41,7 @@ from contracts import (
     TurnResult,
     Utterance,
 )
+from telemetry import NoopTelemetrySink, TelemetrySink, TurnTelemetry
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,7 @@ class VoiceSession:
         brain: BrainClient,
         sink: TtsSink | None = None,
         language: str = "en",
+        telemetry: TelemetrySink | None = None,
     ) -> None:
         self._interview_id = interview_id
         self._token = session_token
@@ -107,12 +109,13 @@ class VoiceSession:
         self._brain = brain
         self._sink: TtsSink = sink if sink is not None else NoopTtsSink()
         self._language = language
+        self._telemetry: TelemetrySink = telemetry if telemetry is not None else NoopTelemetrySink()
 
         self._accum: list[AudioArray] = []
         self._state = _State.LISTENING
         self._request_id = _new_request_id()
-        # In-flight fire-and-forget cue tasks (on_thinking) — referenced so they aren't GC'd
-        # mid-flight, and cancelled on close().
+        # In-flight fire-and-forget cue tasks (on_thinking + telemetry) — referenced so they
+        # aren't GC'd mid-flight, and cancelled on close().
         self._bg_tasks: set[asyncio.Task[None]] = set()
 
     @property
@@ -299,6 +302,19 @@ class VoiceSession:
             " empty=1" if empty else "",
             " terminal=1" if terminal else "",
         )
+        t = TurnTelemetry(
+            request_id=rid,
+            commit=commit,
+            audio_s=audio_s,
+            stt_ms=stt_ms,
+            oracle_ms=oracle_ms,
+            tts_ms=tts_ms,
+            gap_ms=gap_ms,
+            phase=phase,
+            empty=empty,
+            terminal=terminal,
+        )
+        self._safe_telemetry(t)
 
     async def _safe_speak(self, turn: TurnResult) -> None:
         """Voice an utterance. A TTS failure is non-fatal (the room degrades to text) and must
@@ -322,6 +338,24 @@ class VoiceSession:
                 logger.exception("TTS thinking-cue failed — continuing.")
 
         task = asyncio.create_task(_run(), name=f"thinking-cue-{self._request_id}")
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    def _safe_telemetry(self, t: TurnTelemetry) -> None:
+        """Persist turn telemetry via a fire-and-forget background task.
+
+        Mirrors :meth:`_safe_thinking`: tracked in ``self._bg_tasks`` so it is never GC'd
+        mid-flight and is cancelled by :meth:`close`.  All exceptions are swallowed — a
+        telemetry failure must never block or break a turn.
+        """
+
+        async def _run() -> None:
+            try:
+                await self._telemetry.record(t)
+            except Exception:
+                logger.exception("Telemetry record failed for turn %s — continuing.", t.request_id)
+
+        task = asyncio.create_task(_run(), name=f"telemetry-{t.request_id}")
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
 

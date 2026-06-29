@@ -314,6 +314,48 @@ export function claimExpire(id: string): Promise<boolean> {
   return claimStatus(id, 'invited', 'expired');
 }
 
+// ─────────────────────── Voice turn telemetry ───────────────────────
+
+export interface VoiceTurnRecord {
+  requestId: string | null | undefined;
+  commit: string;
+  audioS: number | null | undefined;
+  sttMs: number | null | undefined;
+  oracleMs: number | null | undefined;
+  ttsMs: number | null | undefined;
+  gapMs: number | null | undefined;
+  phase: string | null | undefined;
+  empty: boolean;
+  terminal: boolean;
+}
+
+/** Insert one voice-turn telemetry row.  Throws on DB error (the route swallows it). */
+export async function recordVoiceTurn(interviewId: string, t: VoiceTurnRecord): Promise<void> {
+  const db = createServiceClient();
+
+  // Defensively coerce numeric fields: clamp negatives to 0, treat NaN/Inf as null.
+  const safeNum = (v: number | null | undefined): number | null => {
+    if (v == null || !isFinite(v)) return null;
+    return Math.max(0, v);
+  };
+
+  const { error } = await db.from('voice_turn_telemetry').insert({
+    interview_id: interviewId,
+    request_id: t.requestId ?? null,
+    commit_kind: t.commit,
+    audio_s: safeNum(t.audioS),
+    stt_ms: safeNum(t.sttMs),
+    oracle_ms: safeNum(t.oracleMs),
+    tts_ms: safeNum(t.ttsMs),
+    gap_ms: safeNum(t.gapMs),
+    phase: t.phase ?? null,
+    empty: t.empty,
+    terminal: t.terminal,
+  });
+
+  if (error) throw new Error(`recordVoiceTurn: ${error.message}`);
+}
+
 // ─────────────────────── Outbox store implementation ───────────────────────
 
 /** Insert a pending outbox row for the given interview. */
