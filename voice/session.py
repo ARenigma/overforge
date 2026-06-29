@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+import time
 import uuid
 
 import numpy as np
@@ -190,32 +191,43 @@ class VoiceSession:
 
         Returns ``None`` for a false-fire commit (empty transcript) after silently re-arming.
         Raises :class:`BrainTransientError` (handled by ``feed_frame``) or any unexpected error.
+
+        Emits one structured ``voice.turn`` telemetry line per turn — the commit kind, the per-stage
+        STT/oracle/TTS latency, and the turn audio length. This is the production signal for tuning
+        endpointing (smartturn vs backstop ratio, audio length at commit, false-fire rate) and for
+        seeing where the post-EOT gap actually goes. No audio or transcript text is captured.
         """
+        t0 = time.perf_counter()
+        rid = self._request_id
         committed: AudioArray = (
             np.concatenate(self._accum).astype(np.float32, copy=False)
             if self._accum
             else np.zeros(0, dtype=np.float32)
         )
+        audio_s = len(committed) / _SR
 
         # STT off the event loop — transcribe() is synchronous (~0.12x RT) and would starve frame
         # intake (and, in B.4, every other concurrent session) if run inline.
         transcript = (
             await asyncio.to_thread(self._stt.transcribe, committed, self._language)
         ).strip()
+        stt_ms = (time.perf_counter() - t0) * 1000.0
 
         if not transcript:
             # False fire (cough / clipped silence): never submit an empty answer; re-arm + listen.
-            logger.info("Empty transcript on commit (%s) — false fire; re-arming.", reason)
+            self._log_turn(rid, reason, audio_s, stt_ms, None, None, "false-fire", empty=True)
             self._recover()
             return None
 
         request_id = self._request_id
+        t_stt = time.perf_counter()
         try:
             result = await self._brain.submit_answer(
                 self._interview_id, self._token, transcript, request_id
             )
         except TerminalError as err:
             # 409 / 403: interview over (or token dead). Voice the conclusion; no reset.
+            oracle_ms = (time.perf_counter() - t_stt) * 1000.0
             self._state = _State.TERMINAL
             turn = TurnResult(
                 utterance=Utterance(
@@ -226,8 +238,12 @@ class VoiceSession:
                 request_id=request_id,
                 is_terminal=True,
             )
+            t_oracle = time.perf_counter()
             await self._safe_speak(turn)
+            tts_ms = (time.perf_counter() - t_oracle) * 1000.0
+            self._log_turn(rid, reason, audio_s, stt_ms, oracle_ms, tts_ms, "done", terminal=True)
             return turn
+        oracle_ms = (time.perf_counter() - t_stt) * 1000.0
 
         is_terminal = result.phase in _TERMINAL_PHASES
         turn = TurnResult(
@@ -239,9 +255,50 @@ class VoiceSession:
         )
         # Voice it (including a terminal closing line) BEFORE the caller arms the next turn, so the
         # endpointer reset (in arm_next_turn) can never fire while the interviewer still speaks.
+        t_oracle = time.perf_counter()
         await self._safe_speak(turn)
+        tts_ms = (time.perf_counter() - t_oracle) * 1000.0
         self._state = _State.TERMINAL if is_terminal else _State.SPEAKING
+        self._log_turn(
+            rid, reason, audio_s, stt_ms, oracle_ms, tts_ms, result.phase, terminal=is_terminal
+        )
         return turn
+
+    def _log_turn(
+        self,
+        rid: str,
+        commit: str,
+        audio_s: float,
+        stt_ms: float,
+        oracle_ms: float | None,
+        tts_ms: float | None,
+        phase: str,
+        *,
+        empty: bool = False,
+        terminal: bool = False,
+    ) -> None:
+        """Emit one structured per-turn telemetry line at INFO.
+
+        Format is ``voice.turn`` + ``key=value`` fields so prod logs stay greppable/parseable:
+        ``commit`` is the EOT kind (smartturn / backstop / maxlen / false-fire), the three ``*_ms``
+        are the post-EOT stage latencies, and ``gap_ms`` is their sum — the commit→interviewer-audio
+        gap that the thinking filler masks.
+        """
+        gap_ms = stt_ms + (oracle_ms or 0.0) + (tts_ms or 0.0)
+        logger.info(
+            "voice.turn rid=%s commit=%s audio_s=%.1f stt_ms=%.0f oracle_ms=%s tts_ms=%s "
+            "gap_ms=%.0f phase=%s%s%s",
+            rid,
+            commit,
+            audio_s,
+            stt_ms,
+            f"{oracle_ms:.0f}" if oracle_ms is not None else "na",
+            f"{tts_ms:.0f}" if tts_ms is not None else "na",
+            gap_ms,
+            phase,
+            " empty=1" if empty else "",
+            " terminal=1" if terminal else "",
+        )
 
     async def _safe_speak(self, turn: TurnResult) -> None:
         """Voice an utterance. A TTS failure is non-fatal (the room degrades to text) and must
