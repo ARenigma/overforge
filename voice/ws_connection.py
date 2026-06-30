@@ -197,6 +197,11 @@ class WsConnection:
             frame = await frame_q.get()
             turn = await self._session.feed_frame(frame)
             if turn is None:
+                # A false-fire commit already fired {thinking} (which disarms the browser mic) but
+                # returns no turn_ready; re-send {ready} so the browser re-arms instead of staying
+                # stuck on "Speaking". (A plain no-commit frame leaves take_rearm False → no send.)
+                if self._session.take_rearm():
+                    await self._ws.send_json({"type": "ready", "expects": "voice"})
                 continue
             # feed_frame already sent turn_ready and awaited the browser's spoken ack (inside
             # sink.speak), so playback is done. Terminal → close out; else discard any frames

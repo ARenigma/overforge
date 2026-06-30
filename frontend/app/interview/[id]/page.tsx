@@ -288,7 +288,9 @@ export default function InterviewPage() {
   } = useVoiceMic({
     // Stable callback (deps []): the worklet captures it once. Gate via the live ref, not state.
     onFrame: useCallback((buf: ArrayBuffer) => {
-      if (!micForwardingRef.current) return;
+      // Half-duplex: also drop frames while the interviewer is speaking, else the mic captures our
+      // own greeting/reply as a phantom candidate turn (self-echo → false-fire → "stuck speaking").
+      if (!micForwardingRef.current || voiceSpeakingRef.current) return;
       sendFrameRef.current?.(buf);
     }, []),
   });
@@ -658,42 +660,51 @@ export default function InterviewPage() {
       if (!tok || muted) return;
       const seq = ++speakSeqRef.current; // a newer turn or mute supersedes this playback
       audioRef.current?.pause();
+      // Half-duplex: mark the interviewer as speaking so onFrame drops mic frames for the duration
+      // (else the mic captures our own greeting/reply as a phantom candidate turn — self-echo).
+      voiceSpeakingRef.current = true;
 
-      const first = await speakChunk(id, tok, source, 0);
-      if (!first || seq !== speakSeqRef.current || muted) return;
+      try {
+        const first = await speakChunk(id, tok, source, 0);
+        if (!first || seq !== speakSeqRef.current || muted) return;
 
-      // Prefetch the remaining sentences in parallel so playback is gapless after the first one,
-      // while the first sentence already starts playing in ~1–2s.
-      const pending: Array<ReturnType<typeof speakChunk>> = [Promise.resolve(first)];
-      for (let i = 1; i < first.count; i++) pending.push(speakChunk(id, tok, source, i));
+        // Prefetch the remaining sentences in parallel so playback is gapless after the first one,
+        // while the first sentence already starts playing in ~1–2s.
+        const pending: Array<ReturnType<typeof speakChunk>> = [Promise.resolve(first)];
+        for (let i = 1; i < first.count; i++) pending.push(speakChunk(id, tok, source, i));
 
-      for (let i = 0; i < first.count; i++) {
-        const r = await pending[i];
-        if (!r || seq !== speakSeqRef.current || muted) return;
-        await new Promise<void>((resolve) => {
-          const url = URL.createObjectURL(r.blob);
-          const a = new Audio(url);
-          audioRef.current = a;
-          let settled = false;
-          const done = () => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timer);
-            URL.revokeObjectURL(url);
-            resolve();
-          };
-          // Hard cap so a stalled <audio> element can NEVER hang this await. If it did, the turn's
-          // finally would never run, the mic would never re-arm, and the room would be "stuck in
-          // speaking". 30s matches the server's spoken-ack timeout (ws_sink ack_timeout_s).
-          const timer = setTimeout(() => {
-            a.pause();
-            done();
-          }, 30_000);
-          a.addEventListener('ended', done);
-          a.addEventListener('error', done);
-          a.play().catch(done); // autoplay rejection → skip, room stays usable
-        });
-        if (seq !== speakSeqRef.current || muted) return; // cancelled mid-clip
+        for (let i = 0; i < first.count; i++) {
+          const r = await pending[i];
+          if (!r || seq !== speakSeqRef.current || muted) return;
+          await new Promise<void>((resolve) => {
+            const url = URL.createObjectURL(r.blob);
+            const a = new Audio(url);
+            audioRef.current = a;
+            let settled = false;
+            const done = () => {
+              if (settled) return;
+              settled = true;
+              clearTimeout(timer);
+              URL.revokeObjectURL(url);
+              resolve();
+            };
+            // Hard cap so a stalled <audio> element can NEVER hang this await. If it did, the turn's
+            // finally would never run, the mic would never re-arm, and the room would be "stuck in
+            // speaking". 30s matches the server's spoken-ack timeout (ws_sink ack_timeout_s).
+            const timer = setTimeout(() => {
+              a.pause();
+              done();
+            }, 30_000);
+            a.addEventListener('ended', done);
+            a.addEventListener('error', done);
+            a.play().catch(done); // autoplay rejection → skip, room stays usable
+          });
+          if (seq !== speakSeqRef.current || muted) return; // cancelled mid-clip
+        }
+      } finally {
+        // Release the half-duplex gate — but only if a newer utterance hasn't taken over (it owns
+        // the flag then). Guarantees the mic resumes even if playback errored or timed out.
+        if (seq === speakSeqRef.current) voiceSpeakingRef.current = false;
       }
     },
     [activeToken, id, muted]

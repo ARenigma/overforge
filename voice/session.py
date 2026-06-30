@@ -142,6 +142,9 @@ class VoiceSession:
         # In-flight fire-and-forget cue tasks (on_thinking + telemetry) — referenced so they
         # aren't GC'd mid-flight, and cancelled on close().
         self._bg_tasks: set[asyncio.Task[None]] = set()
+        # Set on a false-fire commit so the WS layer re-sends {ready} to re-arm the browser mic: the
+        # pre-STT {thinking} cue disarmed it but a false-fire sends no turn_ready. See take_rearm().
+        self._rearm_pending = False
 
     @property
     def state(self) -> str:
@@ -245,6 +248,7 @@ class VoiceSession:
             # False fire (cough / clipped silence): never submit an empty answer; re-arm + listen.
             self._log_turn(rid, reason, audio_s, stt_ms, None, None, "false-fire", empty=True)
             self._recover()
+            self._rearm_pending = True  # browser was disarmed by {thinking}; tell it to re-arm
             return None
 
         if _is_hallucination(transcript):
@@ -254,6 +258,7 @@ class VoiceSession:
             logger.debug("Dropping STT hallucination: %r (%.1fs audio)", transcript, audio_s)
             self._log_turn(rid, reason, audio_s, stt_ms, None, None, "hallucination", empty=True)
             self._recover()
+            self._rearm_pending = True  # browser was disarmed by {thinking}; tell it to re-arm
             return None
 
         request_id = self._request_id
@@ -403,6 +408,17 @@ class VoiceSession:
         if self._state is not _State.SPEAKING:
             return
         self._recover()
+
+    def take_rearm(self) -> bool:
+        """True (once) if the last turn was a false-fire that needs the BROWSER mic re-armed.
+
+        The pre-STT {thinking} cue optimistically disarms the browser mic; a false-fire commit then
+        returns None with no turn_ready, so without this the browser stays disarmed ("stuck
+        speaking"). The WS pipeline consumes this and re-sends {ready} to re-arm. Self-clearing.
+        """
+        pending = self._rearm_pending
+        self._rearm_pending = False
+        return pending
 
     def close(self) -> None:
         """Terminal teardown — ``feed_frame`` becomes a no-op. Cancels any in-flight backchannel

@@ -259,6 +259,7 @@ async def test_empty_transcript_short_circuits() -> None:
     assert brain.calls == []  # never submitted an empty answer
     assert session.state == "listening"  # stayed armed
     assert ep.reset_calls == 1
+    assert session.take_rearm() is True  # browser must be told to re-arm after a false-fire
 
 
 async def test_hallucination_transcript_short_circuits() -> None:
@@ -273,6 +274,7 @@ async def test_hallucination_transcript_short_circuits() -> None:
     assert brain.calls == []  # never submitted the hallucination
     assert session.state == "listening"  # stayed armed
     assert ep.reset_calls == 1
+    assert session.take_rearm() is True  # browser must be told to re-arm after a hallucination
 
 
 async def test_hallucination_telemetry_phase() -> None:
@@ -307,6 +309,7 @@ async def test_real_short_answer_not_filtered() -> None:
     turn = await _drive(session, 5)
     assert turn is not None
     assert len(brain.calls) == 1  # "yes" submitted normally
+    assert session.take_rearm() is False  # a real turn must NOT request a re-arm
 
 
 async def test_terminal_phase_done() -> None:
