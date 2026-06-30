@@ -274,9 +274,12 @@ export function useCameraProctor({
     // Graceful: if the worker fails to load (no CDN, CSP block, etc.) we still
     // set cameraState 'granted' so the room isn't blocked.
     try {
-      // type:'module' so the worker's dynamic import() of the MediaPipe ESM bundle works across
-      // browsers (classic workers don't support dynamic import in Firefox/Safari).
-      const worker = new Worker('/vision/face-detect-worker.js', { type: 'module' });
+      // Classic worker (NOT type:'module'): MediaPipe's WASM loader calls importScripts() to load
+      // vision_wasm_internal.js, which exists ONLY in classic workers — a module worker fails init
+      // with "ModuleFactory not set". Dynamic import() of the ESM bundle works in classic workers on
+      // Chromium (the target). Cross-browser (FF/Safari) would need main-thread detection or a
+      // self-hosted non-ESM build — tracked as a follow-up.
+      const worker = new Worker('/vision/face-detect-worker.js');
       worker.onmessage = handleWorkerMessage;
       worker.onerror = (e) => {
         console.warn('[proctor] face-detect worker error — no signals will be produced', e.message);
