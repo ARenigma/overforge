@@ -77,6 +77,18 @@ export function useCameraProctor({
   // Track whether a frame is currently in-flight to the worker (avoid queuing)
   const framePendingRef = useRef(false);
 
+  // The session token arrives only AFTER begin, but start() (and the flush interval it creates) runs
+  // at camera-grant, BEFORE begin. setInterval captures flushWindow once, so flushWindow MUST read the
+  // token from a LIVE ref — otherwise the interval keeps the stale (null) token and the
+  // `samples > 0 && token` guard never fires a POST (the bug that produced zero signals).
+  const tokenRef = useRef<string | null>(token);
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
+
+  // Consecutive empty-window counter, for a one-shot "no frames" diagnostic.
+  const emptyFlushesRef = useRef(0);
+
   function newWindow(): WindowAccumulator {
     return {
       startMs: Date.now(),
@@ -92,6 +104,8 @@ export function useCameraProctor({
   const flushWindow = useCallback(() => {
     const acc = accumRef.current;
     const windowMs = Date.now() - acc.startMs;
+    // Read the LIVE token (see tokenRef above), NOT the value closed over when start() ran.
+    const token = tokenRef.current;
 
     // Only send if we actually had samples; skip empty windows (e.g. tab hidden).
     if (acc.samples > 0 && token) {
@@ -103,11 +117,20 @@ export function useCameraProctor({
         gazeOffMs: acc.gazeOffMs,
         maxFaces: acc.maxFaces,
       });
+      emptyFlushesRef.current = 0;
+    } else if (acc.samples === 0) {
+      // No frames reached the detector this window. Warn once after ~2 empty windows so a
+      // persistent capture failure is visible in the console without per-window log spam.
+      emptyFlushesRef.current += 1;
+      if (emptyFlushesRef.current === 2)
+        console.warn(
+          '[proctor] no camera frames sampled in ~30s — the detector is not receiving frames'
+        );
     }
 
     // Reset for the next window.
     accumRef.current = newWindow();
-  }, [interviewId, token]);
+  }, [interviewId]);
 
   /** Handle a result message from the face-detect worker. */
   const handleWorkerMessage = useCallback((ev: MessageEvent<WorkerResult | { type: string }>) => {
