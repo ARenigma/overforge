@@ -115,7 +115,11 @@ export function useCameraProctor({
 
     // Ignore non-result messages (type: 'ready', type: 'init_failed', etc.)
     const data = ev.data as Record<string, unknown>;
-    if (typeof data.type === 'string') return;
+    if (typeof data.type === 'string') {
+      if (data.type === 'init_failed')
+        console.warn('[proctor] MediaPipe failed to initialise — no signals will be produced');
+      return;
+    }
 
     const result = ev.data as WorkerResult;
     const acc = accumRef.current;
@@ -173,6 +177,7 @@ export function useCameraProctor({
 
     if (videoRef.current) {
       videoRef.current.srcObject = null;
+      videoRef.current.remove();
       videoRef.current = null;
     }
 
@@ -204,11 +209,19 @@ export function useCameraProctor({
 
     streamRef.current = stream;
 
-    // 2. Attach stream to a hidden video element so we can draw frames.
+    // 2. Attach stream to a hidden but DOM-CONNECTED video element. A detached (not-in-DOM)
+    // video does NOT reliably decode frames in Chrome — readyState stays < 2 and drawImage
+    // captures nothing, so no frame ever reaches the worker (this produced zero signals in the
+    // first prod test). Connect it offscreen with near-zero size; NOT display:none, which also
+    // pauses decoding.
     const video = document.createElement('video');
     video.srcObject = stream;
     video.muted = true;
     video.playsInline = true;
+    video.setAttribute('aria-hidden', 'true');
+    video.style.cssText =
+      'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;';
+    document.body.appendChild(video);
     videoRef.current = video;
 
     try {
@@ -235,9 +248,12 @@ export function useCameraProctor({
     // Graceful: if the worker fails to load (no CDN, CSP block, etc.) we still
     // set cameraState 'granted' so the room isn't blocked.
     try {
-      const worker = new Worker('/vision/face-detect-worker.js');
+      // type:'module' so the worker's dynamic import() of the MediaPipe ESM bundle works across
+      // browsers (classic workers don't support dynamic import in Firefox/Safari).
+      const worker = new Worker('/vision/face-detect-worker.js', { type: 'module' });
       worker.onmessage = handleWorkerMessage;
-      worker.onerror = () => {
+      worker.onerror = (e) => {
+        console.warn('[proctor] face-detect worker error — no signals will be produced', e.message);
         // Worker crashed — stop timers but keep cameraState 'granted'.
         if (sampleTimerRef.current !== null) clearInterval(sampleTimerRef.current);
         if (windowTimerRef.current !== null) clearInterval(windowTimerRef.current);
