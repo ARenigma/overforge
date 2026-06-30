@@ -261,6 +261,54 @@ async def test_empty_transcript_short_circuits() -> None:
     assert ep.reset_calls == 1
 
 
+async def test_hallucination_transcript_short_circuits() -> None:
+    # A non-empty STT hallucination ("thank you" on silence) must NOT be submitted as an answer —
+    # it is dropped exactly like an empty false-fire and the session stays armed.
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("Thank you.")  # classic Whisper silence-hallucination
+    brain = FakeBrain()
+    session = _session(ep, stt, brain)
+    turn = await _drive(session, 5)
+    assert turn is None
+    assert brain.calls == []  # never submitted the hallucination
+    assert session.state == "listening"  # stayed armed
+    assert ep.reset_calls == 1
+
+
+async def test_hallucination_telemetry_phase() -> None:
+    # A dropped hallucination is logged distinctly (phase=hallucination) so it is distinguishable
+    # from a true empty false-fire when tuning the blocklist from prod telemetry.
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("you")
+    brain = FakeBrain()
+    tel = FakeTelemetrySink()
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        telemetry=tel,
+    )
+    await _drive(session, 5)
+    await asyncio.sleep(0)
+    assert len(tel.records) == 1
+    rec = tel.records[0]
+    assert rec.empty is True
+    assert rec.phase == "hallucination"
+
+
+async def test_real_short_answer_not_filtered() -> None:
+    # Guard against over-filtering: a legitimate short reply ("yes") must pass through to the brain.
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("yes")
+    brain = FakeBrain()
+    session = _session(ep, stt, brain)
+    turn = await _drive(session, 5)
+    assert turn is not None
+    assert len(brain.calls) == 1  # "yes" submitted normally
+
+
 async def test_terminal_phase_done() -> None:
     ep = FakeEndpointer(fire_after=5)
     stt = FakeSTT("final answer")

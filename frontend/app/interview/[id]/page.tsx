@@ -340,6 +340,10 @@ export default function InterviewPage() {
       const doSpeak = async () => {
         try {
           await speakRef.current?.('turn');
+        } catch (err) {
+          // speak() now always resolves (it has its own playback timeout), but guard anyway so the
+          // finally — which re-arms the mic — can NEVER be skipped by an unexpected throw.
+          console.error('[voice] interviewer playback failed', err);
         } finally {
           voiceSpeakingRef.current = false;
           // Ack playback so the server arms the next turn.
@@ -532,21 +536,28 @@ export default function InterviewPage() {
   async function handleBegin() {
     if (!urlToken) return;
 
-    // Camera is REQUIRED for proctored interviews.
-    // The button always runs through camera-request first, then (if granted) into
-    // beginInterview. This means the same button click serves both steps:
-    //   Click 1 (cameraState idle/denied/error): request camera, stay on consent.
-    //   Click 2 (cameraState granted):           proceed to beginInterview.
+    // Camera AND microphone are REQUIRED for proctored interviews. ONE click requests BOTH on the
+    // same user gesture: startCamera() and startMic() are both INVOKED synchronously inside the
+    // Promise.allSettled array, so each getUserMedia() fires within the activation window. We proceed
+    // to beginInterview only if the camera is granted; a denied mic falls back to typed silently.
     // The "retry" button on the denied screen calls this same handler.
+    let micGranted = micState === 'granted';
     if (cameraState !== 'granted') {
       setConsentCameraState('requesting');
-      await startCamera();
-      // startCamera() resolves after getUserMedia settles (granted or denied).
-      // The hook has now set its internal cameraState; the consent UI re-renders
-      // via cameraState. We stay on the consent screen regardless — the candidate
-      // must click "I agree & start" again once the camera is granted.
+      // Gate on the RETURNED states, not cameraState/micState — React state is stale here.
+      const [camResult, micResult] = await Promise.allSettled([
+        startCamera(),
+        // Only prompt for the mic when voice is actually configured.
+        VOICE_WS_URL ? startMic() : Promise.resolve('idle' as const),
+      ]);
       setConsentCameraState('idle');
-      return;
+      const camFinal = camResult.status === 'fulfilled' ? camResult.value : 'error';
+      micGranted = micResult.status === 'fulfilled' && micResult.value === 'granted';
+      if (camFinal !== 'granted') {
+        // Camera denied/errored — stay on the consent screen; the denied banner shows.
+        return;
+      }
+      // Camera granted — fall through to begin.
     }
 
     setStage('loading_token');
@@ -573,20 +584,13 @@ export default function InterviewPage() {
       // not leave the candidate stuck on a loading screen.)
       setStage(res.phase === 'done' ? 'done' : 'interview');
 
-      // Voice-first: the "I agree & start" click is the user gesture, so INITIATE the mic now
-      // (synchronously, to preserve the gesture) but do NOT await it — voice attaches asynchronously.
-      // startMic() resolves either way and sets micState; the micState watcher reverts to typed on
-      // denied/error. If NEXT_PUBLIC_VOICE_WS_URL is unset, voice is simply unavailable (typed only).
-      if (VOICE_WS_URL && res.phase !== 'done') {
+      // Mic was already requested in the begin gesture above (one-click flow). Arm voice only if it
+      // was granted; otherwise typed mode stays fully usable. If NEXT_PUBLIC_VOICE_WS_URL is unset,
+      // voice is simply unavailable (typed only).
+      if (VOICE_WS_URL && res.phase !== 'done' && micGranted) {
         lastExpectsRef.current = res.utterance.expects;
-        void startMic()
-          .then(() => {
-            setVoiceMode(true);
-            setVoiceSocketEnabled(true);
-          })
-          .catch(() => {
-            /* mic setup failed — typed fallback stays fully usable, no error shown */
-          });
+        setVoiceMode(true);
+        setVoiceSocketEnabled(true);
       }
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to start interview.');
@@ -670,10 +674,21 @@ export default function InterviewPage() {
           const url = URL.createObjectURL(r.blob);
           const a = new Audio(url);
           audioRef.current = a;
+          let settled = false;
           const done = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
             URL.revokeObjectURL(url);
             resolve();
           };
+          // Hard cap so a stalled <audio> element can NEVER hang this await. If it did, the turn's
+          // finally would never run, the mic would never re-arm, and the room would be "stuck in
+          // speaking". 30s matches the server's spoken-ack timeout (ws_sink ack_timeout_s).
+          const timer = setTimeout(() => {
+            a.pause();
+            done();
+          }, 30_000);
           a.addEventListener('ended', done);
           a.addEventListener('error', done);
           a.play().catch(done); // autoplay rejection → skip, room stays usable
@@ -791,11 +806,13 @@ export default function InterviewPage() {
               <li>Attempting to use unauthorized resources may affect your evaluation.</li>
               <li>
                 <strong className="text-foreground">
-                  This interview is proctored. Your camera is required.
+                  This interview is proctored. Your camera and microphone are required.
                 </strong>{' '}
                 Face presence and additional people in the room are analyzed{' '}
                 <strong className="text-foreground">entirely in your browser</strong> — no video is
-                recorded or uploaded. Only anonymized session flags are sent.
+                recorded or uploaded. Your microphone is used to transcribe your spoken answers;
+                audio is streamed for speech-to-text and is not stored. Only anonymized session
+                flags and transcripts are sent.
               </li>
             </ul>
             <p>

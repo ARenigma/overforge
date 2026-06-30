@@ -55,6 +55,31 @@ _VAD_FRAME = 512
 _MAX_TURN_S = 120.0
 _MAX_TURN_FRAMES = int(_MAX_TURN_S * _SR / _VAD_FRAME)
 
+# Known STT silence-hallucinations. faster-whisper invents filler like "thank you" / "you" / "bye"
+# on near-silent or noise-only audio; the bare ``if not transcript`` check only catches the empty
+# string, so these would otherwise render as a candidate turn (the "I said nothing but 'thank you'
+# appeared" bug). Deliberately conservative — only phrases that are essentially never a real
+# interview answer, so a legitimate short reply ("yes", "no", "ok") is never eaten. Matched against
+# the WHOLE normalized transcript, so "thank you for the chance" is NOT filtered.
+_WHISPER_HALLUCINATIONS = frozenset(
+    {
+        "thank you",
+        "thank you very much",
+        "thanks for watching",
+        "thank you for watching",
+        "you",
+        "bye",
+    }
+)
+
+
+def _is_hallucination(text: str) -> bool:
+    """True if ``text`` is a known STT silence-hallucination (or bare punctuation like ".")."""
+    normalized = text.lower().strip().strip(".,!?;:…").strip()
+    if not normalized:
+        return True  # pure punctuation / dots
+    return normalized in _WHISPER_HALLUCINATIONS
+
 # Backend FSM phases that mean the interview is over. The backend normalizes every terminal path to
 # 'done'; 'scoring' is accepted defensively in case a transitional state ever leaks through.
 _TERMINAL_PHASES: frozenset[str] = frozenset({"done", "scoring"})
@@ -219,6 +244,15 @@ class VoiceSession:
         if not transcript:
             # False fire (cough / clipped silence): never submit an empty answer; re-arm + listen.
             self._log_turn(rid, reason, audio_s, stt_ms, None, None, "false-fire", empty=True)
+            self._recover()
+            return None
+
+        if _is_hallucination(transcript):
+            # STT hallucinated filler ("thank you", "you", …) on silence/noise — never submit it as
+            # the candidate's answer. Logged distinctly (phase=hallucination) so the blocklist can
+            # be tuned from prod telemetry. Re-arm + keep listening, like an empty false-fire.
+            logger.debug("Dropping STT hallucination: %r (%.1fs audio)", transcript, audio_s)
+            self._log_turn(rid, reason, audio_s, stt_ms, None, None, "hallucination", empty=True)
             self._recover()
             return None
 

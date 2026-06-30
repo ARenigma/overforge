@@ -28,7 +28,8 @@ interface UseCameraProctorOptions {
 
 interface UseCameraProctorResult {
   cameraState: CameraState;
-  start: () => Promise<void>;
+  /** Requests the camera and returns the FINAL state — gate on this, not cameraState. */
+  start: () => Promise<CameraState>;
   stop: () => void;
 }
 
@@ -215,9 +216,9 @@ export function useCameraProctor({
     setCameraState('idle');
   }, [flushWindow]);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (): Promise<CameraState> => {
     // Idempotent — already live
-    if (cameraState === 'granted' && streamRef.current) return;
+    if (cameraState === 'granted' && streamRef.current) return 'granted';
 
     setCameraState('requesting');
 
@@ -230,7 +231,7 @@ export function useCameraProctor({
       });
     } catch {
       setCameraState('denied');
-      return;
+      return 'denied';
     }
 
     streamRef.current = stream;
@@ -267,7 +268,7 @@ export function useCameraProctor({
     } catch {
       // OffscreenCanvas not supported — mark granted, no signals.
       setCameraState('granted');
-      return;
+      return 'granted';
     }
 
     // 4. Spin up the face-detect Web Worker.
@@ -294,7 +295,7 @@ export function useCameraProctor({
     } catch {
       // Worker instantiation failed — camera granted, no proctoring.
       setCameraState('granted');
-      return;
+      return 'granted';
     }
 
     // 5. Start sampling + windowed flush.
@@ -302,6 +303,7 @@ export function useCameraProctor({
     windowTimerRef.current = setInterval(flushWindow, WINDOW_MS);
 
     setCameraState('granted');
+    return 'granted';
   }, [cameraState, handleWorkerMessage, sampleFrame, flushWindow]);
 
   // Cleanup on unmount.

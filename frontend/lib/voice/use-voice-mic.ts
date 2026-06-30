@@ -11,7 +11,9 @@ interface UseVoiceMicOptions {
 
 interface UseVoiceMicResult {
   micState: MicState;
-  start: () => Promise<void>;
+  /** Requests the mic and returns the FINAL state — callers must gate on this, not micState
+   *  (React state is stale immediately after start() resolves). */
+  start: () => Promise<MicState>;
   stop: () => void;
 }
 
@@ -50,9 +52,9 @@ export function useVoiceMic({ onFrame }: UseVoiceMicOptions): UseVoiceMicResult 
     setMicState('idle');
   }, []);
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (): Promise<MicState> => {
     // Idempotent — already live
-    if (micState === 'granted' && streamRef.current) return;
+    if (micState === 'granted' && streamRef.current) return 'granted';
 
     setMicState('requesting');
 
@@ -68,7 +70,7 @@ export function useVoiceMic({ onFrame }: UseVoiceMicOptions): UseVoiceMicResult 
       });
     } catch {
       setMicState('denied');
-      return;
+      return 'denied';
     }
 
     streamRef.current = stream;
@@ -105,6 +107,7 @@ export function useVoiceMic({ onFrame }: UseVoiceMicOptions): UseVoiceMicResult 
       await ctx.resume().catch(() => undefined);
 
       setMicState('granted');
+      return 'granted';
     } catch {
       // AudioContext or worklet failed — release the stream and surface error.
       stream.getTracks().forEach((t) => t.stop());
@@ -114,6 +117,7 @@ export function useVoiceMic({ onFrame }: UseVoiceMicOptions): UseVoiceMicResult 
       }
       ctxRef.current = null;
       setMicState('error');
+      return 'error';
     }
   }, [micState, onFrame]);
 
