@@ -4,7 +4,7 @@
 // pass does, reproducibly. Malformed/transport failures yield a safe, explicit
 // fallback (never throws into the FSM).
 
-import { MinimaxClient, ChatMessage } from '../interview/minimax';
+import { MinimaxClient, ChatMessage, extractJsonObject } from '../interview/minimax';
 import { TranscriptTurn } from '../interview/oracle';
 import { Scorecard, ScoreDimension, RECOMMENDATIONS, Recommendation } from './types';
 // Single source of truth: the proctor aggregate IS the shape getProctorSignalsForInterview returns.
@@ -59,8 +59,11 @@ export async function scoreInterview(
     { role: 'user', content: buildScoringPrompt(input) },
   ];
   try {
-    const raw = await client.complete(messages, { json: true, temperature: 0, maxTokens: 800 });
-    return validateScorecard(JSON.parse(raw));
+    // 4096, not 800: the grader runs on the reasoning model, whose hidden "thinking" tokens count
+    // against the budget — at 800 the scorecard JSON truncated mid-string and JSON.parse failed,
+    // falling back ~half the time. extractJsonObject tolerates fences/prose around the JSON.
+    const raw = await client.complete(messages, { json: true, temperature: 0, maxTokens: 4096 });
+    return validateScorecard(JSON.parse(extractJsonObject(raw)));
   } catch {
     return fallbackScorecard();
   }

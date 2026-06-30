@@ -78,7 +78,12 @@ export function createMinimaxClient(config: MinimaxConfig): MinimaxClient {
           model: config.model,
           messages,
           temperature: opts.temperature ?? 0.4,
-          max_tokens: opts.maxTokens ?? 512,
+          // Generous ceiling. MiniMax reasoning models spend hidden "thinking" tokens BEFORE the
+          // visible answer; a low cap (was 512) let the reasoning eat the budget and truncate the
+          // JSON mid-string — the scorer + evaluateAnswer then failed JSON.parse and fell back
+          // (~half of prod scorings). max_tokens is only a ceiling: a well-behaved response stops
+          // early, so this adds no cost when not needed, but lets a reasoning response complete.
+          max_tokens: opts.maxTokens ?? 2048,
           ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
         }),
       });
@@ -271,8 +276,41 @@ function buildEvaluatePrompt(req: EvaluateRequest): string {
 
 const VALID_KINDS: readonly InterventionKind[] = ['counter_question', 'probe', 'hint', 'nudge'];
 
+/**
+ * Extract the first complete top-level JSON object from a model response.
+ * Reasoning models sometimes wrap the JSON in markdown fences or emit a little prose around it
+ * even in json_object mode; this strips fences and returns the first balanced `{...}` (string-aware,
+ * so braces inside string values don't fool it). If the object is truncated (unbalanced — the
+ * higher token ceiling should prevent this), it returns from the first `{` so JSON.parse throws a
+ * clear error and the caller's safe fallback fires. Exported so the scorer reuses the same logic.
+ */
+export function extractJsonObject(raw: string): string {
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) s = fence[1].trim();
+  const start = s.indexOf('{');
+  if (start === -1) return s;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+    } else if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return s.slice(start, i + 1);
+    }
+  }
+  return s.slice(start);
+}
+
 function parseDecision(raw: string): OracleDecision {
-  const obj = JSON.parse(raw) as Partial<OracleDecision>;
+  const obj = JSON.parse(extractJsonObject(raw)) as Partial<OracleDecision>;
   const followUp = obj.followUp === true;
   const kind =
     followUp && VALID_KINDS.includes(obj.kind as InterventionKind)
