@@ -93,7 +93,16 @@ export function useVoiceMic({ onFrame }: UseVoiceMicOptions): UseVoiceMicResult 
       };
 
       source.connect(worklet);
-      // Do NOT connect worklet to ctx.destination — we don't want mic playback.
+      // Connect the worklet to the destination so the render graph actually PULLS audio through it.
+      // A worklet with no path to the destination may never have process() invoked (Chromium), so
+      // NO frames are produced and the candidate's speech is silently never captured ("spoke,
+      // nothing appeared"). The worklet writes nothing to its output buffer, so this routes SILENCE
+      // to the speakers — there is no mic playback.
+      worklet.connect(ctx.destination);
+
+      // A fresh AudioContext can start 'suspended' (the begin() await can consume the user gesture),
+      // which would also stall the audio thread — resume so frames actually flow.
+      await ctx.resume().catch(() => undefined);
 
       setMicState('granted');
     } catch {
