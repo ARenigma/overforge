@@ -140,7 +140,10 @@ export function useCameraProctor({
     const data = ev.data as Record<string, unknown>;
     if (typeof data.type === 'string') {
       if (data.type === 'init_failed')
-        console.warn('[proctor] MediaPipe failed to initialise — no signals will be produced');
+        console.warn(
+          '[proctor] MediaPipe failed to initialise — no signals will be produced:',
+          (data as { error?: unknown }).error ?? ''
+        );
       return;
     }
 

@@ -22,7 +22,7 @@
 const LOOK_AWAY_DEG = 20;
 
 // CDN base for MediaPipe WASM + model assets.
-const MEDIAPIPE_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm';
+const MEDIAPIPE_CDN = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm';
 const MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 
@@ -41,7 +41,7 @@ async function init() {
   try {
     // Dynamic import from CDN — tasks-vision ships a self-contained ESM bundle.
     const { FaceLandmarker, FilesetResolver } = await import(
-      `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs`
+      `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs`
     );
 
     const vision = await FilesetResolver.forVisionTasks(MEDIAPIPE_CDN);
