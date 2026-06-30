@@ -12,6 +12,7 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.22",
     "@babel/runtime": "latest",
     "@codemirror/lang-cpp": "latest",
     "@codemirror/lang-java": "latest",

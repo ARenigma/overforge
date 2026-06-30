@@ -33,6 +33,7 @@ import {
 import {
   AlertCircle,
   ArrowUp,
+  Camera,
   CheckCircle,
   Clock,
   Loader2,
@@ -40,6 +41,7 @@ import {
   Mic,
   MicOff,
   Play,
+  RefreshCw,
   Sparkles,
   Volume2,
   VolumeX,
@@ -50,12 +52,16 @@ import { useVoiceMic } from '@/lib/voice/use-voice-mic';
 import { useVoiceSocket } from '@/lib/voice/use-voice-socket';
 import { playFiller } from '@/lib/voice/play-filler';
 import type { ServerReady, ServerTurnReady } from '@/lib/voice/types';
+import { useCameraProctor } from '@/lib/proctor/use-camera-proctor';
 
 const VOICE_WS_URL = process.env.NEXT_PUBLIC_VOICE_WS_URL ?? '';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Stage = 'loading_token' | 'consent' | 'interview' | 'done' | 'error';
+
+/** Sub-state within the consent stage: tracks camera permission flow. */
+type ConsentCameraState = 'idle' | 'requesting' | 'denied';
 
 interface Message {
   role: 'ai' | 'candidate';
@@ -178,6 +184,8 @@ export default function InterviewPage() {
 
   const [stage, setStage] = useState<Stage>('loading_token');
   const [errorMsg, setErrorMsg] = useState<string>('');
+  /** Camera permission sub-state tracked during the consent stage. */
+  const [consentCameraState, setConsentCameraState] = useState<ConsentCameraState>('idle');
   // Rotated session token used for all candidate calls after begin.
   const [activeToken, setActiveToken] = useState<string | null>(null);
   // Inline answer error (kept out of the transcript) so the candidate can resend.
@@ -249,6 +257,20 @@ export default function InterviewPage() {
 
   // Transcript scroll ref
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+
+  // ── Proctor hook ──────────────────────────────────────────────────────────────
+  // Camera proctoring: face detection runs entirely in-browser via a Web Worker.
+  // No video frames are ever transmitted — only numeric aggregates every ~15s.
+  const {
+    cameraState,
+    start: startCamera,
+    stop: stopCamera,
+  } = useCameraProctor({ interviewId: id, token: activeToken });
+
+  // Stop proctoring when the interview ends.
+  useEffect(() => {
+    if (stage === 'done') stopCamera();
+  }, [stage, stopCamera]);
 
   // ── Voice hooks ───────────────────────────────────────────────────────────────
   // sendFrameRef breaks the forward-reference cycle: the mic hook captures the ref,
@@ -502,6 +524,24 @@ export default function InterviewPage() {
 
   async function handleBegin() {
     if (!urlToken) return;
+
+    // Camera is REQUIRED for proctored interviews.
+    // The button always runs through camera-request first, then (if granted) into
+    // beginInterview. This means the same button click serves both steps:
+    //   Click 1 (cameraState idle/denied/error): request camera, stay on consent.
+    //   Click 2 (cameraState granted):           proceed to beginInterview.
+    // The "retry" button on the denied screen calls this same handler.
+    if (cameraState !== 'granted') {
+      setConsentCameraState('requesting');
+      await startCamera();
+      // startCamera() resolves after getUserMedia settles (granted or denied).
+      // The hook has now set its internal cameraState; the consent UI re-renders
+      // via cameraState. We stay on the consent screen regardless — the candidate
+      // must click "I agree & start" again once the camera is granted.
+      setConsentCameraState('idle');
+      return;
+    }
+
     setStage('loading_token');
     try {
       const res = await beginInterview(id, urlToken);
@@ -722,6 +762,9 @@ export default function InterviewPage() {
 
   // STAGE 1 — Consent
   if (stage === 'consent') {
+    const cameraDenied = cameraState === 'denied' || cameraState === 'error';
+    const cameraRequesting = consentCameraState === 'requesting' || cameraState === 'requesting';
+
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-4">
         <div className="w-full max-w-lg bg-card border border-border rounded-xl p-8 space-y-6">
@@ -739,6 +782,14 @@ export default function InterviewPage() {
               <li>Your responses will be assessed by an AI interviewer.</li>
               <li>Do not share your session link with others.</li>
               <li>Attempting to use unauthorized resources may affect your evaluation.</li>
+              <li>
+                <strong className="text-foreground">
+                  This interview is proctored. Your camera is required.
+                </strong>{' '}
+                Face presence and additional people in the room are analyzed{' '}
+                <strong className="text-foreground">entirely in your browser</strong> — no video is
+                recorded or uploaded. Only anonymized session flags are sent.
+              </li>
             </ul>
             <p>
               By clicking <strong className="text-foreground">I agree &amp; start</strong>, you
@@ -746,11 +797,50 @@ export default function InterviewPage() {
             </p>
           </div>
 
+          {/* Camera denied / error banner */}
+          {cameraDenied && (
+            <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <div className="space-y-2">
+                <p className="font-medium">
+                  Camera access is required for this proctored interview.
+                </p>
+                <p className="text-destructive/80">
+                  Enable your camera in your browser settings and click the button below to try
+                  again.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Camera granted confirmation */}
+          {cameraState === 'granted' && (
+            <div className="flex items-center gap-2 rounded-lg border border-success/40 bg-success/10 px-4 py-2.5 text-sm text-success">
+              <Camera className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>Camera access granted — your video is not recorded or uploaded.</span>
+            </div>
+          )}
+
           <Button
-            onClick={handleBegin}
-            className="w-full h-11 rounded-md bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98] font-medium transition-opacity focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+            onClick={() => void handleBegin()}
+            disabled={cameraRequesting}
+            className="w-full h-11 rounded-md bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98] font-medium transition-opacity focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:opacity-60"
           >
-            I agree &amp; start
+            {cameraRequesting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Requesting camera…
+              </>
+            ) : cameraDenied ? (
+              <>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Retry camera &amp; start
+              </>
+            ) : cameraState === 'granted' ? (
+              'I agree &amp; start'
+            ) : (
+              'I agree &amp; start'
+            )}
           </Button>
         </div>
       </div>

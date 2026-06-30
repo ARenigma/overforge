@@ -356,6 +356,93 @@ export async function recordVoiceTurn(interviewId: string, t: VoiceTurnRecord): 
   if (error) throw new Error(`recordVoiceTurn: ${error.message}`);
 }
 
+// ─────────────────────── Proctor signals ───────────────────────
+
+export interface ProctorSignalRecord {
+  windowMs: number;
+  samples: number;
+  faceAbsentMs: number;
+  multiFaceMs: number;
+  gazeOffMs: number;
+  maxFaces: number;
+}
+
+export interface ProctorAggregate {
+  monitoredMs: number;
+  faceAbsentMs: number;
+  multiFaceMs: number;
+  gazeOffMs: number;
+  maxFaces: number;
+  everMultiFace: boolean;
+}
+
+/** Insert one proctor-signal window row. Throws on DB error (the route swallows it). */
+export async function recordProctorSignal(
+  interviewId: string,
+  s: ProctorSignalRecord
+): Promise<void> {
+  const db = createServiceClient();
+
+  // Defensively coerce integer fields: clamp negatives to 0, treat non-finite as 0.
+  const safeInt = (v: number): number => {
+    if (!isFinite(v)) return 0;
+    return Math.max(0, Math.round(v));
+  };
+
+  const { error } = await db.from('proctor_signals').insert({
+    interview_id: interviewId,
+    window_ms: safeInt(s.windowMs),
+    samples: safeInt(s.samples),
+    face_absent_ms: safeInt(s.faceAbsentMs),
+    multi_face_ms: safeInt(s.multiFaceMs),
+    gaze_off_ms: safeInt(s.gazeOffMs),
+    max_faces: safeInt(s.maxFaces),
+  });
+
+  if (error) throw new Error(`recordProctorSignal: ${error.message}`);
+}
+
+/** Aggregate all proctor-signal windows for an interview into a single summary. */
+export async function getProctorSignalsForInterview(
+  interviewId: string
+): Promise<ProctorAggregate> {
+  const db = createServiceClient();
+
+  const { data, error } = await db
+    .from('proctor_signals')
+    .select('window_ms, face_absent_ms, multi_face_ms, gaze_off_ms, max_faces')
+    .eq('interview_id', interviewId);
+
+  if (error) throw new Error(`getProctorSignalsForInterview: ${error.message}`);
+
+  const rows = (data ?? []) as Array<{
+    window_ms: number | null;
+    face_absent_ms: number | null;
+    multi_face_ms: number | null;
+    gaze_off_ms: number | null;
+    max_faces: number | null;
+  }>;
+
+  let monitoredMs = 0;
+  let faceAbsentMs = 0;
+  let multiFaceMs = 0;
+  let gazeOffMs = 0;
+  let maxFaces = 0;
+  let everMultiFace = false;
+
+  for (const row of rows) {
+    monitoredMs += row.window_ms ?? 0;
+    faceAbsentMs += row.face_absent_ms ?? 0;
+    multiFaceMs += row.multi_face_ms ?? 0;
+    gazeOffMs += row.gaze_off_ms ?? 0;
+    const rowMax = row.max_faces ?? 0;
+    if (rowMax > maxFaces) maxFaces = rowMax;
+    if (rowMax > 1) everMultiFace = true;
+  }
+
+  return { monitoredMs, faceAbsentMs, multiFaceMs, gazeOffMs, maxFaces, everMultiFace };
+}
+
 // ─────────────────────── Outbox store implementation ───────────────────────
 
 /** Insert a pending outbox row for the given interview. */

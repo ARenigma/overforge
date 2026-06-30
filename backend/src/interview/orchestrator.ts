@@ -23,6 +23,7 @@ import {
   findInProgressPastDuration,
   insertOutbox,
   makeOutboxStore,
+  getProctorSignalsForInterview,
   Interview,
 } from '../db/interviews';
 import { createDockerKernel } from '../execution/docker';
@@ -645,6 +646,16 @@ export async function finishAndScore(
       : {}),
   }));
 
+  // Best-effort: a proctor-fetch failure must never block scoring.
+  let proctorData: import('../db/interviews').ProctorAggregate | undefined;
+  try {
+    proctorData = await getProctorSignalsForInterview(interviewId);
+    // Omit the aggregate when there are no windows recorded (monitoredMs === 0).
+    if (proctorData.monitoredMs === 0) proctorData = undefined;
+  } catch (err) {
+    console.error(`[orchestrator] proctor fetch failed for ${interviewId} (non-fatal):`, err);
+  }
+
   const scorecard = await scoreInterview(
     {
       transcript: interview.transcript ?? [],
@@ -652,6 +663,7 @@ export async function finishAndScore(
       finalCode: interview.code_snapshot || undefined,
       level: interview.level,
       roleBrief: interview.role_brief,
+      proctor: proctorData,
     },
     minimaxClient
   );

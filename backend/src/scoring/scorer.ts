@@ -7,6 +7,9 @@
 import { MinimaxClient, ChatMessage } from '../interview/minimax';
 import { TranscriptTurn } from '../interview/oracle';
 import { Scorecard, ScoreDimension, RECOMMENDATIONS, Recommendation } from './types';
+// Single source of truth: the proctor aggregate IS the shape getProctorSignalsForInterview returns.
+// Type-only import (erased at runtime) so the pure scorer never pulls in the Supabase client.
+import type { ProctorAggregate } from '../db/interviews';
 
 export interface CodeRunSummary {
   language: string;
@@ -25,6 +28,9 @@ export interface ScoringInput {
   level?: string;
   /** Free-text role/JD context — grade relevance against what this role actually needs. */
   roleBrief?: string | null;
+  /** Advisory proctoring signals from the candidate camera. Present only when data exists.
+   *  Must NOT affect the numeric score — grader is instructed to note anomalies in summary only. */
+  proctor?: ProctorAggregate;
 }
 
 // Level-relative grading: the same answer should score differently by seniority.
@@ -88,6 +94,20 @@ export function buildScoringPrompt(input: ScoringInput): string {
       'higher than a solution reached only after hints):\n' +
       allAssists.join('\n')
     : '';
+  // Advisory proctoring context (do NOT penalize score — note anomalies in summary only).
+  let proctorLine = '';
+  if (input.proctor) {
+    const p = input.proctor;
+    const toS = (ms: number): string => (ms / 1000).toFixed(1);
+    proctorLine =
+      `PROCTORING SIGNALS (advisory context only — do NOT penalize the score; ` +
+      `note anomalies in your summary): ` +
+      `monitored ${toS(p.monitoredMs)}s; ` +
+      `face-absent ${toS(p.faceAbsentMs)}s; ` +
+      `multiple-people ${toS(p.multiFaceMs)}s (ever: ${p.everMultiFace ? 'yes' : 'no'}); ` +
+      `looking-away ${toS(p.gazeOffMs)}s`;
+  }
+
   return [
     levelLine,
     brief ? `ROLE CONTEXT (judge relevance to this role):\n${brief.slice(0, 4000)}` : '',
@@ -95,6 +115,7 @@ export function buildScoringPrompt(input: ScoringInput): string {
     input.finalCode ? `FINAL CODE:\n${input.finalCode.slice(0, 4000)}` : '',
     runs ? `CODE RUNS:\n${runs}` : '',
     assistLine,
+    proctorLine,
     'Grade per the rubric, calibrated to the candidate level above. Return the JSON only.',
   ]
     .filter(Boolean)

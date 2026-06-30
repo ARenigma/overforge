@@ -8,7 +8,7 @@ import { enforceRateLimit } from './rate-limit';
 import { hashToken } from '../interview/token';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
-import { recordVoiceTurn } from '../db/interviews';
+import { recordVoiceTurn, recordProctorSignal } from '../db/interviews';
 import { synthesize, isCartesiaConfigured, splitSentences } from '../voice/cartesia';
 import { pickFillerIndex } from '../voice/fillers';
 import { getFillerAudio } from '../voice/fillerCache';
@@ -413,6 +413,55 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       phase: typeof phase === 'string' ? phase : null,
       empty: empty === true,
       terminal: terminal === true,
+    });
+
+    res.status(204).end();
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ─────────────────────── POST /api/interviews/:id/proctor ───────────────────────
+// Durable sink for per-window camera proctoring signals emitted by the frontend.
+// The frontend proctoring module has no Supabase credentials; it POSTs here and
+// the backend (which owns the service-role client) writes the row.  Best-effort:
+// the frontend fires-and-forgets, so a 500 here is harmless.  Rate-limited to
+// 240 req/10 min per token (≈ one per 2.5-second window over a 60-min session).
+
+router.post('/:id/proctor', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { token, windowMs, samples, faceAbsentMs, multiFaceMs, gazeOffMs, maxFaces } =
+      req.body as {
+        token?: string;
+        windowMs?: unknown;
+        samples?: unknown;
+        faceAbsentMs?: unknown;
+        multiFaceMs?: unknown;
+        gazeOffMs?: unknown;
+        maxFaces?: unknown;
+      };
+
+    await validateCandidate(id, token ?? '');
+    await enforceRateLimit(`proctor:${hashToken(token ?? '')}`, {
+      limit: 240,
+      windowMs: 600_000,
+    });
+
+    // Coerce numeric fields: accept number or null/undefined; clamp negatives to 0.
+    const toInt = (v: unknown): number => {
+      if (v == null) return 0;
+      const n = Number(v);
+      return isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
+    };
+
+    await recordProctorSignal(id, {
+      windowMs: toInt(windowMs),
+      samples: toInt(samples),
+      faceAbsentMs: toInt(faceAbsentMs),
+      multiFaceMs: toInt(multiFaceMs),
+      gazeOffMs: toInt(gazeOffMs),
+      maxFaces: toInt(maxFaces),
     });
 
     res.status(204).end();

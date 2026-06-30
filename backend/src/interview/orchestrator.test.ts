@@ -30,6 +30,17 @@ jest.mock('../db/interviews', () => {
       return row;
     }),
     getById: jest.fn(async (id: string) => store.get(id) ?? null),
+    // Proctor aggregate read (Phase 1 camera anti-cheat). Default: no windows recorded →
+    // monitoredMs 0 → orchestrator omits the advisory section, so scoring tests are unaffected.
+    // Providing it here exercises finishAndScore's fetch path instead of throwing "not a function".
+    getProctorSignalsForInterview: jest.fn(async (_id: string) => ({
+      monitoredMs: 0,
+      faceAbsentMs: 0,
+      multiFaceMs: 0,
+      gazeOffMs: 0,
+      maxFaces: 0,
+      everMultiFace: false,
+    })),
     updateInterview: jest.fn(async (id: string, patch: Record<string, unknown>) => {
       Object.assign(store.get(id) as object, patch);
     }),

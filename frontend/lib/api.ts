@@ -266,6 +266,31 @@ export async function finishInterview(id: string, token: string): Promise<{ ok: 
 }
 
 /**
+ * POST /api/interviews/:id/proctor
+ * Sends an aggregated proctoring signal window (fire-and-forget; swallows all errors).
+ * NO camera frames or images are ever sent — only numeric aggregates.
+ */
+export function sendProctorSignal(
+  id: string,
+  token: string,
+  signals: {
+    windowMs: number;
+    samples: number;
+    faceAbsentMs: number;
+    multiFaceMs: number;
+    gazeOffMs: number;
+    maxFaces: number;
+  }
+): void {
+  // Fire-and-forget: proctoring must never block or surface errors to the candidate.
+  fetch(`${BASE_URL}/api/interviews/${id}/proctor`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, ...signals }),
+  }).catch(() => undefined);
+}
+
+/**
  * POST /api/interviews/:id/speak (P1 — "the interviewer speaks")
  * Returns WAV audio for one sentence-chunk of the latest interviewer utterance (`source:'turn'`)
  * or the latest run-triggered hint (`source:'run'`), plus the total chunk count (X-Chunk-Count) so
