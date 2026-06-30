@@ -276,20 +276,27 @@ export default function InterviewPage() {
   // sendFrameRef breaks the forward-reference cycle: the mic hook captures the ref,
   // the socket hook populates it once instantiated below.
   const sendFrameRef = useRef<((buf: ArrayBuffer) => void) | null>(null);
+  // Live mirror of micForwarding. The mic worklet binds onFrame ONCE at start() (when micForwarding
+  // is still false), so the callback must read forwarding state from a ref — reading the captured
+  // state value froze it at false and dropped every frame forever even after voice was armed.
+  const micForwardingRef = useRef(false);
 
   const {
     micState,
     start: startMic,
     stop: stopMic,
   } = useVoiceMic({
-    onFrame: useCallback(
-      (buf: ArrayBuffer) => {
-        if (!micForwarding) return;
-        sendFrameRef.current?.(buf);
-      },
-      [micForwarding]
-    ),
+    // Stable callback (deps []): the worklet captures it once. Gate via the live ref, not state.
+    onFrame: useCallback((buf: ArrayBuffer) => {
+      if (!micForwardingRef.current) return;
+      sendFrameRef.current?.(buf);
+    }, []),
   });
+
+  // Keep the forwarding ref current for the worklet's captured onFrame closure.
+  useEffect(() => {
+    micForwardingRef.current = micForwarding;
+  }, [micForwarding]);
 
   // speak() is defined below but the socket cue handlers need it — use a ref.
   const speakRef = useRef<
