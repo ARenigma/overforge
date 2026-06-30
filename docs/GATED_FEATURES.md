@@ -6,9 +6,10 @@ This is the living list — append a row when a new gate is declared, strike one
 
 _Last updated: 2026-06-30._
 
-**Recently UN-GATED:** Candidate camera + behavioral anti-cheat (approved 2026-06-30) — see the
-struck row below; now in implementation. The rest of the video umbrella (avatar output, lip-sync,
-full Wan-Streamer) stays gated.
+**Recently SHIPPED:** Candidate camera + behavioral anti-cheat **Phase 1** (approved + deployed
+2026-06-30) — in-browser MediaPipe, flags-only, required gate, advisory scorecard. See the struck
+row below. The rest of the video umbrella (avatar output, lip-sync, full Wan-Streamer) stays gated,
+and the audio "second-voice" anti-cheat is **Phase 2 (gated, §4)**.
 
 ---
 
@@ -21,7 +22,7 @@ Wan-Streamer study (see `wan-streamer-eval` memory).
 | Sub-feature | What it is | Revisit trigger |
 |---|---|---|
 | Animated avatar state machine | Idle/listening/speaking animation driven by existing React state (`micForwarding`, `voiceSpeakingRef`) in `frontend/app/interview/[id]/page.tsx`. Cosmetic, $0 infra. | When video phase opens — this is the cheapest first step. |
-| ~~Candidate camera + behavioral anti-cheat~~ **✅ UN-GATED 2026-06-30 — building** | In-browser MediaPipe face-detect; **flags only, no image/video uploaded or stored**. Required camera gate to start; advisory scorecard. Signals: face present/absent, multiple faces, gaze. **+ audio second-voice detection** (another person helping verbally; keyboard already filtered by Silero VAD) — that's the harder **Phase 2**. | Approved — Phase 1 (camera) building; Phase 2 (audio second-voice) needs an approach decision (voiceprint-verification vs diarization vs heuristic) + accepts added model/CPU cost on the slim voice service. |
+| ~~Candidate camera + behavioral anti-cheat~~ **✅ SHIPPED 2026-06-30 — Phase 1 deployed** | In-browser MediaPipe face-detect; **flags only, no image/video uploaded or stored**. Required camera gate to start; advisory scorecard. Signals: face present/absent, multiple faces, gaze. **+ audio second-voice detection** (another person helping verbally; keyboard already filtered by Silero VAD) — that's the harder **Phase 2**. | Approved — Phase 1 (camera) building; Phase 2 (audio second-voice) needs an approach decision (voiceprint-verification vs diarization vs heuristic) + accepts added model/CPU cost on the slim voice service. |
 | In-browser lip-sync (Wav2Lip ONNX) | Client-side lip-sync of the existing Cartesia audio over a static portrait. No GPU (browser inference). | After a latency/quality spike on a mid-range laptop + a bias audit. |
 | Hosted talking-head avatar API | Simli (~$0.40–0.50/interview) or Anam ($299/mo) bolted onto `cartesia.ts` synthesize(). Only positive value/feasibility path to *real* video. | When video phase opens — preferred path vs self-hosting. |
 | Full Wan-Streamer end-to-end A/V model | Unified streaming Transformer (arXiv 2606.25041). | **Blocked**: needs released weights (none yet) + GPU infra (we're CPU-only) + 480p+ + bias audit. Watch for weight release. |

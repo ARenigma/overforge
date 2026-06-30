@@ -21,9 +21,6 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BASE_URL = "http://localhost:5001"
 _DEFAULT_TIMEOUT_S = 5.0
 
-# Valid EOT commit kinds — mirrors the backend route validation.
-_VALID_COMMITS: frozenset[str] = frozenset({"smartturn", "backstop", "maxlen", "false-fire"})
-
 
 @dataclass(frozen=True)
 class TurnTelemetry:

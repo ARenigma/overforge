@@ -837,9 +837,9 @@ export default function InterviewPage() {
                 Retry camera &amp; start
               </>
             ) : cameraState === 'granted' ? (
-              'I agree &amp; start'
+              'I agree & start'
             ) : (
-              'I agree &amp; start'
+              'I agree & start'
             )}
           </Button>
         </div>
