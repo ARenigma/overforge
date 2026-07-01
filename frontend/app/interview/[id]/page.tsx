@@ -56,6 +56,10 @@ import { useCameraProctor } from '@/lib/proctor/use-camera-proctor';
 
 const VOICE_WS_URL = process.env.NEXT_PUBLIC_VOICE_WS_URL ?? '';
 
+// After the interviewer's audio ends, keep the mic gated this long so the speaker/room tail can't
+// echo back into the mic and commit as a phantom candidate turn (self-echo).
+const SPEAK_TAIL_COOLDOWN_MS = 500;
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Stage = 'loading_token' | 'consent' | 'interview' | 'done' | 'error';
@@ -243,6 +247,9 @@ export default function InterviewPage() {
   const lastExpectsRef = useRef<'voice' | 'text' | 'code'>('voice');
   // True while TTS is playing a voice-mode turn (suppresses mic frames).
   const voiceSpeakingRef = useRef(false);
+  // Timestamp (ms) until which mic frames stay gated AFTER interviewer audio ends — lets the
+  // speaker/room tail clear so the mic doesn't capture the reverb as a phantom turn (self-echo).
+  const micCooldownUntilRef = useRef(0);
   // The requestId of the turn we are currently playing/acking.
   const pendingVoiceRequestRef = useRef<string | null>(null);
   // Whether the voice WS should be connected (set false on fatal / voice toggle).
@@ -290,7 +297,12 @@ export default function InterviewPage() {
     onFrame: useCallback((buf: ArrayBuffer) => {
       // Half-duplex: also drop frames while the interviewer is speaking, else the mic captures our
       // own greeting/reply as a phantom candidate turn (self-echo → false-fire → "stuck speaking").
-      if (!micForwardingRef.current || voiceSpeakingRef.current) return;
+      if (
+        !micForwardingRef.current ||
+        voiceSpeakingRef.current ||
+        Date.now() < micCooldownUntilRef.current
+      )
+        return;
       sendFrameRef.current?.(buf);
     }, []),
   });
@@ -318,7 +330,19 @@ export default function InterviewPage() {
   const handleVoiceThinking = useCallback(() => {
     setMicForwarding(false);
     const tok = activeTokenRef.current;
-    if (tok) void playFiller(id, tok, speakSeqRef);
+    if (!tok) return;
+    // Half-duplex: the filler is interviewer audio too — gate the mic while it plays, else the mic
+    // captures the filler and commits it as a phantom turn, which fires ANOTHER filler → an endless
+    // "self-talking" loop. Release only if a real reply hasn't taken over the seq, then cool down.
+    voiceSpeakingRef.current = true;
+    const fillerDone = playFiller(id, tok, speakSeqRef);
+    const fillerSeq = speakSeqRef.current; // playFiller bumped the seq synchronously
+    void fillerDone.finally(() => {
+      if (speakSeqRef.current === fillerSeq) {
+        voiceSpeakingRef.current = false;
+        micCooldownUntilRef.current = Date.now() + SPEAK_TAIL_COOLDOWN_MS;
+      }
+    });
   }, [id]);
 
   const handleVoiceTurnReady = useCallback(
@@ -703,8 +727,12 @@ export default function InterviewPage() {
         }
       } finally {
         // Release the half-duplex gate — but only if a newer utterance hasn't taken over (it owns
-        // the flag then). Guarantees the mic resumes even if playback errored or timed out.
-        if (seq === speakSeqRef.current) voiceSpeakingRef.current = false;
+        // the flag then). Guarantees the mic resumes even if playback errored or timed out. Start a
+        // short cooldown so the speaker/room tail can't echo into the mic as a phantom turn.
+        if (seq === speakSeqRef.current) {
+          voiceSpeakingRef.current = false;
+          micCooldownUntilRef.current = Date.now() + SPEAK_TAIL_COOLDOWN_MS;
+        }
       }
     },
     [activeToken, id, muted]
