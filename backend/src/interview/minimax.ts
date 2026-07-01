@@ -15,11 +15,15 @@ import {
 } from './oracle';
 import { OracleDecision, InterventionKind } from './types';
 
+// NOTE: MinimaxConfig + createMinimaxClient are OpenAI-compatible (Bearer auth, request shape, and
+// {choices:[{message:{content}}]} response) — so the SAME client backs Groq (see groqConfigFromEnv);
+// only the base URL / model / key (and an optional reasoning_effort) differ.
 export interface MinimaxConfig {
   apiKey: string;
   model: string; // pinned, e.g. process.env.MINIMAX_LLM_MODEL
   baseUrl?: string; // default Minimax chat-completions endpoint
   groupId?: string; // some Minimax accounts require a GroupId
+  reasoningEffort?: string; // gpt-oss on Groq: 'low' for lowest TTFT. Omitted for MiniMax (rejected).
 }
 
 export interface ChatMessage {
@@ -57,6 +61,25 @@ export function minimaxConfigFromEnv(opts: { fast?: boolean } = {}): MinimaxConf
   };
 }
 
+const GROQ_BASE_URL = 'https://api.groq.com/openai/v1/chat/completions';
+
+/**
+ * Groq-backed FAST-oracle config (OpenAI-compatible → reuses createMinimaxClient). Groq's LPU serves
+ * GPT-OSS at ~0.5s TTFT — ~10x faster than MiniMax's reasoning model for real-time conversational
+ * turns (measured: gpt-oss-120b ~0.55s TTFT, same as 20b). GROQ_MODEL is swappable (default
+ * gpt-oss-120b; 'openai/gpt-oss-20b' as a lighter fallback) so models can be A/B'd from prod
+ * voice.turn telemetry. reasoning_effort=low minimizes TTFT. The final scorecard grading stays on
+ * MiniMax (see orchestrator getScoringClient) — split-brain: fast turns, deep async scoring.
+ */
+export function groqConfigFromEnv(): MinimaxConfig {
+  return {
+    apiKey: process.env.GROQ_API_KEY ?? '',
+    model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+    baseUrl: GROQ_BASE_URL,
+    reasoningEffort: process.env.GROQ_REASONING_EFFORT || 'low',
+  };
+}
+
 /** Real Minimax HTTP client (Node 20 global fetch). Throws clearly if unconfigured. */
 export function createMinimaxClient(config: MinimaxConfig): MinimaxClient {
   return {
@@ -84,6 +107,9 @@ export function createMinimaxClient(config: MinimaxConfig): MinimaxClient {
           // (~half of prod scorings). max_tokens is only a ceiling: a well-behaved response stops
           // early, so this adds no cost when not needed, but lets a reasoning response complete.
           max_tokens: opts.maxTokens ?? 2048,
+          // gpt-oss on Groq: 'low' keeps hidden reasoning (and TTFT) minimal. Only sent when set —
+          // MiniMax rejects unknown params, so its config leaves reasoningEffort undefined.
+          ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
           ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
         }),
       });

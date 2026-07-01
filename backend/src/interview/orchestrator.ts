@@ -8,7 +8,13 @@ import { DeterministicOracle, Oracle, TranscriptTurn, UtteranceRequest, Utteranc
 import { InterviewContext, Effect, InterventionKind } from './types';
 import { deriveRunSignals } from './signals';
 import { decideRunIntervention, deriveRunAssistBudget } from './intervention';
-import { createMinimaxClient, MinimaxClient, MinimaxOracle, minimaxConfigFromEnv } from './minimax';
+import {
+  createMinimaxClient,
+  MinimaxClient,
+  MinimaxOracle,
+  minimaxConfigFromEnv,
+  groqConfigFromEnv,
+} from './minimax';
 import { generateToken, hashToken } from './token';
 import {
   createInterview as dbCreateInterview,
@@ -36,8 +42,13 @@ import { createEmailSender } from '../notify/resend';
 // ─────────────────────── Oracle factory ───────────────────────
 
 export function getOracle(): Oracle {
+  // Real-time conversational turns want the FASTEST good model. Prefer Groq (GPT-OSS on the LPU,
+  // ~0.5s TTFT) when configured; else the MiniMax fast model; else the deterministic stub. The final
+  // scorecard grading stays on MiniMax (getScoringClient) — split-brain: fast turns, deep scoring.
+  if (process.env.GROQ_API_KEY) {
+    return new MinimaxOracle(createMinimaxClient(groqConfigFromEnv()));
+  }
   if (process.env.MINIMAX_API_KEY) {
-    // Conversational turns use the FAST model (low latency); the scorer keeps the reasoning model.
     return new MinimaxOracle(createMinimaxClient(minimaxConfigFromEnv({ fast: true })));
   }
   return new DeterministicOracle();
