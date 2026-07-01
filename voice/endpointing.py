@@ -28,6 +28,10 @@ _SR = 16_000
 _VAD_FRAME = 512         # 32 ms @ 16 kHz — Silero VAD v5 native frame size
 _WINDOW_S = 8.0          # seconds of audio fed to Smart Turn
 _WINDOW_SAMPLES = int(_WINDOW_S * _SR)  # 128 000
+# Require at least this much DETECTED speech in a turn before an EOT may fire. Rejects brief
+# residual-echo bursts (the interviewer's own audio leaking past AEC / the client gate) that are too
+# short to be a real answer; real answers run well over this floor.
+_MIN_SPEECH_SAMPLES = int(0.2 * _SR)  # 200 ms
 
 
 @dataclass
@@ -103,6 +107,7 @@ class SilenceGatedEndpointer:
         # Silence tracking
         self._sil = _SilenceState()
         self._fired: bool = False       # prevent double-firing per turn
+        self._speech_samples: int = 0   # total VAD-speech samples this turn (min-speech gate)
 
     # ------------------------------------------------------------------
     # Public API
@@ -137,7 +142,9 @@ class SilenceGatedEndpointer:
 
         # 3. Silence accumulation
         if is_speech:
-            # Reset silence state; a new onset will start if silence resumes
+            # Accumulate speech evidence (min-speech gate) + reset silence; a new onset starts if
+            # silence resumes.
+            self._speech_samples += _VAD_FRAME
             self._sil = _SilenceState()
         else:
             if self._sil.consecutive_samples == 0:
@@ -175,6 +182,7 @@ class SilenceGatedEndpointer:
         self._total_samples = 0
         self._sil = _SilenceState()
         self._fired = False
+        self._speech_samples = 0
         # Reset Silero VAD internal state (it is stateful between frames)
         if self._vad_model is not None and hasattr(self._vad_model, "reset_states"):
             self._vad_model.reset_states()
@@ -243,6 +251,11 @@ class SilenceGatedEndpointer:
 
         if cons == 0:
             return None  # currently in speech
+
+        # Min-speech gate: never commit a turn that had too little detected speech — that's a brief
+        # residual-echo burst (interviewer audio leaking past AEC / the gate), not a real answer.
+        if self._speech_samples < _MIN_SPEECH_SAMPLES:
+            return None
 
         cursor_s = sample_end / _SR
         silence_onset_s = sil.onset_sample / _SR

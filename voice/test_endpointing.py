@@ -44,7 +44,7 @@ _VOICE_DIR = Path(__file__).parent
 if str(_VOICE_DIR) not in sys.path:
     sys.path.insert(0, str(_VOICE_DIR))
 
-from endpointing import SilenceGatedEndpointer  # noqa: E402
+from endpointing import _MIN_SPEECH_SAMPLES, SilenceGatedEndpointer  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -245,6 +245,8 @@ def test_reset_clears_fired_state() -> None:
         backstop_s=0.032,     # backstop after 1 frame of silence
         vad_threshold=1.1,    # threshold > 1.0 → everything is silence
     )
+    # Seed prior speech so the min-speech gate allows a commit (a no-speech turn never fires).
+    ep._speech_samples = _MIN_SPEECH_SAMPLES
     # Feed one silent frame — should backstop-fire immediately
     frame = np.zeros(_VAD_FRAME, dtype=np.float32)
     ev = ep.feed_frame(frame)
@@ -255,6 +257,7 @@ def test_reset_clears_fired_state() -> None:
     ep.reset()
     assert not ep._fired
     assert ep._total_samples == 0
+    assert ep._speech_samples == 0  # reset clears the speech counter too
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +273,7 @@ def test_feed_convenience(vad_model, smart_turn_session) -> None:
         vad_model=vad_model,
         smart_turn_session=smart_turn_session,
     )
+    ep._speech_samples = _MIN_SPEECH_SAMPLES  # seed speech so the min-speech gate allows firing
     silence = np.zeros(int(0.2 * _SR), dtype=np.float32)  # 200 ms silence
     events = ep.feed(silence)
     # Exactly one event: either smartturn (hold_s=0.0 so it's probed on the first silent frame)
@@ -279,6 +283,19 @@ def test_feed_convenience(vad_model, smart_turn_session) -> None:
     # After firing, further feed returns nothing (endpointer marks itself done)
     events2 = ep.feed(silence)
     assert len(events2) == 0
+
+
+def test_min_speech_gate_blocks_pure_silence() -> None:
+    """A turn with NO detected speech must NOT fire — the echo/silence rejection gate."""
+    ep = SilenceGatedEndpointer(
+        hold_s=0.0,
+        backstop_s=0.032,   # would backstop after 1 silent frame if not for the gate
+        vad_threshold=1.1,  # threshold > 1.0 → everything is silence (zero speech)
+    )
+    # Feed 1 s of pure silence — with zero speech samples the gate blocks every EOT.
+    events = ep.feed(np.zeros(_SR, dtype=np.float32))
+    assert events == [], "Pure silence (no speech) must never commit a turn"
+    assert not ep._fired
 
 
 if __name__ == "__main__":

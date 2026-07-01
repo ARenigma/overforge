@@ -60,14 +60,19 @@ export function useVoiceMic({ onFrame }: UseVoiceMicOptions): UseVoiceMicResult 
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      // Force Chrome's SOFTWARE echo canceller (Chrome-Wide Echo Cancellation). On macOS the browser
+      // may otherwise resolve echoCancellationType to 'system' (hardware AEC), which has NO visibility
+      // into in-process TTS audio and cancels nothing — the likeliest reason our self-echo leaks on
+      // speakers. 'browser' references the default-output loopback so AEC can subtract our own TTS
+      // from the mic. Non-standard key → typed via an extension of MediaTrackConstraints.
+      const audioConstraints: MediaTrackConstraints & { echoCancellationType?: string } = {
+        channelCount: 1,
+        echoCancellation: true,
+        echoCancellationType: 'browser',
+        noiseSuppression: true,
+        autoGainControl: true,
+      };
+      stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
     } catch {
       setMicState('denied');
       return 'denied';

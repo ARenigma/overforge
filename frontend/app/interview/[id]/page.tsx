@@ -56,9 +56,14 @@ import { useCameraProctor } from '@/lib/proctor/use-camera-proctor';
 
 const VOICE_WS_URL = process.env.NEXT_PUBLIC_VOICE_WS_URL ?? '';
 
-// After the interviewer's audio ends, keep the mic gated this long so the speaker/room tail can't
-// echo back into the mic and commit as a phantom candidate turn (self-echo).
-const SPEAK_TAIL_COOLDOWN_MS = 500;
+// After the interviewer's audio ends, keep the mic gated this long so the speaker/room reverb tail
+// can't echo back into the mic and commit as a phantom candidate turn (self-echo). Laptop-speaker
+// room reverb runs ~500–800ms, so the earlier 500ms was too short.
+const SPEAK_TAIL_COOLDOWN_MS = 800;
+// One-time gate at session start: Chrome's AEC3 adaptive filter needs ~2–5s to converge before it
+// actually cancels echo. Keep the mic gated this long after voice engages — the greeting plays
+// during it, so AEC trains on the real speaker+mic path before the first candidate turn is captured.
+const AEC_WARMUP_MS = 3000;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -617,6 +622,9 @@ export default function InterviewPage() {
         lastExpectsRef.current = res.utterance.expects;
         setVoiceMode(true);
         setVoiceSocketEnabled(true);
+        // Gate the mic through the AEC convergence window (the greeting plays during it) so the very
+        // first candidate turn isn't polluted by un-cancelled greeting echo.
+        micCooldownUntilRef.current = Date.now() + AEC_WARMUP_MS;
       }
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to start interview.');
