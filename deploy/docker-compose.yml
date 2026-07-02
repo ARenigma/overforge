@@ -60,7 +60,10 @@ services:
       PORT: '5002'
       MAX_CONNECTIONS: '4'
       STT_CONCURRENCY: '2'
-      OMP_NUM_THREADS: '2'
+      # STT (Whisper/ctranslate2) uses all 4 cores. The Docker-per-run executor is ephemeral and
+      # never overlaps oral speech, so the old cap of 2 just throttled STT (~4-6s → ~2-3s at 4
+      # threads; whisper-small is ~1s unthrottled). Concurrency still bounded by STT_CONCURRENCY.
+      OMP_NUM_THREADS: '4'
     expose:
       - '5002'
     depends_on:
