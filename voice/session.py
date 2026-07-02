@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+import os
 import time
 import uuid
 
@@ -54,6 +55,13 @@ _VAD_FRAME = 512
 # Generous: most single answers run well under a minute.
 _MAX_TURN_S = 120.0
 _MAX_TURN_FRAMES = int(_MAX_TURN_S * _SR / _VAD_FRAME)
+
+# Streaming STT (Phase 2b, flag-gated via STT_STREAMING=1): during LISTENING, transcribe a completed
+# speech segment in the BACKGROUND when trailing silence reaches a phrase-pause AND enough new audio
+# has accumulated, so the EOT finalize transcribes only the short tail (near-instant) instead of the
+# whole answer. Pause-aligned so seams fall on word boundaries (the transcript feeds scoring).
+_STREAM_PAUSE_S = 0.4
+_STREAM_MIN_SEG_FRAMES = int(2.5 * _SR / _VAD_FRAME)
 
 # Known STT silence-hallucinations. faster-whisper invents filler like "thank you" / "you" / "bye"
 # on near-silent or noise-only audio; the bare ``if not transcript`` check only catches the empty
@@ -145,6 +153,14 @@ class VoiceSession:
         # Set on a false-fire commit so the WS layer re-sends {ready} to re-arm the browser mic: the
         # pre-STT {thinking} cue disarmed it but a false-fire sends no turn_ready. See take_rearm().
         self._rearm_pending = False
+        # Streaming STT (flag-gated). _committed_text = transcript of _accum[:_committed_frames],
+        # incrementally in the background at pauses; the EOT finalize transcribes only the tail. The
+        # turn_gen counter invalidates a late background result after a recover/re-arm.
+        self._stream_stt = os.environ.get("STT_STREAMING", "") == "1"
+        self._committed_text = ""
+        self._committed_frames = 0
+        self._turn_gen = 0
+        self._stt_task: asyncio.Task[None] | None = None
 
     @property
     def state(self) -> str:
@@ -179,6 +195,10 @@ class VoiceSession:
         self._accum.append(frame.copy())
 
         event = self._endpointer.feed_frame(frame)
+        # Streaming STT: at a pause, transcribe the completed segment in the background so the
+        # EOT finalize handles only the short tail. Never blocks intake; one segment at a time.
+        if self._stream_stt and event is None:
+            self._maybe_commit_segment()
         forced = event is None and len(self._accum) >= _MAX_TURN_FRAMES
         if event is None and not forced:
             return None
@@ -217,6 +237,40 @@ class VoiceSession:
             self._recover()
             raise
 
+    def _maybe_commit_segment(self) -> None:
+        """Streaming STT: kick off a background transcription of the newest completed speech segment
+        at a pause. One at a time; a successful result appends to _committed_text and advances
+        _committed_frames. Best-effort — any failure just leaves that audio for the EOT tail."""
+        if self._stt_task is not None and not self._stt_task.done():
+            return  # a segment transcription is already in flight
+        if self._endpointer.trailing_silence_s < _STREAM_PAUSE_S:
+            return  # mid-speech, not at a pause boundary
+        end = len(self._accum)
+        if end - self._committed_frames < _STREAM_MIN_SEG_FRAMES:
+            return  # not enough new speech since the last commit
+        segment = np.concatenate(self._accum[self._committed_frames : end]).astype(
+            np.float32, copy=False
+        )
+        gen = self._turn_gen
+
+        async def _run() -> None:
+            try:
+                text = (
+                    await asyncio.to_thread(self._stt.transcribe, segment, self._language)
+                ).strip()
+            except Exception:
+                logger.exception("Streaming STT segment failed — leaving audio for the tail.")
+                return
+            # Commit only if the turn hasn't recovered/re-armed since launch (stale result guard).
+            if self._turn_gen == gen and text:
+                self._committed_text = f"{self._committed_text} {text}".strip()
+                self._committed_frames = end
+
+        task = asyncio.create_task(_run(), name=f"stream-stt-{self._request_id}")
+        self._stt_task = task
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
     async def _process_turn(self, reason: str) -> TurnResult | None:
         """Snapshot the turn audio, transcribe, submit to the brain, voice the reply.
 
@@ -237,11 +291,31 @@ class VoiceSession:
         )
         audio_s = len(committed) / _SR
 
-        # STT off the event loop — transcribe() is synchronous (~0.12x RT) and would starve frame
-        # intake (and, in B.4, every other concurrent session) if run inline.
-        transcript = (
-            await asyncio.to_thread(self._stt.transcribe, committed, self._language)
-        ).strip()
+        # STT off the event loop — transcribe() is blocking; offloaded so it can't starve intake.
+        if self._stream_stt and self._committed_frames > 0:
+            # Streaming finalize: await any in-flight segment, then transcribe ONLY the tail
+            # (everything up to _committed_frames was already transcribed at the pauses).
+            if self._stt_task is not None:
+                try:
+                    await self._stt_task
+                except Exception:  # noqa: BLE001 — a failed segment just means a longer tail
+                    pass
+            tail_frames = self._accum[self._committed_frames :]
+            tail = (
+                np.concatenate(tail_frames).astype(np.float32, copy=False)
+                if tail_frames
+                else np.zeros(0, dtype=np.float32)
+            )
+            tail_text = (
+                (await asyncio.to_thread(self._stt.transcribe, tail, self._language)).strip()
+                if len(tail)
+                else ""
+            )
+            transcript = f"{self._committed_text} {tail_text}".strip()
+        else:
+            transcript = (
+                await asyncio.to_thread(self._stt.transcribe, committed, self._language)
+            ).strip()
         stt_ms = (time.perf_counter() - t0) * 1000.0
 
         if not transcript:
@@ -434,6 +508,9 @@ class VoiceSession:
         server's idempotent replay (don't double-submit an answer that may have been processed).
         """
         self._accum.clear()
+        self._committed_text = ""
+        self._committed_frames = 0
+        self._turn_gen += 1  # invalidate any in-flight streaming-STT segment from the prior turn
         if new_request_id:
             self._request_id = _new_request_id()
         self._endpointer.reset()

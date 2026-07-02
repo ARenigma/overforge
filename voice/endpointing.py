@@ -187,6 +187,12 @@ class SilenceGatedEndpointer:
         if self._vad_model is not None and hasattr(self._vad_model, "reset_states"):
             self._vad_model.reset_states()
 
+    @property
+    def trailing_silence_s(self) -> float:
+        """Current run of trailing silence in seconds (0.0 while in speech). Lets the session commit
+        completed speech segments at natural pauses (streaming STT) without duplicating VAD."""
+        return self._sil.consecutive_samples / _SR
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

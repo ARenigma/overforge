@@ -53,6 +53,7 @@ class FakeEndpointer:
         self._n = 0
         self.reset_calls = 0
         self.reset_at: list[float] = []
+        self.trailing_silence_s = 0.0  # streaming-STT pause signal (EndpointerLike protocol)
 
     def feed_frame(self, frame: np.ndarray) -> EotEvent | None:
         self._n += 1
@@ -310,6 +311,26 @@ async def test_real_short_answer_not_filtered() -> None:
     assert turn is not None
     assert len(brain.calls) == 1  # "yes" submitted normally
     assert session.take_rearm() is False  # a real turn must NOT request a re-arm
+
+
+async def test_streaming_finalize_transcribes_only_the_tail(monkeypatch) -> None:
+    # Phase 2b: with STT_STREAMING on and a segment already committed during LISTENING, the EOT
+    # finalize must transcribe ONLY the trailing tail (not the whole buffer) and concatenate it onto
+    # the committed prefix. Default (flag off) path is covered by every other test here.
+    monkeypatch.setenv("STT_STREAMING", "1")
+    ep = FakeEndpointer(fire_after=1)  # the first fed frame fires EOT
+    stt = FakeSTT("tail")
+    brain = FakeBrain()
+    session = _session(ep, stt, brain)
+    frame = np.ones(512, dtype=np.float32) * 0.1
+    # Simulate 100 frames buffered with the first 90 already transcribed during pauses.
+    session._accum = [frame.copy() for _ in range(100)]
+    session._committed_frames = 90
+    session._committed_text = "committed"
+    turn = await session.feed_frame(frame)  # appends → 101 frames, then EOT → finalize
+    assert turn is not None
+    assert brain.calls[0][2] == "committed tail"  # committed prefix + tail, concatenated
+    assert len(stt.received[-1]) < 100 * 512  # finalize saw only the tail, not the full turn
 
 
 async def test_terminal_phase_done() -> None:
