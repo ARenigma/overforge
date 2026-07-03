@@ -66,12 +66,15 @@ export class DeterministicOracle implements Oracle {
     switch (e.kind) {
       case 'greet':
         return {
-          text: "Hi, I'm your interviewer today. Tell me a bit about yourself.",
+          text: "Hi, I'm your interviewer today. To start, tell me about the most technically challenging project you've worked on recently.",
           expects: 'voice',
         };
       case 'ask_oral':
         return {
-          text: `Oral question ${e.index + 1}: walk me through a relevant project.`,
+          text:
+            e.index === 0
+              ? 'Let’s dig into that project — walk me through the hardest technical decision you made, and why you made it that way.'
+              : 'Now a more conceptual one: explain a core idea from that work from first principles, as if to a sharp peer.',
           expects: 'voice',
         };
       case 'handoff':

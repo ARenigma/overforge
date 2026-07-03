@@ -13,7 +13,7 @@ import {
   EvaluateRequest,
   InterventionRequest,
 } from './oracle';
-import { OracleDecision, InterventionKind } from './types';
+import { OracleDecision, InterventionKind, Effect } from './types';
 
 // NOTE: MinimaxConfig + createMinimaxClient are OpenAI-compatible (Bearer auth, request shape, and
 // {choices:[{message:{content}}]} response) — so the SAME client backs Groq (see groqConfigFromEnv);
@@ -184,6 +184,13 @@ const INTERVIEWER_SYSTEM =
   'short turn at a time. You have no name and represent no specific company — NEVER emit ' +
   'placeholders like "[Interviewer Name]" or "[Company]" (your turns are read ALOUD); just speak ' +
   'naturally without one. ' +
+  'Run the session like a senior engineer doing a real technical screen: OPEN by having the ' +
+  'candidate walk you through a substantial, recent project of THEIR OWN, then GRILL on it — dig ' +
+  'into the specific design decisions, trade-offs, failure modes, and what they would do ' +
+  'differently, following the thread that reveals the most. After probing their project, move to ' +
+  'a couple of deeper conceptual, first-principles questions (ideally connected to what they ' +
+  'described). Ask ONE focused thing per turn and build on their previous answer rather than ' +
+  'reading from a script. ' +
   'Before each turn, judge whether the candidate ACTUALLY answered your previous question. If ' +
   'their reply is evasive, non-responsive, off-topic, gibberish, a flattering deflection (e.g. ' +
   '"nice question"), or empty of real substance, do NOT thank them or move on — briefly and ' +
@@ -264,6 +271,37 @@ function levelGuidance(level?: string): string {
   return LEVEL_QUESTION_GUIDANCE[(level ?? 'mid').toLowerCase()] ?? LEVEL_QUESTION_GUIDANCE.mid;
 }
 
+/** Per-effect steering so the interviewer runs project-first, then conceptual — see INTERVIEWER_SYSTEM.
+ *  The FSM fixes WHICH effect fires (greet → ask_oral 0..n → coding); this shapes each into the
+ *  project-first-then-grill-then-concept flow. */
+function effectGuidance(effect: Effect): string {
+  switch (effect.kind) {
+    case 'greet':
+      return (
+        'OPENING turn: greet the candidate warmly in one sentence, then invite them to walk you ' +
+        'through the most technically challenging project they have worked on recently — their OWN ' +
+        'work. One inviting question.'
+      );
+    case 'ask_oral':
+      return effect.index === 0
+        ? 'Now GRILL them on the project they just described, like a senior engineer: pick the most ' +
+            'revealing thread — a specific design decision, a hard trade-off, a bug/failure, or what ' +
+            'they would do differently — and press for concrete specifics. One sharp question.'
+        : 'Ask ONE deeper conceptual, first-principles question — ideally connected to the domain or ' +
+            'a claim from their project — that tests genuine understanding, not memorization.';
+    case 'ask_code':
+      return 'Introduce a coding problem suited to their level; state it clearly and concisely.';
+    case 'ask_followup':
+      return 'Ask ONE focused follow-up that challenges their coding approach or reasoning.';
+    case 'handoff':
+      return 'Transition warmly from the discussion to the coding portion in one short line.';
+    case 'wrap_up':
+      return 'Wrap up warmly in one or two sentences.';
+    default:
+      return '';
+  }
+}
+
 function buildUtterancePrompt(req: UtteranceRequest): string {
   const recent = req.transcript
     .slice(-TRANSCRIPT_WINDOW)
@@ -277,6 +315,7 @@ function buildUtterancePrompt(req: UtteranceRequest): string {
       ? `Role context (tailor questions to this role; keep the same count):\n${brief.slice(0, 4000)}`
       : '',
     `Phase: ${req.ctx.phase}. Next action: ${req.effect.kind}.`,
+    effectGuidance(req.effect),
     req.code ? `Candidate code so far:\n${req.code.slice(0, 1500)}` : '',
     recent ? `Recent transcript:\n${recent}` : '',
     lastCandidate
