@@ -28,6 +28,7 @@ from stt_assemblyai import (  # noqa: E402
     AssemblyAIStreamer,
     _f32_to_pcm16,
 )
+from telemetry import TelemetrySink  # noqa: E402
 from test_session import (  # noqa: E402
     CaptureSink,
     FakeBrain,
@@ -117,6 +118,7 @@ class FakeStreamer:
 
     def __init__(self) -> None:
         self.events: asyncio.Queue[TurnEvent] = asyncio.Queue()
+        self.speech_activity: asyncio.Event = asyncio.Event()
         self.failed = False
         self.fed: list[np.ndarray] = []
         self.start_calls = 0
@@ -138,7 +140,7 @@ def _stream_session(
     endpointer: FakeEndpointer | None = None,
     stt: FakeSTT | None = None,
     sink: CaptureSink | None = None,
-    telemetry: FakeTelemetrySink | None = None,
+    telemetry: TelemetrySink | None = None,
 ) -> tuple[VoiceSession, FakeStreamer]:
     streamer = FakeStreamer()
     session = VoiceSession(

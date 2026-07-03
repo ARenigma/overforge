@@ -56,6 +56,15 @@ _VAD_FRAME = 512
 # once it reaches this length — memory is capped and the answer is still transcribed + submitted.
 # Generous: most single answers run well under a minute.
 _MAX_TURN_S = 120.0
+
+# Idle probe (assemblyai path only). If no speech from the candidate within this window after
+# the mic is armed, the interviewer probes once with a warm canned nudge, then keeps listening.
+_IDLE_PROBE_S = 10.0
+_IDLE_PROBE_LINES = (
+    "Take your time — would you like me to rephrase the question?",
+    "No rush — want me to restate it or give you a moment?",
+    "Whenever you're ready — shall I repeat the question?",
+)
 _MAX_TURN_FRAMES = int(_MAX_TURN_S * _SR / _VAD_FRAME)
 
 # Streaming STT (Phase 2b, flag-gated via STT_STREAMING=1): during LISTENING, transcribe a completed
@@ -183,6 +192,12 @@ class VoiceSession:
         self._pump_event_task: asyncio.Task[TurnEvent] | None = None
         self._pump_event_gen = 0  # _turn_gen at event-waiter creation — stale-event guard
         self._streamer_close_task: asyncio.Task[None] | None = None  # close() safety net ref
+        # Idle probe (assemblyai path only). _idle_watchdog_task is the per-turn 10 s timer;
+        # _probe_fired is the once-per-turn guard (only one nudge per armed window);
+        # _probe_index rotates through _IDLE_PROBE_LINES across turns.
+        self._idle_watchdog_task: asyncio.Task[None] | None = None
+        self._probe_fired = False
+        self._probe_index = 0
 
     @property
     def state(self) -> str:
@@ -348,6 +363,9 @@ class VoiceSession:
             return None
         if self._state is not _State.LISTENING or not event.end_of_turn:
             return None  # stale (belt-and-braces; re-arm drains the queue) or a partial
+        # A real turn is committing — cancel the idle probe watchdog so it doesn't fire
+        # concurrently with turn processing or re-arm.
+        self._cancel_idle_watchdog()
         self._state = _State.PROCESSING
         t0 = time.perf_counter()
         audio_s = self._stream_frames * _VAD_FRAME / _SR
@@ -386,6 +404,13 @@ class VoiceSession:
         except Exception:
             logger.exception("Streaming STT failed to start — using the local whisper path.")
             self._fallback_to_local()
+            return
+        # Streamer started successfully — arm the idle watchdog for the initial listening window.
+        # (_recover arms it for all subsequent windows; this covers the very first turn which
+        # never goes through _recover before the first frame arrives.)
+        if self._stream_mode() and self._idle_watchdog_task is None:
+            self._streamer.speech_activity.clear()
+            self._start_idle_watchdog()
 
     def _fallback_to_local(self) -> None:
         """Flip (once) to the local endpointer + whisper path after a fatal streamer failure.
@@ -705,6 +730,7 @@ class VoiceSession:
         path is :meth:`aclose`, which awaits it. Prefer ``aclose`` from async teardown.
         """
         self._state = _State.CLOSED
+        self._cancel_idle_watchdog()
         for task in list(self._bg_tasks):
             task.cancel()
         for pump_task in (self._pump_frame_task, self._pump_event_task):
@@ -758,3 +784,62 @@ class VoiceSession:
             self._request_id = _new_request_id()
         self._endpointer.reset()
         self._state = _State.LISTENING
+        # Idle probe: start a fresh 10 s watchdog for this listening window (assemblyai only).
+        # Reset the once-per-turn guard and clear any leftover speech signal from the prior turn
+        # so the new window starts clean.
+        self._probe_fired = False
+        self._cancel_idle_watchdog()
+        if self._stream_mode():
+            self._streamer.speech_activity.clear()  # type: ignore[union-attr]
+            self._start_idle_watchdog()
+
+    def _cancel_idle_watchdog(self) -> None:
+        """Cancel any running idle watchdog without removing it from _bg_tasks (it self-removes)."""
+        task = self._idle_watchdog_task
+        if task is not None and not task.done():
+            task.cancel()
+        self._idle_watchdog_task = None
+
+    def _start_idle_watchdog(self) -> None:
+        """Launch the 10 s idle-probe watchdog for the current listening window."""
+        gen = self._turn_gen
+
+        async def _watchdog() -> None:
+            streamer = self._streamer
+            assert streamer is not None  # only called in stream_mode
+            try:
+                # Wait for speech_activity OR the 10 s timeout, whichever comes first.
+                await asyncio.wait_for(
+                    asyncio.shield(streamer.speech_activity.wait()),
+                    timeout=_IDLE_PROBE_S,
+                )
+                # Candidate started speaking — no probe needed.
+                return
+            except TimeoutError:
+                pass
+            # 10 s elapsed with no speech signal.  Only probe if we are still in the same
+            # listening window (turn_gen unchanged), still LISTENING, and haven't fired yet.
+            if self._turn_gen != gen or self._state is not _State.LISTENING or self._probe_fired:
+                return
+            self._probe_fired = True
+            line = _IDLE_PROBE_LINES[self._probe_index % len(_IDLE_PROBE_LINES)]
+            self._probe_index += 1
+            probe_turn = TurnResult(
+                utterance=Utterance(text=line, expects="voice"),
+                phase="idle_probe",
+                transcript="",
+                request_id=self._request_id,
+                is_terminal=False,
+            )
+            logger.info(
+                "voice.idle_probe rid=%s — no speech in %.0fs, probing once.",
+                self._request_id,
+                _IDLE_PROBE_S,
+            )
+            await self._safe_speak(probe_turn)
+
+        task = asyncio.create_task(_watchdog(), name=f"idle-probe-{self._request_id}")
+        self._idle_watchdog_task = task
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+        task.add_done_callback(lambda _: setattr(self, "_idle_watchdog_task", None))

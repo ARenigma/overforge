@@ -206,6 +206,10 @@ class AssemblyAIStreamer:
         self._reconnect_backoff_s = reconnect_backoff_s
 
         self.events: asyncio.Queue[TurnEvent] = asyncio.Queue()
+        # Set on ANY Turn message (partial or final) so the session can reset its idle probe
+        # timer without needing partials to flow through the events queue.  The session calls
+        # clear() on each re-arm and the streamer calls set() on every Turn receipt.
+        self.speech_activity: asyncio.Event = asyncio.Event()
         self.failed = False
 
         self._ws: _WsLike | None = None
@@ -353,6 +357,10 @@ class AssemblyAIStreamer:
         end_of_turn = bool(msg.get("end_of_turn"))
         formatted = bool(msg.get("turn_is_formatted"))
         order = int(msg.get("turn_order") or 0)
+        # Signal any candidate-silence idle watchdog that speech has started, regardless of
+        # whether this is a partial or a final — the probe must be suppressed even on early
+        # partials that won't commit for another few seconds.
+        self.speech_activity.set()
         if not end_of_turn:
             return  # partials are unused (the session only acts on committed turns)
         if order <= self._last_emitted_order:

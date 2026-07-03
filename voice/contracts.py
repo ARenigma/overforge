@@ -117,9 +117,14 @@ class SttStreamerLike(Protocol):
     the session can fall back to the local whisper path. ``close`` MUST always be called on
     session teardown (an unterminated AssemblyAI v3 session auto-closes only after 3 h and
     bills the full duration); it is idempotent and exception-safe.
+
+    ``speech_activity`` is an :class:`asyncio.Event` set on ANY Turn message (partial or
+    final) by the streamer and cleared by the session on each re-arm.  The idle-probe
+    watchdog waits on this event to know whether the candidate has started speaking.
     """
 
     events: asyncio.Queue[TurnEvent]
+    speech_activity: asyncio.Event
     failed: bool
 
     async def start(self) -> None: ...
