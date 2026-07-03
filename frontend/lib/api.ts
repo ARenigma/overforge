@@ -192,6 +192,21 @@ export async function deleteInterview(accessToken: string, id: string): Promise<
 }
 
 /**
+ * POST /api/interviews/:id/regenerate-invite-link
+ * Rotates the invite token for a not-yet-started interview, returning a fresh link.
+ * The previous token is immediately invalidated.
+ */
+export async function regenerateInviteLink(
+  accessToken: string,
+  id: string
+): Promise<CreateInterviewResponse> {
+  return apiFetch<CreateInterviewResponse>(`/api/interviews/${id}/regenerate-invite-link`, {
+    accessToken,
+    body: {},
+  });
+}
+
+/**
  * POST /api/interviews/:id/rescore
  * Re-run scoring (recovers a stuck interview / retries a failed scorecard).
  */

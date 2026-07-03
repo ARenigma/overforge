@@ -4,11 +4,16 @@ import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/client';
 import { RescoreButton } from './rescore-button';
+import { InviteLinkPanel } from './invite-link-panel';
 import { StatusBadge, type BadgeIntent } from '@/components/ds/status-badge';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
 import { statusMeta } from '@/lib/interview-status';
-import { type Scorecard } from '@/lib/api';
+import { type Scorecard, regenerateInviteLink } from '@/lib/api';
 import { INTERVIEW_DETAIL_COLUMNS, type InterviewDetail } from '@/lib/interview-detail';
+import { Button } from '@/components/ui/button';
+import { Link } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' });
@@ -44,6 +49,10 @@ const RECOMMENDATION_LABEL: Record<Scorecard['recommendation'], string> = {
 export function LiveInterview({ initial }: { initial: InterviewDetail }) {
   const [iv, setIv] = useState<InterviewDetail>(initial);
   const [connected, setConnected] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   const live = iv.status === 'in_progress' || iv.status === 'completed';
 
@@ -89,6 +98,27 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
     };
   }, [live, initial.id]);
 
+  async function openInviteDialog() {
+    setInviteLink(null);
+    setInviteError(null);
+    setInviteOpen(true);
+    setInviteLoading(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token)
+        throw new Error('Your session has expired. Please sign in again.');
+      const result = await regenerateInviteLink(session.access_token, iv.id);
+      setInviteLink(result.link);
+    } catch (err: unknown) {
+      setInviteError(err instanceof Error ? err.message : 'Failed to generate invite link.');
+    } finally {
+      setInviteLoading(false);
+    }
+  }
+
   const meta = statusMeta(iv.status);
   const sc = iv.evaluation_score;
   const transcript = (iv.transcript ?? []).filter((t) => t.role !== 'system');
@@ -123,9 +153,53 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
               Live
             </span>
           ) : null}
+          {/* Regenerate + copy a fresh invite link — only before the interview has started. */}
+          {iv.status === 'invited' && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void openInviteDialog()}
+              className="h-8 gap-1.5 border-border text-xs text-muted-foreground hover:text-foreground"
+            >
+              <Link className="h-3.5 w-3.5" />
+              Copy invite link
+            </Button>
+          )}
           <StatusBadge intent={meta.intent}>{meta.label}</StatusBadge>
         </div>
       </div>
+
+      {/* Fresh invite link dialog (invited interviews only). */}
+      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+        <DialogContent className="bg-card border border-border text-card-foreground sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-foreground text-base">Invite link</DialogTitle>
+          </DialogHeader>
+          <div className="min-w-0 space-y-4 pt-1">
+            {inviteLoading && (
+              <p className="text-sm text-muted-foreground">Generating fresh link…</p>
+            )}
+            {inviteError && (
+              <Alert className="border-destructive/40 bg-destructive/10 py-2 px-3">
+                <AlertDescription className="text-destructive text-sm">
+                  {inviteError}
+                </AlertDescription>
+              </Alert>
+            )}
+            {inviteLink && (
+              <>
+                <InviteLinkPanel
+                  link={inviteLink}
+                  candidateEmail={iv.candidate_email ?? undefined}
+                />
+                <p className="text-xs text-muted-foreground">
+                  This is a fresh link — any previously shared link will stop working.
+                </p>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Transcript */}

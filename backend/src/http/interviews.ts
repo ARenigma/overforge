@@ -96,6 +96,28 @@ router.post('/', requireInterviewer, async (req: Request, res: Response): Promis
   }
 });
 
+// ─────────────────────── POST /api/interviews/:id/regenerate-invite-link ───────────────────────
+// Interviewer-only: rotate the invite token for an 'invited' (not-yet-started) interview.
+// Returns a fresh link; the previous token is immediately invalidated.
+
+router.post(
+  '/:id/regenerate-invite-link',
+  requireInterviewer,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const result = await orchestrator.regenerateInvite(req.params.id, req.userId!);
+      res.json({
+        id: result.id,
+        token: result.token,
+        link: result.link,
+        expiresAt: result.expiresAt,
+      });
+    } catch (err) {
+      sendError(res, err);
+    }
+  }
+);
+
 // ─────────────────────── POST /api/interviews/:id/cancel ───────────────────────
 // Interviewer soft-cancel — keeps the row + transcript; the candidate's link stops working.
 

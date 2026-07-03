@@ -350,6 +350,50 @@ export async function cancelInterview(interviewId: string, interviewerId: string
   await appendEvent(interviewId, 'transition', { from: interview.status, to: 'cancelled' });
 }
 
+export interface RegenerateInviteResult {
+  id: string;
+  token: string;
+  link: string;
+  expiresAt: Date;
+}
+
+/**
+ * Rotate the invite token for an interview that has NOT yet started.
+ * Only the owning interviewer may call this, and only while the interview is
+ * still in 'invited' status. Returns a fresh link; the previous token is
+ * immediately invalidated.
+ */
+export async function regenerateInvite(
+  interviewId: string,
+  interviewerId: string
+): Promise<RegenerateInviteResult> {
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  assertOwner(interview, interviewerId);
+
+  if (interview.status !== 'invited') {
+    throw Object.assign(
+      new Error(
+        `Cannot regenerate invite — interview has already started (status: ${interview.status}).`
+      ),
+      { status: 409 }
+    );
+  }
+
+  const rawToken = generateToken();
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = tokenExpiry();
+
+  await updateInterview(interviewId, {
+    access_token_hash: tokenHash,
+    token_expires_at: expiresAt.toISOString(),
+  });
+
+  const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+  const link = `${frontendUrl}/interview/${interviewId}?t=${rawToken}`;
+
+  return { id: interviewId, token: rawToken, link, expiresAt };
+}
+
 /** Hard-delete (erasure) — removes the interview and all of its data. */
 export async function deleteInterview(interviewId: string, interviewerId: string): Promise<void> {
   const interview = requireInterview(await getById(interviewId), interviewId);
