@@ -488,9 +488,12 @@ export async function submitAnswer(
   const ctx = interview.fsm_state as InterviewContext;
   const oracle = getOracle();
 
-  // In the coding phase, ask the oracle whether a follow-up is warranted.
+  // Evaluate the candidate's answer in both the oral and coding phases so the machine can
+  // decide whether to nudge (oral: 1-nudge cap) or follow up (coding: maxFollowUps cap).
+  // The signal is always recorded truthfully — a weak answer that received a nudge still
+  // scores low; we never inflate signal or suppress the thin-answer record.
   let decision: import('./types').OracleDecision | undefined;
-  if (ctx.phase === 'coding') {
+  if (ctx.phase === 'oral' || ctx.phase === 'coding') {
     decision = await oracle.evaluateAnswer({
       answer,
       code: interview.code_snapshot,

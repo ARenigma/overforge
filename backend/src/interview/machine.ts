@@ -2,12 +2,14 @@
 //
 // Pure, side-effect-free transitions: `advance(ctx, event) -> { ctx, effect }`.
 // The machine is the ONLY thing that decides control flow. The LLM oracle's
-// `decision.followUp` is consulted only in the coding phase and only ever within
-// the hard `maxFollowUps` cap — the model cannot pick the next state.
+// `decision.followUp` is consulted in BOTH the oral and coding phases — always
+// within hard caps — the model cannot pick the next state.
 //
 // Progression:
 //   start            -> greet
 //   greeting  +answer-> ask_oral(0..oralQuestions-1) one at a time
+//   oral      +answer-> ask_oral_followup (if decision.followUp && oralFollowUps===0, ONCE per question)
+//                       else next ask_oral, or handoff after the last question
 //   oral done +answer-> handoff
 //   handoff   +answer-> ask_code(0)
 //   coding    +answer-> ask_followup (if decision.followUp && under cap)
@@ -19,7 +21,7 @@
 import { InterviewConfig, InterviewContext, InterviewEvent, Effect, DEFAULT_CONFIG } from './types';
 
 export function initialContext(config: InterviewConfig = DEFAULT_CONFIG): InterviewContext {
-  return { phase: 'greeting', oralAsked: 0, codeIndex: 0, followUps: 0, config };
+  return { phase: 'greeting', oralAsked: 0, codeIndex: 0, followUps: 0, oralFollowUps: 0, config };
 }
 
 export interface StepResult {
@@ -44,11 +46,26 @@ export function advance(ctx: InterviewContext, event: InterviewEvent): StepResul
     }
 
     case 'oral': {
+      // Bounded oral nudge: if the oracle flagged this answer as thin AND we haven't already
+      // nudged on this question, re-probe the same question once (don't advance oralAsked).
+      const wantsOralNudge = event.decision?.followUp === true;
+      if (wantsOralNudge && ctx.oralFollowUps === 0) {
+        // Re-probe the current question (oralAsked - 1 is the index of the question just answered).
+        const index = ctx.oralAsked - 1;
+        return {
+          ctx: { ...ctx, oralFollowUps: 1 },
+          effect: { kind: 'ask_oral_followup', index },
+        };
+      }
+      // Satisfactory answer, cap already hit, or evaluator unavailable → advance gracefully.
       if (ctx.oralAsked < config.oralQuestions) {
         const index = ctx.oralAsked; // 0-based index of the question being asked now
-        return { ctx: { ...ctx, oralAsked: ctx.oralAsked + 1 }, effect: { kind: 'ask_oral', index } };
+        return {
+          ctx: { ...ctx, oralAsked: ctx.oralAsked + 1, oralFollowUps: 0 },
+          effect: { kind: 'ask_oral', index },
+        };
       }
-      return { ctx: { ...ctx, phase: 'handoff' }, effect: { kind: 'handoff' } };
+      return { ctx: { ...ctx, phase: 'handoff', oralFollowUps: 0 }, effect: { kind: 'handoff' } };
     }
 
     case 'handoff': {

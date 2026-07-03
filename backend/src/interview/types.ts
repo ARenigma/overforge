@@ -28,6 +28,9 @@ export interface InterviewContext {
   codeIndex: number;
   /** Follow-ups asked for the current coding question. */
   followUps: number;
+  /** Follow-up nudges issued for the CURRENT oral question (hard cap: 1). Reset to 0 when a
+   *  new oral question is asked. Kept at 0 during non-oral phases. */
+  oralFollowUps: number;
   config: InterviewConfig;
 }
 
@@ -41,6 +44,7 @@ export type InterventionKind = 'counter_question' | 'probe' | 'hint' | 'nudge';
 export type Effect =
   | { kind: 'greet' }
   | { kind: 'ask_oral'; index: number } // 0-based
+  | { kind: 'ask_oral_followup'; index: number } // re-probe the same oral question (max 1 per question)
   | { kind: 'handoff' }
   | { kind: 'ask_code'; index: number } // 0-based core question
   | { kind: 'ask_followup'; codeIndex: number; depth: number } // depth 1..maxFollowUps

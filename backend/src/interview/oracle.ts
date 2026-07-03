@@ -73,8 +73,13 @@ export class DeterministicOracle implements Oracle {
         return {
           text:
             e.index === 0
-              ? 'Let’s dig into that project — walk me through the hardest technical decision you made, and why you made it that way.'
+              ? "Let's dig into that project — walk me through the hardest technical decision you made, and why you made it that way."
               : 'Now a more conceptual one: explain a core idea from that work from first principles, as if to a sharp peer.',
+          expects: 'voice',
+        };
+      case 'ask_oral_followup':
+        return {
+          text: 'Let me push on that a bit — can you give me a concrete example or a specific trade-off you had to make?',
           expects: 'voice',
         };
       case 'handoff':

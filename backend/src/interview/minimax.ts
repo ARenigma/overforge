@@ -184,6 +184,10 @@ const INTERVIEWER_SYSTEM =
   'short turn at a time. You have no name and represent no specific company — NEVER emit ' +
   'placeholders like "[Interviewer Name]" or "[Company]" (your turns are read ALOUD); just speak ' +
   'naturally without one. ' +
+  'BREVITY RULE (non-negotiable): every spoken turn must be 1–3 sentences maximum. ONE question ' +
+  'per turn. No throat-clearing, preamble, or meta-commentary (e.g. no "That\'s a great point", ' +
+  '"Thanks for sharing that", "Good answer"). Cut any sentence that does not directly advance the ' +
+  'interview. Aim for ~20% shorter than you think you need. ' +
   'Run the session like a senior engineer doing a real technical screen: OPEN by having the ' +
   'candidate walk you through a substantial, recent project of THEIR OWN, then GRILL on it — dig ' +
   'into the specific design decisions, trade-offs, failure modes, and what they would do ' +
@@ -191,12 +195,10 @@ const INTERVIEWER_SYSTEM =
   'a couple of deeper conceptual, first-principles questions (ideally connected to what they ' +
   'described). Ask ONE focused thing per turn and build on their previous answer rather than ' +
   'reading from a script. ' +
-  'Before each turn, judge whether the candidate ACTUALLY answered your previous question. If ' +
-  'their reply is evasive, non-responsive, off-topic, gibberish, a flattering deflection (e.g. ' +
-  '"nice question"), or empty of real substance, do NOT thank them or move on — briefly and ' +
-  'politely note that it did not address the question and press again for the specific, concrete ' +
-  'answer, naming what you still need. Only acknowledge and advance once they have genuinely ' +
-  'answered. Stay warm, but hold the bar — never reward dodging. ' +
+  'If an answer is thin or evasive, give ONE focused follow-up to press for specifics, then move ' +
+  'on gracefully regardless of the response. Never repeat the same challenge more than once per ' +
+  'question. The handoff to coding must be warm (e.g. "Let\'s shift to some coding") — never ' +
+  'imply the candidate failed or that answers were wrong. ' +
   'Never reveal scores or internal reasoning.';
 
 const EVALUATOR_SYSTEM =
@@ -247,7 +249,7 @@ function buildInterventionPrompt(req: InterventionRequest): string {
 
 function utteranceMode(kind: string): Utterance['expects'] {
   if (kind === 'ask_code' || kind === 'ask_followup') return 'code';
-  if (kind === 'greet' || kind === 'ask_oral') return 'voice';
+  if (kind === 'greet' || kind === 'ask_oral' || kind === 'ask_oral_followup') return 'voice';
   return 'text';
 }
 
@@ -289,6 +291,13 @@ function effectGuidance(effect: Effect): string {
             'they would do differently — and press for concrete specifics. One sharp question.'
         : 'Ask ONE deeper conceptual, first-principles question — ideally connected to the domain or ' +
             'a claim from their project — that tests genuine understanding, not memorization.';
+    case 'ask_oral_followup':
+      return (
+        "The candidate's last answer was thin or evasive. Push a little further on the SAME " +
+        'topic — one focused follow-up that names the specific thing still missing (e.g. a concrete ' +
+        'trade-off, a real number, a specific decision). Keep it warm: "Let me push on that a bit" ' +
+        'or similar. ONE sentence question only. This is the last prompt on this topic before moving on.'
+      );
     case 'ask_code':
       return 'Introduce a coding problem suited to their level; state it clearly and concisely.';
     case 'ask_followup':

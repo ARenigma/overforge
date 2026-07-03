@@ -2,8 +2,17 @@ import { advance, initialContext, isTerminal } from './machine';
 import { InterviewContext, InterviewEvent, Effect, OracleDecision } from './types';
 import { DeterministicOracle } from './oracle';
 
+// Helper: produce an oral-phase answer event with an explicit followUp decision.
+const oralAnswer = (followUp: boolean): InterviewEvent => ({
+  type: 'answer',
+  decision: { followUp, reason: 'test', signal: followUp ? 0.2 : 0.8 },
+});
+
 // Drive the machine through a list of events, collecting the emitted effects.
-function run(events: InterviewEvent[], config = undefined as never): { effects: Effect[]; ctx: InterviewContext } {
+function run(
+  events: InterviewEvent[],
+  config = undefined as never
+): { effects: Effect[]; ctx: InterviewContext } {
   let ctx = initialContext(config);
   const effects: Effect[] = [];
   for (const ev of events) {
@@ -15,7 +24,9 @@ function run(events: InterviewEvent[], config = undefined as never): { effects: 
 }
 
 const answer = (followUp?: boolean): InterviewEvent =>
-  followUp === undefined ? { type: 'answer' } : { type: 'answer', decision: { followUp, reason: '', signal: 0 } };
+  followUp === undefined
+    ? { type: 'answer' }
+    : { type: 'answer', decision: { followUp, reason: '', signal: 0 } };
 
 describe('interview machine', () => {
   test('happy path: 2 oral + 2 core, no follow-ups', () => {
@@ -31,7 +42,15 @@ describe('interview machine', () => {
       answer(), // scoring -> done
     ]);
     expect(effects.map((e) => e.kind)).toEqual([
-      'greet', 'ask_oral', 'ask_oral', 'handoff', 'ask_code', 'ask_code', 'wrap_up', 'score', 'done',
+      'greet',
+      'ask_oral',
+      'ask_oral',
+      'handoff',
+      'ask_code',
+      'ask_code',
+      'wrap_up',
+      'score',
+      'done',
     ]);
     expect((effects[1] as { index: number }).index).toBe(0);
     expect((effects[2] as { index: number }).index).toBe(1);
@@ -61,8 +80,16 @@ describe('interview machine', () => {
     const cfg = { oralQuestions: 3, coreQuestions: 2, maxFollowUps: 3 };
     let ctx = initialContext(cfg as never);
     const effects: Effect[] = [];
-    for (const ev of [{ type: 'start' }, answer(), answer(), answer(), answer()] as InterviewEvent[]) {
-      const r = advance(ctx, ev); ctx = r.ctx; effects.push(r.effect);
+    for (const ev of [
+      { type: 'start' },
+      answer(),
+      answer(),
+      answer(),
+      answer(),
+    ] as InterviewEvent[]) {
+      const r = advance(ctx, ev);
+      ctx = r.ctx;
+      effects.push(r.effect);
     }
     const orals = effects.filter((e) => e.kind === 'ask_oral');
     expect(orals.map((e) => (e as { index: number }).index)).toEqual([0, 1, 2]);
@@ -75,6 +102,90 @@ describe('interview machine', () => {
     const r = advance(ctx, { type: 'answer' });
     expect(r.effect.kind).toBe('done');
     expect(isTerminal(r.ctx)).toBe(true);
+  });
+
+  test('oral: unsatisfactory answer → exactly one nudge (same-question re-probe) then advance', () => {
+    // Start → greet → oral(0) asked → thin answer → ask_oral_followup(0) → any answer → ask_oral(1)
+    let ctx = initialContext();
+    // start
+    ctx = advance(ctx, { type: 'start' }).ctx;
+    // greeting answer → ask_oral(0)
+    let res = advance(ctx, { type: 'answer' });
+    ctx = res.ctx;
+    expect(res.effect).toEqual({ kind: 'ask_oral', index: 0 });
+
+    // thin answer on oral question 0 → should get one nudge
+    res = advance(ctx, oralAnswer(true));
+    ctx = res.ctx;
+    expect(res.effect).toEqual({ kind: 'ask_oral_followup', index: 0 });
+    expect(ctx.oralFollowUps).toBe(1);
+    expect(ctx.oralAsked).toBe(1); // oralAsked NOT incremented during nudge
+
+    // answer after the nudge → must advance to ask_oral(1), not nudge again
+    res = advance(ctx, oralAnswer(true)); // even if oracle still says followUp
+    ctx = res.ctx;
+    expect(res.effect).toEqual({ kind: 'ask_oral', index: 1 });
+    expect(ctx.oralFollowUps).toBe(0); // reset for next question
+    expect(ctx.oralAsked).toBe(2);
+  });
+
+  test('oral: satisfactory answer → immediate advance, no nudge', () => {
+    let ctx = initialContext();
+    ctx = advance(ctx, { type: 'start' }).ctx;
+    ctx = advance(ctx, { type: 'answer' }).ctx; // greeting → ask_oral(0)
+
+    // good answer → go straight to ask_oral(1)
+    const res = advance(ctx, oralAnswer(false));
+    expect(res.effect).toEqual({ kind: 'ask_oral', index: 1 });
+    expect(res.ctx.oralFollowUps).toBe(0);
+    expect(res.ctx.oralAsked).toBe(2);
+  });
+
+  test('oral: nudge fires at most once per question — second thin answer on same question is ignored', () => {
+    let ctx = initialContext();
+    ctx = advance(ctx, { type: 'start' }).ctx;
+    ctx = advance(ctx, { type: 'answer' }).ctx; // greeting → ask_oral(0)
+
+    // First thin answer → nudge
+    let res = advance(ctx, oralAnswer(true));
+    ctx = res.ctx;
+    expect(res.effect.kind).toBe('ask_oral_followup');
+
+    // Another thin answer on the same question → must advance, NOT nudge again
+    res = advance(ctx, oralAnswer(true));
+    expect(res.effect.kind).toBe('ask_oral'); // moved to question 1
+    expect(res.ctx.oralFollowUps).toBe(0);
+  });
+
+  test('oral: both orals each nudged once → handoff → coding', () => {
+    let ctx = initialContext();
+    ctx = advance(ctx, { type: 'start' }).ctx;
+    ctx = advance(ctx, { type: 'answer' }).ctx; // greeting → ask_oral(0)
+
+    // oral Q0: thin → nudge
+    let res = advance(ctx, oralAnswer(true));
+    ctx = res.ctx;
+    expect(res.effect.kind).toBe('ask_oral_followup');
+
+    // nudge answered (thin again) → advance to Q1
+    res = advance(ctx, oralAnswer(true));
+    ctx = res.ctx;
+    expect(res.effect).toEqual({ kind: 'ask_oral', index: 1 });
+
+    // oral Q1: thin → nudge
+    res = advance(ctx, oralAnswer(true));
+    ctx = res.ctx;
+    expect(res.effect).toEqual({ kind: 'ask_oral_followup', index: 1 });
+
+    // nudge answered → advance to handoff (all orals exhausted)
+    res = advance(ctx, oralAnswer(true));
+    ctx = res.ctx;
+    expect(res.effect.kind).toBe('handoff');
+
+    // handoff answer → coding
+    res = advance(ctx, { type: 'answer' });
+    expect(res.effect).toEqual({ kind: 'ask_code', index: 0 });
+    expect(res.ctx.phase).toBe('coding');
   });
 
   test('drives end-to-end with the DeterministicOracle within bounded turns', async () => {

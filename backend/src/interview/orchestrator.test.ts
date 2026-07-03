@@ -129,6 +129,12 @@ beforeAll(() => {
   delete process.env.MINIMAX_API_KEY;
 });
 
+// Long answers exceed the DeterministicOracle's 120-char threshold → followUp=false → advances.
+// Short answers are below the threshold → followUp=true → triggers nudge/follow-up logic.
+const longAnswer =
+  'This is a thorough, technically detailed answer that comfortably exceeds the ' +
+  'follow-up threshold so the deterministic oracle advances the interview.';
+
 describe('orchestrator end-to-end (offline)', () => {
   test('create → begin → answers drives the FSM to a scored interview', async () => {
     const { id, token } = await orch.createInterview({
@@ -145,11 +151,7 @@ describe('orchestrator end-to-end (offline)', () => {
     expect(typeof begun.startedAt).toBe('string');
     expect(Number.isNaN(new Date(begun.startedAt).getTime())).toBe(false);
 
-    // Long answers avoid coding follow-ups so the flow advances briskly.
-    const longAnswer =
-      'This is a thorough, technically detailed answer that comfortably exceeds the ' +
-      'follow-up threshold so the deterministic oracle advances the interview.';
-
+    // Long answers avoid coding follow-ups so the flow advances briskly (defined at describe scope).
     let phase = begun.phase;
     let guard = 0;
     while (phase !== 'done' && guard < 30) {
@@ -273,6 +275,51 @@ describe('orchestrator end-to-end (offline)', () => {
     expect(db.__outbox).toContain(devId);
   });
 
+  test('oral nudge: short oral answer triggers exactly one ask_oral_followup, then advances', async () => {
+    // The DeterministicOracle fires followUp=true for answers shorter than 120 chars.
+    const shortAnswer = 'short'; // 5 chars — always triggers followUp in DeterministicOracle
+
+    const { id } = await orch.createInterview({
+      interviewerId: 'uN1',
+      candidateEmail: 'nudge@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true }); // greeting phase
+
+    // Greeting answer → moves to oral phase, asks oral Q0.
+    let res = await orch.submitAnswer(id, longAnswer);
+    expect(res.phase).toBe('oral');
+
+    // Short answer on oral Q0 → oracle says followUp=true → machine emits ask_oral_followup.
+    res = await orch.submitAnswer(id, shortAnswer);
+    expect(res.state.phase).toBe('oral');
+    expect(res.state.oralFollowUps).toBe(1);
+    // The utterance should be a voice-mode re-probe (ask_oral_followup wired to 'voice').
+    expect(res.utterance.expects).toBe('voice');
+
+    // Answer the nudge (still short — weak) → must advance to oral Q1, NOT nudge again.
+    res = await orch.submitAnswer(id, shortAnswer);
+    expect(res.state.phase).toBe('oral');
+    expect(res.state.oralAsked).toBe(2); // moved to Q1
+    expect(res.state.oralFollowUps).toBe(0); // reset for new question
+  });
+
+  test('oral nudge: satisfactory oral answer advances immediately without a nudge', async () => {
+    const { id } = await orch.createInterview({
+      interviewerId: 'uN2',
+      candidateEmail: 'good@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true });
+
+    // Greeting answer → oral phase.
+    await orch.submitAnswer(id, longAnswer);
+
+    // Long (substantive) answer → oracle says followUp=false → no nudge, go to Q1.
+    const res = await orch.submitAnswer(id, longAnswer);
+    expect(res.state.phase).toBe('oral');
+    expect(res.state.oralAsked).toBe(2); // straight to Q1
+    expect(res.state.oralFollowUps).toBe(0);
+  });
+
   test('rescore refuses a closed-incomplete (abandoned) interview', async () => {
     const { id } = await orch.createInterview({
       interviewerId: 'u6',
@@ -315,8 +362,10 @@ describe('orchestrator end-to-end (offline)', () => {
       candidateEmail: 'struggler@example.com',
     });
     await orch.begin(id, { tncAccepted: true });
-    // Drive greeting → oral → oral → handoff → coding (4 answers).
-    for (let i = 0; i < 4; i++) await orch.submitAnswer(id, 'a non-empty placeholder answer');
+    // Drive greeting → oral(0) → oral(1) → handoff → coding (4 answers).
+    // Use longAnswer (>120 chars) so the DeterministicOracle returns followUp=false for oral
+    // questions — we don't want nudges here, just a clean path to the coding phase.
+    for (let i = 0; i < 4; i++) await orch.submitAnswer(id, longAnswer);
     let row = (await db.getById(id)) as Record<string, unknown>;
     expect((row.fsm_state as { phase: string }).phase).toBe('coding');
     const codingTxLen = (row.transcript as unknown[]).length;
