@@ -79,3 +79,9 @@ api_keys.rtf
 /eval/voice-turn-bakeoff/results/
 /eval/voice-turn-bakeoff/.cache/
 /eval/voice-turn-bakeoff/buckeye_extract/
+eval/samples/
+eval/*_bench.py
+eval/test_sample.*
+eval/*.wav
+eval/*.m4a
+eval/interview_results.json
