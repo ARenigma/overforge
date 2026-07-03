@@ -8,6 +8,13 @@ process caps concurrent connections.
 
 Env: OVERFORGE_API_URL (backend origin — internal compose address in prod), FRONTEND_URL (allowed WS
 Origin), PORT, MAX_CONNECTIONS, STT_CONCURRENCY, OMP_NUM_THREADS.
+
+STT provider (P1-A, flag-gated): STT_PROVIDER=assemblyai routes each connection through the
+AssemblyAI v3 real-time stream (built-in semantic turn detection — no local endpointer false-cuts
+on thinking pauses) with ASSEMBLYAI_API_KEY + STT_KEYTERMS + the STT_* tuning vars (see
+stt_assemblyai.AssemblyAIConfig.from_env). Unset/`whisper` keeps the local Silero + Smart-Turn +
+whisper path byte-for-byte unchanged; the local models stay warm either way — they are the
+in-session fallback when the remote stream permanently fails.
 """
 
 from __future__ import annotations
@@ -28,9 +35,10 @@ from fastapi import FastAPI, WebSocket  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 
 from brain_client import RestBrainClient  # noqa: E402
-from contracts import AudioArray  # noqa: E402
+from contracts import AudioArray, SttStreamerLike  # noqa: E402
 from endpointing import SilenceGatedEndpointer  # noqa: E402
 from session import VoiceSession  # noqa: E402
+from stt_assemblyai import AssemblyAIConfig, AssemblyAIStreamer  # noqa: E402
 from telemetry import RestTelemetrySink  # noqa: E402
 from ws_connection import ConnectionDeps, WsConnection  # noqa: E402
 from ws_protocol import CLOSE_AT_CAPACITY, CLOSE_ORIGIN_DENIED  # noqa: E402
@@ -42,7 +50,20 @@ OVERFORGE_API_URL = os.environ.get("OVERFORGE_API_URL", "http://localhost:5001")
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 MAX_CONNECTIONS = int(os.environ.get("MAX_CONNECTIONS", "4"))
 STT_CONCURRENCY = int(os.environ.get("STT_CONCURRENCY", "2"))
+STT_PROVIDER = os.environ.get("STT_PROVIDER", "whisper").strip().lower()
 _REQUEST_TIMEOUT_S = 30.0
+
+
+def _use_assemblyai() -> bool:
+    """True when the assemblyai provider is selected AND usable (key present)."""
+    if STT_PROVIDER != "assemblyai":
+        if STT_PROVIDER not in ("", "whisper"):
+            logger.error("Unknown STT_PROVIDER=%r — using whisper.", STT_PROVIDER)
+        return False
+    if not os.environ.get("ASSEMBLYAI_API_KEY"):
+        logger.error("STT_PROVIDER=assemblyai but ASSEMBLYAI_API_KEY is unset — using whisper.")
+        return False
+    return True
 
 
 class SemaphoreStt:
@@ -80,17 +101,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )  # pay the cold-start cost off the hot path
     http_client = httpx.AsyncClient(base_url=OVERFORGE_API_URL, timeout=_REQUEST_TIMEOUT_S)
     stt = SemaphoreStt(whisper, STT_CONCURRENCY)
+    use_assemblyai = _use_assemblyai()
+    if use_assemblyai:
+        logger.info("STT provider: assemblyai (v3 streaming; local whisper kept as fallback).")
 
     def build_session(
         interview_id: str, token: str, language: str, sink: WsTtsSink
     ) -> VoiceSession:
         # Each connection gets its OWN endpointer (VAD state is per-speaker) over the SHARED,
         # read-mostly warm models; one shared SemaphoreStt; a brain and telemetry sink both
-        # using the shared HTTP client (no second connection opened).
+        # using the shared HTTP client (no second connection opened). On the assemblyai path
+        # each connection also gets its OWN streamer (one AAI WS per session lifetime); the
+        # endpointer + whisper stay wired in as the in-session fallback.
         endpointer = SilenceGatedEndpointer(
             vad_model=vad_model, smart_turn_session=smart_turn_session
         )
         telemetry_sink = RestTelemetrySink(interview_id, token, client=http_client)
+        streamer: SttStreamerLike | None = None
+        if use_assemblyai:
+            streamer = AssemblyAIStreamer(AssemblyAIConfig.from_env(language=language))
         return VoiceSession(
             interview_id=interview_id,
             session_token=token,
@@ -100,6 +129,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             sink=sink,
             language=language,
             telemetry=telemetry_sink,
+            streamer=streamer,
         )
 
     app.state.deps = ConnectionDeps(http_client=http_client, build_session=build_session)

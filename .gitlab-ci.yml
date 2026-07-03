@@ -181,7 +181,8 @@ deploy-backend:
     - printf 'Host beef\n  HostName %s\n  User %s\n  IdentityFile ~/.ssh/id_ed25519\n  IdentitiesOnly yes\n  StrictHostKeyChecking accept-new\n' "$BEEF_HOST" "$BEEF_USER" > ~/.ssh/config
   script:
     - rsync -az --delete --exclude node_modules --exclude '.env*' backend/ beef:overforge/backend/
-    - rsync -az --exclude backend.env deploy/ beef:overforge/deploy/
+    # backend.env AND voice.env are host-only secrets files — every deploy/ rsync must exclude both.
+    - rsync -az --exclude backend.env --exclude voice.env deploy/ beef:overforge/deploy/
     # Ensure every language image the kernel runs is present on the host (--pull never at run
     # time means a missing image hard-fails). Idempotent; pulls only what's new.
     - ssh beef 'cd ~/overforge && bash deploy/pull-runtimes.sh'
@@ -223,7 +224,8 @@ deploy-voice:
   script:
     # Ship source only — the venv (wrong platform), caches, and tests never belong on the host.
     - rsync -az --delete --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.pytest_cache' --exclude '.ruff_cache' --exclude '.mypy_cache' --exclude '.fixtures' voice/ beef:overforge/voice/
-    - rsync -az --exclude backend.env deploy/ beef:overforge/deploy/
+    # backend.env AND voice.env are host-only secrets files — every deploy/ rsync must exclude both.
+    - rsync -az --exclude backend.env --exclude voice.env deploy/ beef:overforge/deploy/
     # --no-deps: build + (re)start ONLY voice/caddy. Without it, `up` reconciles the whole project and
     # may recreate the backend/postgres containers another job owns — the source of the earlier race.
     - ssh beef 'cd ~/overforge && docker compose -f deploy/docker-compose.yml up -d --build --no-deps voice'

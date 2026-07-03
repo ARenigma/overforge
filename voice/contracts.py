@@ -11,6 +11,7 @@ shadow the stdlib ``types`` that torch/httpx import.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Literal, Protocol
@@ -84,6 +85,46 @@ class SttLike(Protocol):
     """The slice of ``WhisperSTT`` that ``VoiceSession`` depends on (sync, blocking)."""
 
     def transcribe(self, audio: AudioArray, language: str = ...) -> str: ...
+
+
+@dataclass(frozen=True)
+class TurnEvent:
+    """One turn notification from a streaming STT provider (AssemblyAI v3, P1-A).
+
+    Attributes:
+        transcript:  The turn's transcript text (full turn, not a delta).
+        end_of_turn: True when the provider's built-in turn detection committed end-of-turn.
+        formatted:   True when ``transcript`` is the punctuated/formatted final
+                     (``turn_is_formatted`` on the wire).
+        fatal:       Poison pill — the streamer died permanently (connect + one retry both
+                     failed). The session must fall back to the local whisper path. All other
+                     fields are meaningless when set.
+    """
+
+    transcript: str
+    end_of_turn: bool
+    formatted: bool
+    fatal: bool = False
+
+
+class SttStreamerLike(Protocol):
+    """The slice of ``AssemblyAIStreamer`` that ``VoiceSession`` depends on.
+
+    Contract: one WebSocket per session lifetime. ``feed`` never blocks on the network for
+    long (small buffered sends); committed turns arrive on ``events`` (the provider's
+    built-in turn detection replaces the local endpointer). ``failed`` flips True — and a
+    ``fatal`` :class:`TurnEvent` is enqueued — when the connection is permanently lost, so
+    the session can fall back to the local whisper path. ``close`` MUST always be called on
+    session teardown (an unterminated AssemblyAI v3 session auto-closes only after 3 h and
+    bills the full duration); it is idempotent and exception-safe.
+    """
+
+    events: asyncio.Queue[TurnEvent]
+    failed: bool
+
+    async def start(self) -> None: ...
+    async def feed(self, pcm_f32: AudioArray) -> None: ...
+    async def close(self) -> None: ...
 
 
 class BrainClient(Protocol):

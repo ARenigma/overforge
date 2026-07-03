@@ -37,8 +37,10 @@ from contracts import (
     EndpointerLike,
     NoopTtsSink,
     SttLike,
+    SttStreamerLike,
     TerminalError,
     TtsSink,
+    TurnEvent,
     TurnResult,
     Utterance,
 )
@@ -121,6 +123,12 @@ class VoiceSession:
         brain:          A :class:`BrainClient` (``RestBrainClient`` in production).
         sink:           A :class:`TtsSink`; defaults to :class:`NoopTtsSink` (headless).
         language:       BCP-47 code passed to STT and (later) the brain.
+        streamer:       Optional :class:`SttStreamerLike` (AssemblyAI v3, ``STT_PROVIDER=
+                        assemblyai``). When set, frames are forwarded to the remote stream
+                        and its built-in turn detection replaces the local endpointer + STT;
+                        on permanent streamer failure the session falls back to the injected
+                        ``endpointer``/``stt``. ``None`` (default) = the local whisper path,
+                        byte-for-byte unchanged.
     """
 
     def __init__(
@@ -134,6 +142,7 @@ class VoiceSession:
         sink: TtsSink | None = None,
         language: str = "en",
         telemetry: TelemetrySink | None = None,
+        streamer: SttStreamerLike | None = None,
     ) -> None:
         self._interview_id = interview_id
         self._token = session_token
@@ -161,6 +170,19 @@ class VoiceSession:
         self._committed_frames = 0
         self._turn_gen = 0
         self._stt_task: asyncio.Task[None] | None = None
+        # Remote streaming STT (P1-A, STT_PROVIDER=assemblyai). While healthy, frames bypass
+        # the endpointer/local STT entirely; committed turns arrive as TurnEvents consumed by
+        # pump(). _fell_back flips (once) on permanent streamer failure — the session then
+        # runs the local whisper path for the rest of its life. The two _pump_* tasks are the
+        # persistent frame/event waiters (never cancelled mid-wait, so no queue items leak).
+        self._streamer = streamer
+        self._streamer_started = False
+        self._fell_back = False
+        self._stream_frames = 0  # frames forwarded since the last re-arm (telemetry audio_s)
+        self._pump_frame_task: asyncio.Task[AudioArray] | None = None
+        self._pump_event_task: asyncio.Task[TurnEvent] | None = None
+        self._pump_event_gen = 0  # _turn_gen at event-waiter creation — stale-event guard
+        self._streamer_close_task: asyncio.Task[None] | None = None  # close() safety net ref
 
     @property
     def state(self) -> str:
@@ -188,6 +210,17 @@ class VoiceSession:
         """
         if self._state is not _State.LISTENING:
             return None  # ignore frames while processing / speaking / done
+
+        streamer = self._streamer
+        if streamer is not None and self._stream_mode():
+            # Remote streaming STT: forward the frame; the provider's built-in turn detection
+            # replaces the endpointer, so no local accumulation / VAD / segment logic runs.
+            # Committed turns arrive as TurnEvents (see pump / _on_stream_event).
+            await self._ensure_streamer_started()
+            if self._stream_mode():  # start may have failed → fell back to the local path
+                self._stream_frames += 1
+                await streamer.feed(np.asarray(frame, dtype=np.float32))
+                return None
 
         frame = np.asarray(frame, dtype=np.float32)
         # Append to our OWN full-turn buffer BEFORE the endpointer (whose ring only keeps 8 s).
@@ -237,6 +270,162 @@ class VoiceSession:
             self._recover()
             raise
 
+    async def pump(self, frame_q: asyncio.Queue[AudioArray]) -> TurnResult | None:
+        """One pipeline step: consume the next input (mic frame or streamed turn event).
+
+        The WS pipeline's single entry point. In the default whisper mode this is EXACTLY the
+        previous inline loop body — ``await frame_q.get()`` then :meth:`feed_frame` — so the
+        local path is behaviorally unchanged. In streaming mode (STT_PROVIDER=assemblyai) it
+        waits on BOTH the frame queue (frames forward to the remote stream) and the streamer's
+        TurnEvent queue (an end-of-turn event commits a turn through the same pipeline), since
+        the provider's EOT decision arrives independently of mic-frame timing.
+
+        Returns / raises exactly like :meth:`feed_frame` (``TurnResult`` for a committed turn,
+        ``None`` otherwise; brain errors propagate after the session has re-armed itself).
+        """
+        if self._streamer is None or self._fell_back:
+            frame = await self._next_frame(frame_q)
+            return await self.feed_frame(frame)
+
+        if self._streamer.failed:
+            # The fatal poison-pill event may have been drained with the queue on a re-arm;
+            # the flag is the authoritative signal either way.
+            self._fallback_to_local()
+            frame = await self._next_frame(frame_q)
+            return await self.feed_frame(frame)
+
+        await self._ensure_streamer_started()
+        if not self._stream_mode():  # start failed → this session is local from here on
+            frame = await self._next_frame(frame_q)
+            return await self.feed_frame(frame)
+
+        # Persistent waiters: never cancelled between pump calls, so a dequeued item can never
+        # be lost to a cancellation race (asyncio.wait leaves the losers pending).
+        if self._pump_frame_task is None:
+            self._pump_frame_task = asyncio.create_task(frame_q.get(), name="pump-frame")
+        if self._pump_event_task is None:
+            self._pump_event_task = asyncio.create_task(
+                self._streamer.events.get(), name="pump-event"
+            )
+            self._pump_event_gen = self._turn_gen
+        done, _pending = await asyncio.wait(
+            {self._pump_frame_task, self._pump_event_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        result: TurnResult | None = None
+        if self._pump_frame_task in done:
+            frame_task, self._pump_frame_task = self._pump_frame_task, None
+            await self.feed_frame(frame_task.result())
+        if self._pump_event_task in done:
+            event_task, self._pump_event_task = self._pump_event_task, None
+            event = event_task.result()
+            if self._pump_event_gen != self._turn_gen and not event.fatal:
+                # The waiter predates a re-arm (turn_gen moved on) — the event belongs to the
+                # previous listening window. Drop it; never commit stale audio as a turn.
+                logger.debug("Dropping stale streamed turn event (gen %d != %d).",
+                             self._pump_event_gen, self._turn_gen)
+            else:
+                result = await self._on_stream_event(event)
+        return result
+
+    async def _next_frame(self, frame_q: asyncio.Queue[AudioArray]) -> AudioArray:
+        """Next mic frame — consuming a leftover persistent waiter first (fallback path)."""
+        if self._pump_frame_task is not None:
+            frame_task, self._pump_frame_task = self._pump_frame_task, None
+            return await frame_task
+        return await frame_q.get()
+
+    async def _on_stream_event(self, event: TurnEvent) -> TurnResult | None:
+        """Commit one streamed end-of-turn event through the existing turn pipeline.
+
+        Mirrors the post-EOT half of :meth:`feed_frame`: leave LISTENING synchronously, fire
+        the thinking cue, then run the shared sanity → brain → TTS tail (``_complete_turn``).
+        ``stt_ms`` is the event→transcript-ready time, ≈0 by construction — the transcript
+        rides on the end-of-turn event itself.
+        """
+        if event.fatal:
+            self._fallback_to_local()
+            return None
+        if self._state is not _State.LISTENING or not event.end_of_turn:
+            return None  # stale (belt-and-braces; re-arm drains the queue) or a partial
+        self._state = _State.PROCESSING
+        t0 = time.perf_counter()
+        audio_s = self._stream_frames * _VAD_FRAME / _SR
+        logger.debug(
+            "Commit (assemblyai_eot) at %.1fs — formatted=%s", audio_s, event.formatted
+        )
+        self._safe_thinking()
+        # One loop yield so the thinking cue DISPATCHES before the brain reply can be spoken.
+        # The local path gets this ordering for free from its asyncio.to_thread STT hop; here
+        # there is no STT hop at all, so the cue task would otherwise start after speak().
+        await asyncio.sleep(0)
+        transcript = event.transcript.strip()
+        stt_ms = (time.perf_counter() - t0) * 1000.0
+        try:
+            return await self._complete_turn("assemblyai_eot", transcript, audio_s, stt_ms)
+        except BrainTransientError:
+            logger.exception("Transient brain failure on turn %s — re-arming.", self._request_id)
+            self._recover(new_request_id=False)
+            raise
+        except Exception:
+            logger.exception("Unexpected failure processing streamed turn — re-arming.")
+            self._recover()
+            raise
+
+    def _stream_mode(self) -> bool:
+        """True while the remote streamer is the active STT/turn-detection path."""
+        return self._streamer is not None and not self._streamer.failed and not self._fell_back
+
+    async def _ensure_streamer_started(self) -> None:
+        """Start the streamer once; a failed start flips the session to the local path."""
+        if self._streamer is None or self._streamer_started:
+            return
+        self._streamer_started = True
+        try:
+            await self._streamer.start()
+        except Exception:
+            logger.exception("Streaming STT failed to start — using the local whisper path.")
+            self._fallback_to_local()
+
+    def _fallback_to_local(self) -> None:
+        """Flip (once) to the local endpointer + whisper path after a fatal streamer failure.
+
+        The streamer socket itself is torn down by the streamer (on fatal) and again —
+        idempotently — at session teardown, so the fallback never leaves it open.
+        """
+        if self._fell_back:
+            return
+        self._fell_back = True
+        logger.error(
+            "Streaming STT permanently failed — falling back to local whisper + endpointer "
+            "for interview %s.",
+            self._interview_id,
+        )
+        if self._pump_event_task is not None:
+            self._pump_event_task.cancel()
+            self._pump_event_task = None
+        if self._state is _State.LISTENING:
+            # Reset the (never-fed) endpointer + buffers so the local path starts clean.
+            self._recover(new_request_id=False)
+
+    def _drain_stream_events(self) -> None:
+        """Discard queued turn events from the previous listening window (stale on re-arm).
+
+        The fatal poison pill is re-queued, never swallowed — ``streamer.failed`` also guards
+        it, but the pill must stay visible to a pending waiter.
+        """
+        if self._streamer is None:
+            return
+        q = self._streamer.events
+        while True:
+            try:
+                event = q.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            if event.fatal:
+                q.put_nowait(event)
+                return
+
     def _maybe_commit_segment(self) -> None:
         """Streaming STT: kick off a background transcription of the newest completed speech segment
         at a pause. One at a time; a successful result appends to _committed_text and advances
@@ -283,7 +472,6 @@ class VoiceSession:
         seeing where the post-EOT gap actually goes. No audio or transcript text is captured.
         """
         t0 = time.perf_counter()
-        rid = self._request_id
         committed: AudioArray = (
             np.concatenate(self._accum).astype(np.float32, copy=False)
             if self._accum
@@ -317,6 +505,20 @@ class VoiceSession:
                 await asyncio.to_thread(self._stt.transcribe, committed, self._language)
             ).strip()
         stt_ms = (time.perf_counter() - t0) * 1000.0
+        return await self._complete_turn(reason, transcript, audio_s, stt_ms)
+
+    async def _complete_turn(
+        self, reason: str, transcript: str, audio_s: float, stt_ms: float
+    ) -> TurnResult | None:
+        """Sanity-check a transcript, submit it to the brain, voice the reply, log telemetry.
+
+        Shared tail of both commit paths — local (endpointer EOT → whisper) and streamed
+        (AssemblyAI end-of-turn event, where the transcript is already known and stt_ms ≈ 0).
+        Same contract as :meth:`_process_turn`: ``None`` for a dropped (empty/hallucinated)
+        transcript after silently re-arming; raises brain errors for ``feed_frame``/``pump``
+        to handle.
+        """
+        rid = self._request_id
 
         if not transcript:
             # False fire (cough / clipped silence): never submit an empty answer; re-arm + listen.
@@ -396,7 +598,7 @@ class VoiceSession:
         """Emit one structured per-turn telemetry line at INFO.
 
         Format is ``voice.turn`` + ``key=value`` fields so prod logs stay greppable/parseable:
-        ``commit`` is the EOT kind (smartturn / backstop / maxlen / false-fire), the three ``*_ms``
+        ``commit`` is the EOT kind (smartturn / backstop / maxlen / assemblyai_eot); the ``*_ms``
         are the post-EOT stage latencies, and ``gap_ms`` is their sum — the commit→interviewer-audio
         gap that the thinking filler masks.
         """
@@ -496,10 +698,49 @@ class VoiceSession:
 
     def close(self) -> None:
         """Terminal teardown — ``feed_frame`` becomes a no-op. Cancels any in-flight backchannel
-        cue; does NOT reset the endpointer."""
+        cue; does NOT reset the endpointer.
+
+        If a remote streamer exists its Terminate+close is SCHEDULED here as a safety net (the
+        AssemblyAI billing trap: an unterminated session bills up to 3 h) — but the guaranteed
+        path is :meth:`aclose`, which awaits it. Prefer ``aclose`` from async teardown.
+        """
         self._state = _State.CLOSED
         for task in list(self._bg_tasks):
             task.cancel()
+        for pump_task in (self._pump_frame_task, self._pump_event_task):
+            if pump_task is not None:
+                pump_task.cancel()
+        self._pump_frame_task = None
+        self._pump_event_task = None
+        if self._streamer is not None and self._streamer_close_task is None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                logger.error(
+                    "VoiceSession.close() outside a running loop — the streamer socket cannot "
+                    "be closed here; call aclose() instead (AssemblyAI bills unclosed sessions)."
+                )
+            else:
+                # Scheduled once (guarded by _streamer_close_task) and deliberately NOT tracked
+                # in _bg_tasks: a repeated close() must never cancel the in-flight Terminate —
+                # that is the whole point of the safety net.
+                self._streamer_close_task = loop.create_task(
+                    self._streamer.close(), name="session-streamer-close"
+                )
+
+    async def aclose(self) -> None:
+        """Async terminal teardown: :meth:`close` + AWAIT the streamer's Terminate+close.
+
+        This is the guaranteed-teardown path the WS layer uses — it must run on every session
+        end (normal, error, or disconnect) so a streaming-STT socket is never left open.
+        """
+        self.close()  # schedules the streamer close (if any) exactly once
+        task = self._streamer_close_task
+        if task is not None:
+            try:
+                await task
+            except Exception:
+                logger.exception("Streamer close failed during session teardown — continuing.")
 
     def _recover(self, *, new_request_id: bool = True) -> None:
         """Clear the buffer, reset the endpointer, return to LISTENING.
@@ -511,6 +752,8 @@ class VoiceSession:
         self._committed_text = ""
         self._committed_frames = 0
         self._turn_gen += 1  # invalidate any in-flight streaming-STT segment from the prior turn
+        self._stream_frames = 0
+        self._drain_stream_events()  # streamed events from the prior listening window are stale
         if new_request_id:
             self._request_id = _new_request_id()
         self._endpointer.reset()

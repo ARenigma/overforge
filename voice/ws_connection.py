@@ -110,7 +110,10 @@ class WsConnection:
                     logger.error("WS task failed for %s: %r", self._interview_id, err)
         finally:
             if self._session is not None:
-                self._session.close()
+                # aclose (not close): AWAITS the streaming-STT socket's Terminate+close on the
+                # assemblyai path — an unterminated AssemblyAI session bills up to 3 h. This
+                # finally runs on EVERY teardown (normal, error, disconnect).
+                await self._session.aclose()
             await self._safe_close()
 
     # ── handshake ────────────────────────────────────────────────────────────────
@@ -194,8 +197,10 @@ class WsConnection:
     async def _pipeline(self, frame_q: asyncio.Queue[npt.NDArray[np.float32]]) -> None:
         assert self._session is not None
         while True:
-            frame = await frame_q.get()
-            turn = await self._session.feed_frame(frame)
+            # pump = frame_q.get() + feed_frame on the default whisper path (unchanged); on the
+            # streaming-STT path it also consumes the provider's end-of-turn events, which can
+            # arrive independently of mic-frame timing (e.g. right after the client mic gates).
+            turn = await self._session.pump(frame_q)
             if turn is None:
                 # A false-fire commit already fired {thinking} (which disarms the browser mic) but
                 # returns no turn_ready; re-send {ready} so the browser re-arms instead of staying

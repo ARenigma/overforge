@@ -13,6 +13,9 @@ venv/
 .env
 .env.*
 !.env.example
+# Host-only compose secrets files (deploy/*.env live on the VPS, never in git)
+deploy/backend.env
+deploy/voice.env
 openrouter_key.txt
 
 # Local secrets (tokens/credentials) — never commit
