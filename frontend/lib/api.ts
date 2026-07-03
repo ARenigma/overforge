@@ -332,3 +332,31 @@ export async function speakChunk(
     return null; // voice is best-effort; never break the interview
   }
 }
+
+/**
+ * POST /api/interviews/:id/speak-stream (P1-B — streaming TTS)
+ * Streams the WHOLE latest interviewer utterance (`source:'turn'`) or run-hint (`source:'run'`)
+ * as raw PCM16 mono audio (sample rate in the X-Sample-Rate header), chunked as Cartesia
+ * synthesizes it — so the first audio arrives at ~TTFB. Returns the ok-checked Response so the
+ * caller can read `response.body` progressively; null on any failure (voice off 503, nothing to
+ * say 404, upstream 502, network/abort) — the caller falls back to the chunked speakChunk path.
+ */
+export async function speakStream(
+  id: string,
+  token: string,
+  source: 'turn' | 'run',
+  signal?: AbortSignal
+): Promise<Response | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/api/interviews/${id}/speak-stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, source }),
+      signal,
+    });
+    if (!res.ok || !res.body) return null;
+    return res;
+  } catch {
+    return null; // voice is best-effort; never break the interview
+  }
+}

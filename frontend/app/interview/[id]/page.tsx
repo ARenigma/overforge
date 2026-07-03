@@ -37,6 +37,7 @@ import {
   answerInterview,
   runCode as apiRunCode,
   speakChunk,
+  speakStream,
   finishInterview,
   getInterviewState,
   type InterviewPhase,
@@ -77,6 +78,127 @@ const SPEAK_TAIL_COOLDOWN_MS = 800;
 // actually cancels echo. Keep the mic gated this long after voice engages — the greeting plays
 // during it, so AEC trains on the real speaker+mic path before the first candidate turn is captured.
 const AEC_WARMUP_MS = 3000;
+
+// ── Streaming TTS (P1-B) ──────────────────────────────────────────────────────
+// The interviewer's utterance is streamed as raw PCM16 from /speak-stream and scheduled onto a
+// shared AudioContext as chunks arrive, so the first audio lands at ~TTFB instead of after
+// full-sentence synthesis. Default ON; set NEXT_PUBLIC_TTS_STREAM=0 to force the legacy chunked
+// /speak path. Any streaming failure before audio starts falls back to that path automatically.
+const TTS_STREAMING = process.env.NEXT_PUBLIC_TTS_STREAM !== '0';
+// Generous hard cap on ONE streamed utterance (fetch + playback tail). Exists so the half-duplex
+// mic gate can never stay stuck behind a wedged stream; normal turns finish far inside it.
+const TTS_STREAM_WATCHDOG_MS = 60_000;
+
+/** Convert little-endian PCM16 bytes → Float32 samples for Web Audio. `byteLen` must be even. */
+function pcm16ToFloat32(bytes: Uint8Array, byteLen: number): Float32Array<ArrayBuffer> {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, byteLen);
+  const out = new Float32Array(byteLen >> 1);
+  for (let i = 0; i < out.length; i++) out[i] = view.getInt16(i * 2, true) / 32768;
+  return out;
+}
+
+/** Read a raw-PCM16 streaming response body and play it gaplessly on `ctx`: each chunk becomes an
+ *  AudioBuffer scheduled at a monotonic playback head (playT = max(playT, now); start(playT);
+ *  playT += duration). Chunk boundaries can split a 16-bit sample, so a 1-byte remainder is
+ *  carried between chunks. Resolves when the stream has ended AND the last scheduled buffer has
+ *  finished (or on cancel/watchdog — the mic gate can never stay stuck here). Returns true if ANY
+ *  audio was scheduled: a mid-stream failure after audio has played must NOT trigger the chunked
+ *  fallback, which would replay the utterance from the top. */
+async function playPcmStream(opts: {
+  body: NonNullable<Response['body']>;
+  ctx: AudioContext;
+  sampleRate: number;
+  isCancelled: () => boolean;
+  registerStop: (stop: () => void) => void;
+}): Promise<boolean> {
+  const { body, ctx, sampleRate, isCancelled, registerStop } = opts;
+  const reader = body.getReader();
+  const sources: AudioBufferSourceNode[] = [];
+  let playT = 0;
+  let scheduledAny = false;
+  let stopped = false;
+  let wakeTail: (() => void) | null = null;
+
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    void reader.cancel().catch(() => undefined);
+    for (const s of sources) {
+      try {
+        s.stop();
+      } catch {
+        // source already ended — fine
+      }
+    }
+    sources.length = 0;
+    wakeTail?.(); // release a pending tail wait immediately
+  };
+  registerStop(stop);
+  const watchdog = setTimeout(stop, TTS_STREAM_WATCHDOG_MS);
+
+  // Wait out whatever is still scheduled on the playback head (cancel-aware via wakeTail).
+  const waitTail = async () => {
+    const remainingMs = Math.max(0, (playT - ctx.currentTime) * 1000);
+    if (!scheduledAny || remainingMs <= 0 || stopped) return;
+    await new Promise<void>((resolve) => {
+      wakeTail = resolve;
+      setTimeout(resolve, remainingMs + 50);
+    });
+  };
+
+  let carry: Uint8Array | null = null;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (stopped) return scheduledAny;
+      if (isCancelled()) {
+        stop(); // superseded (e.g. the filler bumped the seq) — silence our scheduled audio too
+        return scheduledAny;
+      }
+      if (done) break;
+      if (!value || value.byteLength === 0) continue;
+
+      // PCM16 alignment: prepend last chunk's odd trailing byte, carry this chunk's (if any).
+      let bytes: Uint8Array = value;
+      if (carry) {
+        const merged = new Uint8Array(carry.length + value.length);
+        merged.set(carry, 0);
+        merged.set(value, carry.length);
+        bytes = merged;
+      }
+      const even = bytes.length & ~1;
+      carry = even < bytes.length ? bytes.slice(even) : null;
+      if (even === 0) continue;
+
+      const f32 = pcm16ToFloat32(bytes, even);
+      const buf = ctx.createBuffer(1, f32.length, sampleRate);
+      buf.copyToChannel(f32, 0);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ctx.destination);
+      // Monotonic playback head: butt each chunk against the previous one; never schedule in
+      // the past (first chunk, or if decode ever lagged behind playback).
+      playT = Math.max(playT, ctx.currentTime);
+      src.start(playT);
+      playT += buf.duration;
+      sources.push(src);
+      scheduledAny = true;
+    }
+    await waitTail();
+    return scheduledAny;
+  } catch {
+    // Mid-stream network/decode error. If audio already played, let the scheduled tail finish and
+    // report success (a fallback would replay from the top); if nothing played, signal fallback.
+    if (!scheduledAny) {
+      stop();
+      return false;
+    }
+    await waitTail();
+    return true;
+  } finally {
+    clearTimeout(watchdog);
+  }
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -272,6 +394,10 @@ export default function InterviewPage() {
   // Voice (P1): the interviewer speaks its turns (always audible — the candidate can't mute it).
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const speakSeqRef = useRef(0); // bumped to cancel in-flight playback on a new turn
+  // Streaming TTS (P1-B): shared lazy AudioContext for PCM playback + canceller for the in-flight
+  // streamed utterance (aborts its fetch AND stops its scheduled Web Audio sources).
+  const ttsCtxRef = useRef<AudioContext | null>(null);
+  const stopTtsStreamRef = useRef<(() => void) | null>(null);
 
   // Answer textarea
   const [answer, setAnswer] = useState('');
@@ -777,8 +903,15 @@ export default function InterviewPage() {
     pasteHintTimer.current = setTimeout(() => setPasteBlocked(false), 2500);
   }, []);
 
-  // Stop any audio on unmount.
-  useEffect(() => () => audioRef.current?.pause(), []);
+  // Stop any audio on unmount (both the chunked <audio> path and the streamed Web Audio path).
+  useEffect(
+    () => () => {
+      audioRef.current?.pause();
+      stopTtsStreamRef.current?.();
+      void ttsCtxRef.current?.close().catch(() => undefined);
+    },
+    []
+  );
 
   // Speak the latest interviewer utterance (P1). Best-effort — never throws into the flow. A token
   // override is needed right after begin() (the state token hasn't flushed yet). source='run'
@@ -789,11 +922,56 @@ export default function InterviewPage() {
       if (!tok) return;
       const seq = ++speakSeqRef.current; // a newer turn supersedes this playback
       audioRef.current?.pause();
+      // Cancel any in-flight STREAMED playback from a previous turn (aborts its fetch + stops its
+      // scheduled Web Audio sources) — the <audio> pause above only covers the chunked path.
+      stopTtsStreamRef.current?.();
+      stopTtsStreamRef.current = null;
       // Half-duplex: mark the interviewer as speaking so onFrame drops mic frames for the duration
       // (else the mic captures our own greeting/reply as a phantom candidate turn — self-echo).
       voiceSpeakingRef.current = true;
 
       try {
+        // STREAMING path (P1-B): play the whole utterance progressively from /speak-stream — first
+        // audio at ~TTFB. On ANY failure before audio starts (503/404/502, no body, decode error)
+        // fall through to the proven chunked path below.
+        if (TTS_STREAMING) {
+          const ctrl = new AbortController();
+          let stopPlayback: (() => void) | null = null;
+          const stopAll = () => {
+            ctrl.abort();
+            stopPlayback?.();
+          };
+          stopTtsStreamRef.current = stopAll;
+          // Watchdog also covers the pre-headers fetch window, so a hung request can never leave
+          // the mic gated; playback itself has a second (idempotent) watchdog inside playPcmStream.
+          const watchdog = setTimeout(stopAll, TTS_STREAM_WATCHDOG_MS);
+          let streamed = false;
+          try {
+            const res = await speakStream(id, tok, source, ctrl.signal);
+            if (seq !== speakSeqRef.current) return; // superseded while fetching
+            if (res?.body) {
+              let ctx = ttsCtxRef.current;
+              if (!ctx) ttsCtxRef.current = ctx = new AudioContext();
+              if (ctx.state === 'suspended') void ctx.resume();
+              const sampleRate = Number(res.headers.get('X-Sample-Rate') || '') || 24000;
+              streamed = await playPcmStream({
+                body: res.body,
+                ctx,
+                sampleRate,
+                isCancelled: () => seq !== speakSeqRef.current,
+                registerStop: (s) => {
+                  stopPlayback = s;
+                },
+              });
+            }
+          } finally {
+            clearTimeout(watchdog);
+            if (stopTtsStreamRef.current === stopAll) stopTtsStreamRef.current = null;
+          }
+          if (streamed || seq !== speakSeqRef.current) return;
+          // else: nothing was played — fall back to the chunked per-sentence path.
+        }
+
         const first = await speakChunk(id, tok, source, 0);
         if (!first || seq !== speakSeqRef.current) return;
 

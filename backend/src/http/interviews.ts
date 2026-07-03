@@ -9,7 +9,13 @@ import { hashToken } from '../interview/token';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
 import { recordVoiceTurn, recordProctorSignal } from '../db/interviews';
-import { synthesize, isCartesiaConfigured, splitSentences } from '../voice/cartesia';
+import {
+  synthesize,
+  synthesizeStream,
+  isCartesiaConfigured,
+  splitSentences,
+  STREAM_SAMPLE_RATE,
+} from '../voice/cartesia';
 import { pickFillerIndex } from '../voice/fillers';
 import { getFillerAudio } from '../voice/fillerCache';
 
@@ -314,6 +320,90 @@ router.post('/:id/speak', async (req: Request, res: Response): Promise<void> => 
     res.setHeader('Content-Type', 'audio/wav');
     res.setHeader('Cache-Control', 'no-store');
     res.send(audio);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ─────────────────────── POST /api/interviews/:id/speak-stream ───────────────────────
+// Streaming TTS (P1-B): same server-authoritative text resolution as /speak (latest interviewer
+// turn or run-hint — never client-supplied text), but the audio is PROXIED CHUNK-BY-CHUNK from
+// Cartesia's SSE endpoint as raw pcm_s16le mono @ STREAM_SAMPLE_RATE, so the room's first audio
+// lands at ~TTFB instead of after full-sentence synthesis. One request per utterance.
+// Upstream failure BEFORE the first byte → 502 JSON (the room falls back to the chunked /speak
+// path); after the first byte → the response just ends (the room plays what it got).
+
+router.post('/:id/speak-stream', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { token, source } = req.body as { token?: string; source?: 'turn' | 'run' };
+
+    await validateCandidate(id, token ?? '');
+    await enforceRateLimit(`speakstream:${hashToken(token ?? '')}`, {
+      limit: 60, // one request per interviewer turn
+      windowMs: 600_000,
+      message: 'Too many speech requests; please slow down.',
+    });
+
+    if (!isCartesiaConfigured()) {
+      res.status(503).json({ error: 'Voice is not enabled for this interview.' });
+      return;
+    }
+
+    const text = await orchestrator.latestSpeakable(id, source === 'run' ? 'run' : 'turn');
+    if (!text) {
+      res.status(404).json({ error: 'Nothing to speak yet.' });
+      return;
+    }
+
+    const stream = synthesizeStream(text);
+    // If the candidate disconnects mid-stream, stop pulling from Cartesia (releases the upstream
+    // connection via the generator's finally).
+    res.on('close', () => {
+      if (!res.writableEnded) void stream.return(undefined);
+    });
+
+    let started = false;
+    try {
+      for await (const chunk of stream) {
+        if (res.destroyed || res.writableEnded) break;
+        if (!started) {
+          started = true;
+          res.status(200);
+          res.setHeader('Content-Type', 'application/octet-stream');
+          res.setHeader('X-Sample-Rate', String(STREAM_SAMPLE_RATE));
+          res.setHeader('Access-Control-Expose-Headers', 'X-Sample-Rate');
+          res.setHeader('Cache-Control', 'no-store');
+        }
+        if (!res.write(chunk)) {
+          // Respect backpressure; also wake on close so a vanished client can't wedge the loop.
+          await new Promise<void>((resolve) => {
+            const onDrain = (): void => {
+              res.off('close', onClose);
+              resolve();
+            };
+            const onClose = (): void => {
+              res.off('drain', onDrain);
+              resolve();
+            };
+            res.once('drain', onDrain);
+            res.once('close', onClose);
+          });
+        }
+      }
+      res.end();
+    } catch (err) {
+      if (!started) {
+        // Nothing sent yet — a clean JSON error the room can react to (it falls back to /speak).
+        // Never leak the vendor error body to the candidate's browser.
+        console.error('[interviews] speak-stream upstream error:', err);
+        res.status(502).json({ error: 'Voice synthesis failed.' });
+      } else {
+        // Headers + audio already flowing — just end; the room plays what arrived.
+        console.error('[interviews] speak-stream ended mid-stream:', err);
+        res.end();
+      }
+    }
   } catch (err) {
     sendError(res, err);
   }
