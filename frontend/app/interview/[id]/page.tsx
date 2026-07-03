@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
 import {
@@ -64,7 +63,6 @@ import { Wordmark } from '@/components/marketing/wordmark';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
 import { useVoiceMic } from '@/lib/voice/use-voice-mic';
 import { useVoiceSocket } from '@/lib/voice/use-voice-socket';
-import { playFiller } from '@/lib/voice/play-filler';
 import type { ServerReady, ServerTurnReady } from '@/lib/voice/types';
 import { useCameraProctor } from '@/lib/proctor/use-camera-proctor';
 
@@ -246,15 +244,6 @@ const LANGUAGES = [
 
 type Language = (typeof LANGUAGES)[number]['value'];
 
-const PHASE_LABELS: Record<InterviewPhase, string> = {
-  greeting: 'Greeting',
-  oral: 'Oral Q&A',
-  handoff: 'Transition',
-  coding: 'Coding',
-  wrap_up: 'Wrap-up',
-  done: 'Done',
-};
-
 const PHASE_ORDER: InterviewPhase[] = ['greeting', 'oral', 'handoff', 'coding', 'wrap_up', 'done'];
 
 function formatTime(totalSeconds: number): string {
@@ -300,17 +289,6 @@ function LoadingScreen({ text }: { text: string }) {
         <p className="text-sm text-muted-foreground">{text}</p>
       </div>
     </div>
-  );
-}
-
-function PhaseBadge({ phase }: { phase: InterviewPhase }) {
-  return (
-    <Badge
-      variant="outline"
-      className="text-[10px] uppercase tracking-widest border-primary/40 text-primary bg-primary/10 px-2 py-0.5 font-mono"
-    >
-      {PHASE_LABELS[phase] ?? phase}
-    </Badge>
   );
 }
 
@@ -541,22 +519,11 @@ export default function InterviewPage() {
   }, []);
 
   const handleVoiceThinking = useCallback(() => {
+    // Turn committed — stop forwarding mic frames until the interviewer's reply plays. NO filler:
+    // with instant EOT STT + streamed TTS the gap is ~1s, and a spoken filler bled into the mic
+    // (self-echo → phantom AAI turn → erratic firing + spoken-ack desync = "stuck at speaking").
     setMicForwarding(false);
-    const tok = activeTokenRef.current;
-    if (!tok) return;
-    // Half-duplex: the filler is interviewer audio too — gate the mic while it plays, else the mic
-    // captures the filler and commits it as a phantom turn, which fires ANOTHER filler → an endless
-    // "self-talking" loop. Release only if a real reply hasn't taken over the seq, then cool down.
-    voiceSpeakingRef.current = true;
-    const fillerDone = playFiller(id, tok, speakSeqRef);
-    const fillerSeq = speakSeqRef.current; // playFiller bumped the seq synchronously
-    void fillerDone.finally(() => {
-      if (speakSeqRef.current === fillerSeq) {
-        voiceSpeakingRef.current = false;
-        micCooldownUntilRef.current = Date.now() + SPEAK_TAIL_COOLDOWN_MS;
-      }
-    });
-  }, [id]);
+  }, []);
 
   const handleVoiceTurnReady = useCallback(
     (cue: ServerTurnReady) => {
@@ -1177,11 +1144,22 @@ export default function InterviewPage() {
 
       {/* Minimal top strip */}
       <header className="h-11 border-b border-border bg-card flex items-center justify-between px-4 shrink-0">
-        <Wordmark className="scale-90 origin-left" />
+        {/* Left: wordmark + elapsed timer. */}
         <div className="flex items-center gap-3">
-          {/* Passive device status (camera/mic/audio are REQUIRED — no disable) + the single
-              collapse/expand toggle. All room controls live here in the top bar, not the chat pane. */}
-          {!isDone && (
+          <Wordmark className="scale-90 origin-left" />
+          <span
+            className="flex items-center gap-1.5 font-mono text-xs tabular-nums text-muted-foreground"
+            title="Elapsed time"
+          >
+            <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+            {formatTime(elapsed)}
+          </span>
+        </div>
+
+        {/* Right: room controls — passive device status (camera/mic/audio are REQUIRED, no disable),
+            the single collapse/expand toggle, and End. Interview only. */}
+        {!isDone && (
+          <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5">
               <DeviceIndicator
                 icon={Camera}
@@ -1216,25 +1194,12 @@ export default function InterviewPage() {
                 )}
               </button>
             </div>
-          )}
-          <span
-            className="flex items-center gap-1.5 font-mono text-xs tabular-nums text-muted-foreground"
-            title="Elapsed time"
-          >
-            <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-            {formatTime(elapsed)}
-          </span>
-          <PhaseBadge phase={phase} />
-          {/* End the interview early — confirm dialog, candidate token drives /finish. */}
-          {!isDone && (
+            {/* End the interview early — confirm dialog, candidate token drives /finish. */}
             <AlertDialog>
               <AlertDialogTrigger asChild>
-                <button
-                  type="button"
-                  className="rounded-input border border-destructive/40 bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
+                <Button variant="destructive" size="sm">
                   End
-                </button>
+                </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
@@ -1255,8 +1220,8 @@ export default function InterviewPage() {
                 </AlertDialogFooter>
               </AlertDialogContent>
             </AlertDialog>
-          )}
-        </div>
+          </div>
+        )}
       </header>
 
       {/* Phase progress — fills as the interview advances greeting → done */}
@@ -1315,7 +1280,7 @@ export default function InterviewPage() {
                     onClick={handleRunCode}
                     loading={running}
                     variant="outline"
-                    className="h-6 gap-1 rounded-md border border-primary/40 bg-primary/10 px-3 font-mono text-[10px] text-primary transition-colors hover:bg-primary/20 focus-visible:ring-ring"
+                    className="h-6 gap-1 rounded-md border border-success/40 bg-success/10 px-3 font-mono text-[10px] text-success transition-colors hover:bg-success/20 focus-visible:ring-ring"
                   >
                     {!running && <Play className="h-3 w-3 fill-current" />}
                     RUN
