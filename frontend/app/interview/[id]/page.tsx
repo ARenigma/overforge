@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import type { ImperativePanelHandle } from 'react-resizable-panels';
 import {
   Select,
   SelectContent,
@@ -20,6 +21,17 @@ const EnhancedCodeMirrorEditor = dynamic(
   { ssr: false, loading: () => <div className="h-full w-full bg-background" /> }
 );
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import {
   beginInterview,
   answerInterview,
@@ -39,12 +51,13 @@ import {
   Loader2,
   Lock,
   Mic,
-  MicOff,
+  PanelRightClose,
+  PanelRightOpen,
   Play,
   RefreshCw,
   Sparkles,
   Volume2,
-  VolumeX,
+  type LucideIcon,
 } from 'lucide-react';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
@@ -179,6 +192,41 @@ function PhaseBadge({ phase }: { phase: InterviewPhase }) {
   );
 }
 
+/** Passive device-status indicator (icon + dot) — mic/camera are REQUIRED for a proctored
+ *  interview, so these are read-only: they show the device is live, with no way to disable it.
+ *  `live` adds a ping pulse (e.g. the mic while actively listening). */
+function DeviceIndicator({
+  icon: Icon,
+  on,
+  live = false,
+  title,
+}: {
+  icon: LucideIcon;
+  on: boolean;
+  live?: boolean;
+  title: string;
+}) {
+  return (
+    <span title={title} className="flex items-center gap-1 px-1 text-foreground-subtle">
+      <Icon
+        className={`h-3.5 w-3.5 ${on ? 'text-foreground' : 'text-foreground-subtle'}`}
+        aria-hidden="true"
+      />
+      <span className="relative flex h-1.5 w-1.5" aria-hidden="true">
+        {live && on && (
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
+        )}
+        <span
+          className={`relative inline-flex h-1.5 w-1.5 rounded-full ${
+            on ? 'bg-success' : 'bg-foreground-subtle/40'
+          }`}
+        />
+      </span>
+      <span className="sr-only">{title}</span>
+    </span>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function InterviewPage() {
@@ -189,7 +237,6 @@ export default function InterviewPage() {
   const urlToken = searchParams.get('t');
   const sessionKey = `of_session_${id}`;
   const langKey = `of_lang_${id}`;
-  const muteKey = `of_mute_${id}`;
 
   const [stage, setStage] = useState<Stage>('loading_token');
   const [errorMsg, setErrorMsg] = useState<string>('');
@@ -197,6 +244,10 @@ export default function InterviewPage() {
   const [consentCameraState, setConsentCameraState] = useState<ConsentCameraState>('idle');
   // Rotated session token used for all candidate calls after begin.
   const [activeToken, setActiveToken] = useState<string | null>(null);
+  // When set, this session is being RESUMED (reload / new tab). Consent (camera + mic) must be
+  // re-granted before re-entering the room — reloading must NOT bypass proctoring. handleBegin then
+  // rehydrates via resumeSession() instead of beginInterview().
+  const [resumeToken, setResumeToken] = useState<string | null>(null);
   // Inline answer error (kept out of the transcript) so the candidate can resend.
   const [answerError, setAnswerError] = useState<string | null>(null);
 
@@ -218,10 +269,9 @@ export default function InterviewPage() {
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<RunResult | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
-  // Voice (P1): the interviewer speaks its turns. Muteable; preference persists per interview.
-  const [muted, setMuted] = useState(false);
+  // Voice (P1): the interviewer speaks its turns (always audible — the candidate can't mute it).
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const speakSeqRef = useRef(0); // bumped to cancel in-flight playback on a new turn / mute
+  const speakSeqRef = useRef(0); // bumped to cancel in-flight playback on a new turn
 
   // Answer textarea
   const [answer, setAnswer] = useState('');
@@ -269,6 +319,38 @@ export default function InterviewPage() {
 
   // Transcript scroll ref
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+
+  // Chat panel collapse — Supabase-style SLIDE. react-resizable-panels' collapse sets flex→0, which
+  // squishes the content; to slide instead, we freeze the content at its current pixel width and
+  // absolutely position it (left-anchored) inside an overflow-hidden panel. As the panel's flex
+  // animates to 0 the fixed-width block tracks the receding edge and glides out (clipped) while the
+  // editor grows to fill. The flex transition is gated to button-driven collapse/expand so a manual
+  // handle-drag never smears.
+  const chatPanelRef = useRef<ImperativePanelHandle>(null);
+  const chatInnerRef = useRef<HTMLDivElement>(null);
+  const [chatCollapsed, setChatCollapsed] = useState(false);
+  const [chatAnimating, setChatAnimating] = useState(false);
+  // Frozen content width (px) during the slide; null = fluid (fills the panel, resizable).
+  const [chatSlideW, setChatSlideW] = useState<number | null>(null);
+  const chatAnimTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const animateChatPanel = useCallback((action: 'collapse' | 'expand') => {
+    const p = chatPanelRef.current;
+    if (!p) return;
+    if (chatAnimTimer.current) clearTimeout(chatAnimTimer.current);
+    setChatAnimating(true);
+    if (action === 'collapse') {
+      setChatSlideW(chatInnerRef.current?.offsetWidth ?? null);
+      p.collapse();
+    } else {
+      p.expand();
+    }
+    chatAnimTimer.current = setTimeout(() => setChatAnimating(false), 300);
+  }, []);
+  // Once expanded and settled, release the frozen width so the panel is fluid/resizable again.
+  useEffect(() => {
+    if (!chatCollapsed && !chatAnimating) setChatSlideW(null);
+  }, [chatCollapsed, chatAnimating]);
+  const chatAnimClass = chatAnimating ? '[transition:flex_260ms_ease-in-out]' : '';
 
   // ── Proctor hook ──────────────────────────────────────────────────────────────
   // Camera proctoring: face detection runs entirely in-browser via a Web Worker.
@@ -404,13 +486,7 @@ export default function InterviewPage() {
   const sendSpokenRef = useRef<((requestId: string) => void) | null>(null);
   const sendMicOffRef = useRef<(() => void) | null>(null);
 
-  const {
-    socketStatus,
-    sendFrame,
-    sendSpoken,
-    sendMicOff,
-    disconnect: disconnectVoice,
-  } = useVoiceSocket({
+  const { socketStatus, sendFrame, sendSpoken, sendMicOff } = useVoiceSocket({
     interviewId: id,
     token: activeToken,
     enabled: voiceSocketEnabled && !!VOICE_WS_URL,
@@ -492,15 +568,32 @@ export default function InterviewPage() {
     }
   }, [phase, id, activeToken]);
 
-  // Resume on reload / new tab (session token in localStorage), else consent for a fresh link.
+  // Decide the entry stage: a saved session (reload / new tab) must RE-CONSENT before re-entering the
+  // room (reloading must not bypass proctoring), so it shows the consent screen too — not an
+  // auto-resume. A fresh link shows consent; anything else is an error.
   useEffect(() => {
-    let cancelled = false;
     const saved = typeof window !== 'undefined' ? localStorage.getItem(sessionKey) : null;
+    if (saved) {
+      setResumeToken(saved);
+      setActiveToken(saved);
+      setStage('consent');
+    } else if (urlToken) {
+      setStage('consent');
+    } else {
+      setErrorMsg('Invalid or missing interview link.');
+      setStage('error');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
-    async function resume(tok: string) {
+  // ── Handlers ───────────────────────────────────────────────────────────────
+
+  // Rehydrate an in-progress session and enter the room. Called from handleBegin AFTER camera/mic
+  // consent is (re)granted — never before, so a reload can't skip proctoring.
+  const resumeSession = useCallback(
+    async (tok: string, micGranted: boolean) => {
       try {
         const s = await getInterviewState(id, tok);
-        if (cancelled) return;
         const done = s.status === 'scored' || s.phase === 'done' || s.phase === 'scoring';
         setPhase(done ? 'done' : (s.phase as InterviewPhase));
         const resumed: Message[] = s.transcript
@@ -537,43 +630,30 @@ export default function InterviewPage() {
           setLanguage(s.language);
         }
         setStage(done ? 'done' : 'interview');
+        // Re-arm voice on resume if the mic was granted and voice is configured (mirrors begin).
+        if (VOICE_WS_URL && !done && micGranted) {
+          setVoiceMode(true);
+          setVoiceSocketEnabled(true);
+          micCooldownUntilRef.current = Date.now() + AEC_WARMUP_MS;
+        }
       } catch {
-        if (cancelled) return;
         setErrorMsg(
           'Your interview session could not be resumed on this device. If you have not finished, please contact your interviewer.'
         );
         setStage('error');
       }
-    }
-
-    if (saved) {
-      setActiveToken(saved);
-      void resume(saved);
-    } else if (urlToken) {
-      setStage('consent');
-    } else {
-      setErrorMsg('Invalid or missing interview link.');
-      setStage('error');
-    }
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
-  // ── Handlers ───────────────────────────────────────────────────────────────
+    },
+    [id, langKey]
+  );
 
   async function handleBegin() {
-    if (!urlToken) return;
-
-    // Camera AND microphone are REQUIRED for proctored interviews. ONE click requests BOTH on the
-    // same user gesture: startCamera() and startMic() are both INVOKED synchronously inside the
-    // Promise.allSettled array, so each getUserMedia() fires within the activation window. We proceed
-    // to beginInterview only if the camera is granted; a denied mic falls back to typed silently.
-    // The "retry" button on the denied screen calls this same handler.
+    // Camera AND microphone are REQUIRED for proctored interviews — for a FRESH start AND on RESUME
+    // (reloading must NOT bypass proctoring). ONE click requests BOTH on the same user gesture:
+    // startCamera() + startMic() are INVOKED synchronously inside Promise.allSettled so each
+    // getUserMedia() fires within the activation window. We proceed only if the camera is granted; a
+    // denied mic falls back to typed silently. The "retry" button on the denied screen calls this too.
     let micGranted = micState === 'granted';
-    if (cameraState !== 'granted') {
+    if (cameraState !== 'granted' || (!!VOICE_WS_URL && micState !== 'granted')) {
       setConsentCameraState('requesting');
       // Gate on the RETURNED states, not cameraState/micState — React state is stale here.
       const [camResult, micResult] = await Promise.allSettled([
@@ -585,12 +665,20 @@ export default function InterviewPage() {
       const camFinal = camResult.status === 'fulfilled' ? camResult.value : 'error';
       micGranted = micResult.status === 'fulfilled' && micResult.value === 'granted';
       if (camFinal !== 'granted') {
-        // Camera denied/errored — stay on the consent screen; the denied banner shows.
+        // Camera denied/errored — stay on the consent screen; the denied banner shows. The interview
+        // cannot proceed (fresh OR resumed) without camera consent.
         return;
       }
-      // Camera granted — fall through to begin.
     }
 
+    // RESUME path: devices re-granted → rehydrate the in-progress session and re-enter the room.
+    if (resumeToken) {
+      setStage('loading_token');
+      await resumeSession(resumeToken, micGranted);
+      return;
+    }
+
+    if (!urlToken) return;
     setStage('loading_token');
     try {
       const res = await beginInterview(id, urlToken);
@@ -629,6 +717,20 @@ export default function InterviewPage() {
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to start interview.');
       setStage('error');
+    }
+  }
+
+  // Candidate ends the interview early (top-bar End button, behind a confirm dialog). Submits what's
+  // there via /finish and freezes the room. Shares concludeCalledRef with the timer/phase-done paths
+  // so /finish never double-fires.
+  async function handleEndInterview() {
+    if (!activeToken || concludeCalledRef.current) return;
+    concludeCalledRef.current = true;
+    setStage('done');
+    try {
+      await finishInterview(id, activeToken);
+    } catch {
+      // Idempotent server-side — ignore.
     }
   }
 
@@ -675,11 +777,6 @@ export default function InterviewPage() {
     pasteHintTimer.current = setTimeout(() => setPasteBlocked(false), 2500);
   }, []);
 
-  // Load the mute preference once.
-  useEffect(() => {
-    if (typeof window !== 'undefined') setMuted(localStorage.getItem(muteKey) === '1');
-  }, [muteKey]);
-
   // Stop any audio on unmount.
   useEffect(() => () => audioRef.current?.pause(), []);
 
@@ -689,8 +786,8 @@ export default function InterviewPage() {
   const speak = useCallback(
     async (source: 'turn' | 'run', tokenOverride?: string) => {
       const tok = tokenOverride ?? activeToken;
-      if (!tok || muted) return;
-      const seq = ++speakSeqRef.current; // a newer turn or mute supersedes this playback
+      if (!tok) return;
+      const seq = ++speakSeqRef.current; // a newer turn supersedes this playback
       audioRef.current?.pause();
       // Half-duplex: mark the interviewer as speaking so onFrame drops mic frames for the duration
       // (else the mic captures our own greeting/reply as a phantom candidate turn — self-echo).
@@ -698,7 +795,7 @@ export default function InterviewPage() {
 
       try {
         const first = await speakChunk(id, tok, source, 0);
-        if (!first || seq !== speakSeqRef.current || muted) return;
+        if (!first || seq !== speakSeqRef.current) return;
 
         // Prefetch the remaining sentences in parallel so playback is gapless after the first one,
         // while the first sentence already starts playing in ~1–2s.
@@ -707,7 +804,7 @@ export default function InterviewPage() {
 
         for (let i = 0; i < first.count; i++) {
           const r = await pending[i];
-          if (!r || seq !== speakSeqRef.current || muted) return;
+          if (!r || seq !== speakSeqRef.current) return;
           await new Promise<void>((resolve) => {
             const url = URL.createObjectURL(r.blob);
             const a = new Audio(url);
@@ -731,7 +828,7 @@ export default function InterviewPage() {
             a.addEventListener('error', done);
             a.play().catch(done); // autoplay rejection → skip, room stays usable
           });
-          if (seq !== speakSeqRef.current || muted) return; // cancelled mid-clip
+          if (seq !== speakSeqRef.current) return; // cancelled mid-clip
         }
       } finally {
         // Release the half-duplex gate — but only if a newer utterance hasn't taken over (it owns
@@ -743,48 +840,13 @@ export default function InterviewPage() {
         }
       }
     },
-    [activeToken, id, muted]
+    [activeToken, id]
   );
 
   // Keep speakRef in sync so voice cue handlers always call the latest speak().
   useEffect(() => {
     speakRef.current = speak;
   }, [speak]);
-
-  const toggleMute = useCallback(() => {
-    setMuted((prev) => {
-      const next = !prev;
-      localStorage.setItem(muteKey, next ? '1' : '0');
-      if (next) {
-        speakSeqRef.current++; // cancel any in-flight chunk playback
-        audioRef.current?.pause();
-      }
-      return next;
-    });
-  }, [muteKey]);
-
-  /** Toggle voice mode on/off. Entering voice re-requests the mic; leaving stops it. */
-  const toggleVoiceMode = useCallback(async () => {
-    if (!VOICE_WS_URL) return;
-    if (voiceMode) {
-      // Turn voice off — revert to typed.
-      setVoiceMode(false);
-      setVoiceSocketEnabled(false);
-      setMicForwarding(false);
-      stopMic();
-      disconnectVoice();
-    } else {
-      // Turn voice on — request mic (requires a user gesture; this button click qualifies).
-      try {
-        await startMic();
-        setVoiceMode(true);
-        setVoiceSocketEnabled(true);
-        if (lastExpectsRef.current === 'voice') setMicForwarding(true);
-      } catch {
-        // Mic denied — stay in typed mode silently.
-      }
-    }
-  }, [voiceMode, stopMic, disconnectVoice, startMic]);
 
   const handleRunCode = useCallback(async () => {
     if (!activeToken || running) return;
@@ -939,6 +1001,44 @@ export default function InterviewPage() {
       <header className="h-11 border-b border-border bg-card flex items-center justify-between px-4 shrink-0">
         <Wordmark className="scale-90 origin-left" />
         <div className="flex items-center gap-3">
+          {/* Passive device status (camera/mic/audio are REQUIRED — no disable) + the single
+              collapse/expand toggle. All room controls live here in the top bar, not the chat pane. */}
+          {!isDone && (
+            <div className="flex items-center gap-1.5">
+              <DeviceIndicator
+                icon={Camera}
+                on={cameraState === 'granted'}
+                title="Camera on — checked in your browser, never recorded"
+              />
+              {!!VOICE_WS_URL && (
+                <DeviceIndicator
+                  icon={Mic}
+                  on={voiceMode && micState === 'granted'}
+                  live={micForwarding}
+                  title="Microphone on — your spoken answers are transcribed"
+                />
+              )}
+              <DeviceIndicator
+                icon={Volume2}
+                on
+                title="Interviewer audio on — you'll hear the interviewer"
+              />
+              <span className="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />
+              <button
+                type="button"
+                onClick={() => animateChatPanel(chatCollapsed ? 'expand' : 'collapse')}
+                title={chatCollapsed ? 'Show interviewer panel' : 'Hide interviewer panel'}
+                aria-label={chatCollapsed ? 'Show interviewer panel' : 'Hide interviewer panel'}
+                className="rounded-input p-1 text-foreground-subtle transition-colors hover:text-foreground"
+              >
+                {chatCollapsed ? (
+                  <PanelRightOpen className="h-4 w-4" />
+                ) : (
+                  <PanelRightClose className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          )}
           <span
             className="flex items-center gap-1.5 font-mono text-xs tabular-nums text-muted-foreground"
             title="Elapsed time"
@@ -947,6 +1047,37 @@ export default function InterviewPage() {
             {formatTime(elapsed)}
           </span>
           <PhaseBadge phase={phase} />
+          {/* End the interview early — confirm dialog, candidate token drives /finish. */}
+          {!isDone && (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <button
+                  type="button"
+                  className="rounded-input border border-destructive/40 bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  End
+                </button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>End the interview?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This submits your responses so far and ends the session. You won&apos;t be able
+                    to return.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Keep going</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => void handleEndInterview()}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    End interview
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
         </div>
       </header>
 
@@ -980,58 +1111,10 @@ export default function InterviewPage() {
           className="flex-1 overflow-hidden"
         >
           {/* LEFT — editor + terminal console */}
-          <ResizablePanel defaultSize={62} minSize={30}>
-            <div className="h-full flex flex-col overflow-hidden bg-background">
-              {/* Code toolbar — language selector + Run pill */}
-              <div className="flex h-10 items-center gap-2 px-3 border-b border-border bg-card shrink-0">
-                {lockedLanguage ? (
-                  // Interviewer assigned the language at creation — show it read-only.
-                  <div
-                    className="flex h-7 w-36 items-center gap-1.5 rounded-md border border-border bg-muted px-3 font-mono text-xs text-muted-foreground"
-                    title="Language set by the interviewer"
-                  >
-                    <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />
-                    {LANGUAGES.find((l) => l.value === lockedLanguage)?.label ?? lockedLanguage}
-                  </div>
-                ) : (
-                  <Select
-                    value={language}
-                    onValueChange={(v) => {
-                      setLanguage(v as Language);
-                      // Persist so a reload/reconnect restores the candidate's choice.
-                      if (typeof window !== 'undefined') localStorage.setItem(langKey, v);
-                    }}
-                  >
-                    <SelectTrigger className="h-7 w-36 text-xs bg-muted border-border text-foreground focus-visible:ring-ring font-mono">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-card border-border text-foreground">
-                      {LANGUAGES.map((l) => (
-                        <SelectItem
-                          key={l.value}
-                          value={l.value}
-                          className="text-xs focus:bg-muted font-mono"
-                        >
-                          {l.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-
-                <Button
-                  size="sm"
-                  onClick={handleRunCode}
-                  loading={running}
-                  className="h-7 px-4 text-xs rounded-md bg-primary/10 border border-primary/40 text-primary hover:bg-primary/20 transition-colors focus-visible:ring-ring gap-1.5 font-mono"
-                  variant="outline"
-                >
-                  {!running && <Play className="w-3.5 h-3.5 fill-current" />}
-                  RUN
-                </Button>
-              </div>
-
-              {/* Editor — fills remaining vertical space */}
+          <ResizablePanel defaultSize={62} minSize={30} className={chatAnimClass}>
+            <div className="h-full flex flex-col overflow-hidden bg-surface-deep">
+              {/* Editor — fills remaining vertical space. Single top bar = the app header; Run +
+                  language moved down into the console below. */}
               <div className="flex-1 overflow-hidden">
                 <EnhancedCodeMirrorEditor
                   value={code}
@@ -1046,10 +1129,52 @@ export default function InterviewPage() {
               </div>
 
               {/* Terminal output — fixed-height console strip */}
-              <div className="shrink-0 h-[180px] border-t border-border bg-background overflow-auto p-3 font-mono text-[11px]">
-                {/* Console header label */}
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-[9px] font-mono uppercase tracking-wider text-muted-foreground">
+              <div className="shrink-0 h-[180px] border-t border-border bg-surface-deep overflow-auto p-3 font-mono text-[11px]">
+                {/* Console header — Run + language live here so the editor keeps a single top bar. */}
+                <div className="mb-2 flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    onClick={handleRunCode}
+                    loading={running}
+                    variant="outline"
+                    className="h-6 gap-1 rounded-md border border-primary/40 bg-primary/10 px-3 font-mono text-[10px] text-primary transition-colors hover:bg-primary/20 focus-visible:ring-ring"
+                  >
+                    {!running && <Play className="h-3 w-3 fill-current" />}
+                    RUN
+                  </Button>
+                  {lockedLanguage ? (
+                    <div
+                      className="flex h-6 items-center gap-1.5 rounded-md border border-border bg-muted px-2 font-mono text-[10px] text-muted-foreground"
+                      title="Language set by the interviewer"
+                    >
+                      <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      {LANGUAGES.find((l) => l.value === lockedLanguage)?.label ?? lockedLanguage}
+                    </div>
+                  ) : (
+                    <Select
+                      value={language}
+                      onValueChange={(v) => {
+                        setLanguage(v as Language);
+                        if (typeof window !== 'undefined') localStorage.setItem(langKey, v);
+                      }}
+                    >
+                      <SelectTrigger className="h-6 w-28 border-border bg-muted font-mono text-[10px] text-foreground focus-visible:ring-ring">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="border-border bg-card text-foreground">
+                        {LANGUAGES.map((l) => (
+                          <SelectItem
+                            key={l.value}
+                            value={l.value}
+                            className="font-mono text-xs focus:bg-muted"
+                          >
+                            {l.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <span className="ml-auto text-[9px] font-mono uppercase tracking-wider text-muted-foreground">
                     OUTPUT
                   </span>
                   {running && <Loader2 className="w-3 h-3 animate-spin text-primary" />}
@@ -1119,8 +1244,25 @@ export default function InterviewPage() {
           <ResizableHandle withHandle className={isMobile ? 'h-px bg-border' : 'w-px bg-border'} />
 
           {/* RIGHT — AI chat / oral widget */}
-          <ResizablePanel defaultSize={38} minSize={25}>
-            <div className="flex h-full flex-col overflow-hidden bg-surface-deep">
+          <ResizablePanel
+            ref={chatPanelRef}
+            defaultSize={38}
+            minSize={25}
+            collapsible
+            collapsedSize={0}
+            onCollapse={() => setChatCollapsed(true)}
+            onExpand={() => setChatCollapsed(false)}
+            className={`relative overflow-hidden ${chatAnimClass}`}
+          >
+            <div
+              ref={chatInnerRef}
+              className={
+                chatSlideW != null
+                  ? 'absolute inset-y-0 left-0 flex flex-col overflow-hidden bg-surface-200'
+                  : 'flex h-full w-full flex-col overflow-hidden bg-surface-200'
+              }
+              style={chatSlideW != null ? { width: chatSlideW } : undefined}
+            >
               {/* Pane header — single assistant identity (no per-message labels) */}
               <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-4">
                 <span
@@ -1177,44 +1319,6 @@ export default function InterviewPage() {
                     )}
                   </span>
                 )}
-
-                <div className="ml-auto flex items-center gap-1">
-                  {/* Mic toggle — only rendered when VOICE_WS_URL is configured */}
-                  {!!VOICE_WS_URL && (
-                    <button
-                      type="button"
-                      onClick={() => void toggleVoiceMode()}
-                      aria-label={voiceMode ? 'Switch to typed mode' : 'Switch to voice mode'}
-                      aria-pressed={voiceMode}
-                      title={
-                        voiceMode
-                          ? 'Voice on — click to use keyboard'
-                          : 'Click to speak your answers'
-                      }
-                      className={[
-                        'rounded-input p-1 transition-colors',
-                        voiceMode
-                          ? 'text-primary hover:text-primary/80'
-                          : 'text-foreground-subtle hover:text-foreground',
-                      ].join(' ')}
-                    >
-                      {voiceMode ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={toggleMute}
-                    aria-label={muted ? 'Unmute interviewer voice' : 'Mute interviewer voice'}
-                    aria-pressed={muted}
-                    className="rounded-input p-1 text-foreground-subtle transition-colors hover:text-foreground"
-                  >
-                    {muted ? (
-                      <VolumeX className="h-4 w-4" />
-                    ) : (
-                      <Volume2 className="h-4 w-4 text-primary" />
-                    )}
-                  </button>
-                </div>
               </div>
 
               {/* Transcript scroll area */}
@@ -1236,16 +1340,16 @@ export default function InterviewPage() {
                       </span>
                       <div
                         className={[
-                          'max-w-[88%] px-4 py-2.5 text-sm leading-relaxed',
+                          'max-w-[88%] px-4 py-2.5 text-[13px] leading-relaxed',
                           isCandidate
                             ? // You: ember-tinted, right-aligned, medium weight.
                               'whitespace-pre-wrap border border-primary/40 bg-primary/15 font-medium text-foreground'
                             : msg.assist
                               ? // Autonomous intervention: ember left-accent.
                                 'border-l-2 border-primary bg-primary/5 font-normal text-foreground'
-                              : // Interviewer: neutral bordered card, prose weight — distinct from
-                                // both the panel and the candidate bubble.
-                                'border border-border bg-surface-200 font-normal text-foreground',
+                              : // Interviewer: neutral bordered card, prose weight — sits a shade
+                                // above the lighter chat panel so it reads as a distinct message.
+                                'border border-border bg-card font-normal text-foreground',
                         ].join(' ')}
                       >
                         {msg.role === 'ai' && msg.assist && (
@@ -1262,7 +1366,7 @@ export default function InterviewPage() {
 
                 {aiThinking && (
                   <div className="flex justify-start">
-                    <div className="flex items-center gap-2 bg-card px-4 py-2.5 text-sm font-medium italic text-muted-foreground">
+                    <div className="flex items-center gap-2 bg-card px-4 py-2.5 text-[13px] font-medium italic text-muted-foreground">
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
                       Thinking…
                     </div>
