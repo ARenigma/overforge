@@ -1,0 +1,316 @@
+[
+  {
+    "slug": "reverse-words",
+    "title": "Reverse Words in a Sentence",
+    "difficulty": "easy",
+    "levels": ["junior"],
+    "tags": ["strings", "arrays"],
+    "statement": "Given a sentence (a single line of text), reverse the order of the words. Words are separated by a single space. The output must contain no leading or trailing spaces.\n\n**Input format:** A single line containing the sentence.\n\n**Output format:** A single line with the words in reversed order.",
+    "examples": [
+      {
+        "input": "the quick brown fox",
+        "output": "fox brown quick the",
+        "explanation": "Words reversed in order."
+      },
+      {
+        "input": "hello world",
+        "output": "world hello"
+      }
+    ],
+    "constraints": "1 <= len(sentence) <= 1000; sentence contains only printable ASCII; words are separated by exactly one space; no leading/trailing spaces in input.",
+    "hiddenTests": [
+      { "input": "one", "expected": "one" },
+      { "input": "a b", "expected": "b a" },
+      { "input": "to be or not to be", "expected": "be to not or be to" },
+      { "input": "abc def ghi jkl mno", "expected": "mno jkl ghi def abc" },
+      { "input": "i love coding interviews", "expected": "interviews coding love i" },
+      { "input": "x", "expected": "x" },
+      { "input": "do or do not", "expected": "not do or do" }
+    ],
+    "referencePython": "import sys\nwords = sys.stdin.read().split()\nprint(' '.join(reversed(words)))"
+  },
+  {
+    "slug": "count-vowels",
+    "title": "Count Vowels and Consonants",
+    "difficulty": "easy",
+    "levels": ["junior"],
+    "tags": ["strings", "counting"],
+    "statement": "Given a string of lowercase English letters, count the number of vowels (a, e, i, o, u) and consonants separately.\n\n**Input format:** A single line containing a non-empty string of lowercase English letters only.\n\n**Output format:** Two space-separated integers on a single line: the count of vowels followed by the count of consonants.",
+    "examples": [
+      {
+        "input": "hello",
+        "output": "2 3",
+        "explanation": "Vowels: e, o (2). Consonants: h, l, l (3)."
+      },
+      {
+        "input": "aeiou",
+        "output": "5 0"
+      }
+    ],
+    "constraints": "1 <= len(s) <= 10^5; string contains only lowercase English letters a-z.",
+    "hiddenTests": [
+      { "input": "a", "expected": "1 0" },
+      { "input": "b", "expected": "0 1" },
+      { "input": "bcdfg", "expected": "0 5" },
+      { "input": "programming", "expected": "3 8" },
+      { "input": "aabbccdd", "expected": "2 6" },
+      { "input": "aaaa", "expected": "4 0" },
+      { "input": "zzzzzz", "expected": "0 6" },
+      { "input": "abcdefghij", "expected": "3 7" }
+    ],
+    "referencePython": "import sys\ns = sys.stdin.read().strip()\nvowels = sum(1 for c in s if c in 'aeiou')\nprint(vowels, len(s) - vowels)"
+  },
+  {
+    "slug": "fizzbuzz-range",
+    "title": "FizzBuzz Range",
+    "difficulty": "easy",
+    "levels": ["junior"],
+    "tags": ["math", "iteration"],
+    "statement": "Given two integers A and B (inclusive), print one integer or word per line for each number from A to B:\n- Print `Fizz` if the number is divisible by 3 but not 5.\n- Print `Buzz` if the number is divisible by 5 but not 3.\n- Print `FizzBuzz` if the number is divisible by both 3 and 5.\n- Otherwise print the number itself.\n\n**Input format:** A single line containing two space-separated integers A and B.\n\n**Output format:** B - A + 1 lines, one per number.",
+    "examples": [
+      {
+        "input": "1 15",
+        "output": "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz",
+        "explanation": "Classic FizzBuzz from 1 to 15."
+      },
+      {
+        "input": "14 16",
+        "output": "14\nFizzBuzz\n16"
+      }
+    ],
+    "constraints": "-10^6 <= A <= B <= 10^6.",
+    "hiddenTests": [
+      { "input": "1 1", "expected": "1" },
+      { "input": "3 3", "expected": "Fizz" },
+      { "input": "5 5", "expected": "Buzz" },
+      { "input": "15 15", "expected": "FizzBuzz" },
+      { "input": "30 30", "expected": "FizzBuzz" },
+      { "input": "-5 0", "expected": "Buzz\n-4\nFizz\n-2\n-1\nFizzBuzz" },
+      { "input": "1 5", "expected": "1\n2\nFizz\n4\nBuzz" },
+      { "input": "13 16", "expected": "13\n14\nFizzBuzz\n16" }
+    ],
+    "referencePython": "import sys\na, b = map(int, sys.stdin.read().split())\nfor n in range(a, b + 1):\n    if n % 15 == 0:\n        print('FizzBuzz')\n    elif n % 3 == 0:\n        print('Fizz')\n    elif n % 5 == 0:\n        print('Buzz')\n    else:\n        print(n)"
+  },
+  {
+    "slug": "two-sum-indices",
+    "title": "Two Sum — Return Indices",
+    "difficulty": "easy",
+    "levels": ["mid"],
+    "tags": ["arrays", "hashing"],
+    "statement": "Given a list of N integers and a target integer T, find the two distinct indices (0-based) such that the values at those indices sum to T. You may assume exactly one solution exists and you may not use the same element twice.\n\nOutput the two indices in ascending order on a single line, space-separated.\n\n**Input format:**\n- Line 1: two space-separated integers N and T.\n- Line 2: N space-separated integers.\n\n**Output format:** Two space-separated integers (smaller index first).",
+    "examples": [
+      {
+        "input": "4 9\n2 7 11 15",
+        "output": "0 1",
+        "explanation": "nums[0] + nums[1] = 2 + 7 = 9."
+      },
+      {
+        "input": "4 6\n3 2 4 6",
+        "output": "1 2",
+        "explanation": "nums[1] + nums[2] = 2 + 4 = 6."
+      }
+    ],
+    "constraints": "2 <= N <= 10^5; -10^9 <= each integer <= 10^9; -2*10^9 <= T <= 2*10^9; exactly one solution exists.",
+    "hiddenTests": [
+      { "input": "2 0\n-1 1", "expected": "0 1" },
+      { "input": "2 0\n0 0", "expected": "0 1" },
+      { "input": "5 -3\n-5 2 -1 4 3", "expected": "0 1" },
+      { "input": "5 1\n0 4 3 2 1", "expected": "0 4" },
+      { "input": "6 10\n1 2 3 4 5 6", "expected": "3 5" },
+      { "input": "3 100\n50 50 1", "expected": "0 1" },
+      { "input": "4 -10\n-7 -3 -5 2", "expected": "0 1" }
+    ],
+    "referencePython": "import sys\ndata = sys.stdin.read().split()\nn, t = int(data[0]), int(data[1])\nnums = list(map(int, data[2:2+n]))\nseen = {}\nfor i, v in enumerate(nums):\n    comp = t - v\n    if comp in seen:\n        a, b = seen[comp], i\n        print(min(a,b), max(a,b))\n        break\n    seen[v] = i"
+  },
+  {
+    "slug": "longest-unique-substring",
+    "title": "Longest Substring Without Repeating Characters",
+    "difficulty": "medium",
+    "levels": ["mid"],
+    "tags": ["strings", "hashing", "two-pointers", "sliding-window"],
+    "statement": "Given a string S, find the length of the longest substring that contains no repeating characters.\n\n**Input format:** A single line containing the string S (may be empty).\n\n**Output format:** A single integer — the length of the longest such substring.",
+    "examples": [
+      {
+        "input": "abcabcbb",
+        "output": "3",
+        "explanation": "The longest substring without repeating characters is \"abc\", length 3."
+      },
+      {
+        "input": "bbbbb",
+        "output": "1"
+      }
+    ],
+    "constraints": "0 <= len(S) <= 10^5; S contains printable ASCII characters (codes 32–126).",
+    "hiddenTests": [
+      { "input": "", "expected": "0" },
+      { "input": "a", "expected": "1" },
+      { "input": "au", "expected": "2" },
+      { "input": "pwwkew", "expected": "3" },
+      { "input": "dvdf", "expected": "3" },
+      { "input": "abcdefghijklmnop", "expected": "16" },
+      { "input": "aab", "expected": "2" },
+      { "input": " !@#$%", "expected": "6" },
+      { "input": "abba", "expected": "2" }
+    ],
+    "referencePython": "import sys\ns = sys.stdin.readline().rstrip('\\n')\nlast = {}\nbest = 0\nleft = 0\nfor right, c in enumerate(s):\n    if c in last and last[c] >= left:\n        left = last[c] + 1\n    last[c] = right\n    best = max(best, right - left + 1)\nprint(best)"
+  },
+  {
+    "slug": "group-anagrams-count",
+    "title": "Count Anagram Groups",
+    "difficulty": "medium",
+    "levels": ["mid"],
+    "tags": ["strings", "hashing", "sorting"],
+    "statement": "Given N words (one per line), group them into sets of anagrams (words that are rearrangements of the same letters). Output the number of groups, followed by the size of each group in non-decreasing order, one per line.\n\n**Input format:**\n- Line 1: integer N.\n- Next N lines: one word each (lowercase English letters, length 1..20).\n\n**Output format:**\n- Line 1: the number of anagram groups G.\n- Next G lines: the size of each group, printed in non-decreasing order.",
+    "examples": [
+      {
+        "input": "6\neat\ntea\ntan\nate\nnat\nbat",
+        "output": "3\n1\n2\n3",
+        "explanation": "Groups: {bat}(1), {tan,nat}(2), {eat,tea,ate}(3). Sizes sorted: 1,2,3."
+      },
+      {
+        "input": "2\na\na",
+        "output": "1\n2"
+      }
+    ],
+    "constraints": "1 <= N <= 10^4; each word: 1..20 lowercase letters.",
+    "hiddenTests": [
+      { "input": "1\nz", "expected": "1\n1" },
+      { "input": "3\nabc\ncba\nbca", "expected": "1\n3" },
+      { "input": "4\nab\nba\ncd\ndc", "expected": "2\n2\n2" },
+      { "input": "5\na\nb\nc\nd\ne", "expected": "5\n1\n1\n1\n1\n1" },
+      { "input": "3\nlisten\nsilent\nenlist", "expected": "1\n3" },
+      { "input": "4\ndog\ngod\ncat\ntac", "expected": "2\n2\n2" },
+      { "input": "2\nabc\ndef", "expected": "2\n1\n1" }
+    ],
+    "referencePython": "import sys\nfrom collections import defaultdict\nlines = sys.stdin.read().splitlines()\nn = int(lines[0])\nwords = [lines[i+1].strip() for i in range(n)]\ngroups = defaultdict(int)\nfor w in words:\n    groups[tuple(sorted(w))] += 1\nsizes = sorted(groups.values())\nprint(len(sizes))\nfor s in sizes:\n    print(s)"
+  },
+  {
+    "slug": "best-time-stock",
+    "title": "Best Time to Buy and Sell Stock",
+    "difficulty": "easy",
+    "levels": ["mid"],
+    "tags": ["arrays", "greedy"],
+    "statement": "Given a list of N stock prices (one price per day), find the maximum profit you can achieve by buying on one day and selling on a later day. You must buy before you sell (at least one day apart). If no profit is possible, output 0.\n\n**Input format:**\n- Line 1: integer N.\n- Line 2: N space-separated non-negative integers (prices).\n\n**Output format:** A single integer — the maximum profit.",
+    "examples": [
+      {
+        "input": "6\n7 1 5 3 6 4",
+        "output": "5",
+        "explanation": "Buy at price 1 (day 2), sell at price 6 (day 5): profit = 5."
+      },
+      {
+        "input": "5\n7 6 4 3 1",
+        "output": "0",
+        "explanation": "Prices only decrease, no profitable trade possible."
+      }
+    ],
+    "constraints": "1 <= N <= 10^5; 0 <= price <= 10^9.",
+    "hiddenTests": [
+      { "input": "1\n5", "expected": "0" },
+      { "input": "2\n1 2", "expected": "1" },
+      { "input": "2\n2 1", "expected": "0" },
+      { "input": "3\n1 1 1", "expected": "0" },
+      { "input": "4\n3 1 4 2", "expected": "3" },
+      { "input": "5\n1 2 3 4 5", "expected": "4" },
+      { "input": "6\n2 4 1 7 0 3", "expected": "6" },
+      { "input": "3\n0 0 0", "expected": "0" }
+    ],
+    "referencePython": "import sys\nlines = sys.stdin.read().split()\nn = int(lines[0])\nprices = list(map(int, lines[1:n+1]))\nmin_price = float('inf')\nbest = 0\nfor p in prices:\n    min_price = min(min_price, p)\n    best = max(best, p - min_price)\nprint(best)"
+  },
+  {
+    "slug": "merge-intervals",
+    "title": "Merge Overlapping Intervals",
+    "difficulty": "medium",
+    "levels": ["senior"],
+    "tags": ["arrays", "sorting", "intervals"],
+    "statement": "Given N intervals, each specified by a start and end integer (both inclusive, start <= end), merge all overlapping or touching intervals and output the resulting non-overlapping intervals sorted by start, one per line.\n\nTwo intervals [a,b] and [c,d] overlap or touch if c <= b + 1 (i.e. they share at least one integer or are adjacent).\n\n**Input format:**\n- Line 1: integer N.\n- Next N lines: two space-separated integers `start end` for each interval.\n\n**Output format:** One merged interval per line as `start end`, in ascending order by start.",
+    "examples": [
+      {
+        "input": "4\n1 3\n2 6\n8 10\n15 18",
+        "output": "1 6\n8 10\n15 18",
+        "explanation": "[1,3] and [2,6] overlap, merged to [1,6]."
+      },
+      {
+        "input": "3\n1 4\n4 5\n6 6",
+        "output": "1 6",
+        "explanation": "[1,4] touches [4,5] (share endpoint 4), [4,5] is adjacent to [6,6] (5+1=6)."
+      }
+    ],
+    "constraints": "1 <= N <= 10^5; -10^9 <= start <= end <= 10^9.",
+    "hiddenTests": [
+      { "input": "1\n5 10", "expected": "5 10" },
+      { "input": "2\n1 2\n3 4", "expected": "1 4" },
+      { "input": "2\n1 5\n2 3", "expected": "1 5" },
+      { "input": "3\n1 1\n2 2\n3 3", "expected": "1 3" },
+      { "input": "4\n5 10\n1 3\n6 8\n15 18", "expected": "1 3\n5 10\n15 18" },
+      { "input": "3\n-5 -3\n-4 0\n1 2", "expected": "-5 2" },
+      { "input": "2\n0 0\n0 0", "expected": "0 0" },
+      { "input": "3\n1 10\n2 5\n6 9", "expected": "1 10" }
+    ],
+    "referencePython": "import sys\nlines = sys.stdin.read().splitlines()\nn = int(lines[0])\nintervals = []\nfor i in range(1, n+1):\n    a, b = map(int, lines[i].split())\n    intervals.append((a, b))\nintervals.sort()\nmerged = []\nfor start, end in intervals:\n    if merged and start <= merged[-1][1] + 1:\n        merged[-1] = (merged[-1][0], max(merged[-1][1], end))\n    else:\n        merged.append((start, end))\nfor a, b in merged:\n    print(a, b)"
+  },
+  {
+    "slug": "word-ladder-length",
+    "title": "Word Ladder Length",
+    "difficulty": "hard",
+    "levels": ["senior"],
+    "tags": ["graphs", "BFS", "strings", "hashing"],
+    "statement": "Given a begin word, an end word, and a dictionary of words (all the same length), find the length of the shortest transformation sequence from begin to end, where each step changes exactly one letter and every intermediate word must be in the dictionary. The begin word does NOT need to be in the dictionary; the end word MUST be in the dictionary. If no such sequence exists, output 0.\n\nThe length of the sequence is the number of words in it (including begin and end).\n\n**Input format:**\n- Line 1: the begin word.\n- Line 2: the end word.\n- Line 3: integer N (number of words in the dictionary).\n- Next N lines: one dictionary word each.\n\n**Output format:** A single integer — the length of the shortest sequence, or 0 if none exists.",
+    "examples": [
+      {
+        "input": "hit\ncog\n6\nhot\ndot\ndog\nlot\nlog\ncog",
+        "output": "5",
+        "explanation": "hit -> hot -> dot -> dog -> cog (length 5)."
+      },
+      {
+        "input": "hit\ncog\n5\nhot\ndot\ndog\nlot\nlog",
+        "output": "0",
+        "explanation": "cog is not in the dictionary."
+      }
+    ],
+    "constraints": "1 <= len(word) <= 10; 0 <= N <= 5000; all words are lowercase English letters and the same length.",
+    "hiddenTests": [
+      { "input": "a\nb\n1\nb", "expected": "2" },
+      { "input": "a\nb\n0\n", "expected": "0" },
+      { "input": "abc\nabc\n1\nabc", "expected": "1" },
+      { "input": "hot\ndot\n2\nhot\ndot", "expected": "2" },
+      { "input": "hit\ncog\n6\nhot\ndot\ndog\nlot\nlog\ncog", "expected": "5" },
+      { "input": "red\ntax\n6\nted\ntex\nred\ntad\nden\ntex", "expected": "0" },
+      { "input": "hot\ncog\n5\nhot\ndot\ndog\nlog\ncog", "expected": "4" },
+      { "input": "hit\nhit\n1\nhit", "expected": "1" }
+    ],
+    "referencePython": "import sys\nfrom collections import deque\nlines = sys.stdin.read().splitlines()\nbegin = lines[0].strip()\nend = lines[1].strip()\nn = int(lines[2].strip())\nword_set = set()\nfor i in range(3, 3 + n):\n    if i < len(lines) and lines[i].strip():\n        word_set.add(lines[i].strip())\nif end not in word_set:\n    print(0)\nelse:\n    if begin == end:\n        print(1)\n    else:\n        queue = deque([(begin, 1)])\n        visited = {begin}\n        found = 0\n        while queue:\n            word, length = queue.popleft()\n            for i in range(len(word)):\n                for c in 'abcdefghijklmnopqrstuvwxyz':\n                    if c == word[i]:\n                        continue\n                    candidate = word[:i] + c + word[i+1:]\n                    if candidate == end:\n                        found = length + 1\n                        break\n                    if candidate in word_set and candidate not in visited:\n                        visited.add(candidate)\n                        queue.append((candidate, length + 1))\n                if found:\n                    break\n            if found:\n                break\n        print(found)"
+  },
+  {
+    "slug": "lru-cache-sim",
+    "title": "LRU Cache Simulation",
+    "difficulty": "hard",
+    "levels": ["staff"],
+    "tags": ["design", "hashing", "linked-list", "simulation"],
+    "statement": "Implement an LRU (Least Recently Used) cache with a fixed capacity. The cache supports two operations:\n\n- `GET k` — return the value associated with key `k`, or `-1` if not present. A successful GET makes `k` the most recently used.\n- `PUT k v` — insert key `k` with value `v`. If `k` already exists, update its value and make it most recently used. If the cache is at capacity, evict the least recently used key before inserting.\n\nKeys and values are non-negative integers.\n\n**Input format:**\n- Line 1: integer C (cache capacity, C >= 1).\n- Line 2: integer Q (number of operations).\n- Next Q lines: either `GET k` or `PUT k v`.\n\n**Output format:** For each `GET` operation, print the result on its own line (the value or -1). `PUT` operations produce no output.",
+    "examples": [
+      {
+        "input": "2\n8\nPUT 1 1\nPUT 2 2\nGET 1\nPUT 3 3\nGET 2\nPUT 4 4\nGET 1\nGET 3",
+        "output": "1\n-1\n-1\n3",
+        "explanation": "Capacity 2. PUT 1,2: cache={1:1,2:2} (1=LRU). GET 1 -> 1, 1 becomes MRU; order: 2(LRU)->1(MRU). PUT 3: evict LRU=2; cache={1:1,3:3}. GET 2 -> -1. PUT 4: 1 is LRU (3 was just inserted as MRU); evict 1; cache={3:3,4:4}. GET 1 -> -1. GET 3 -> 3."
+      }
+    ],
+    "constraints": "1 <= C <= 3000; 1 <= Q <= 10^4; 0 <= k, v <= 10^6.",
+    "hiddenTests": [
+      { "input": "1\n4\nPUT 1 10\nGET 1\nPUT 2 20\nGET 1", "expected": "10\n-1" },
+      { "input": "2\n5\nPUT 1 1\nPUT 2 2\nPUT 1 10\nGET 1\nGET 2", "expected": "10\n2" },
+      { "input": "3\n6\nPUT 1 1\nPUT 2 2\nPUT 3 3\nGET 1\nPUT 4 4\nGET 2", "expected": "1\n-1" },
+      { "input": "2\n6\nPUT 1 1\nPUT 2 2\nGET 1\nPUT 3 3\nGET 2\nGET 3", "expected": "1\n-1\n3" },
+      { "input": "1\n3\nPUT 5 100\nPUT 5 200\nGET 5", "expected": "200" },
+      {
+        "input": "2\n7\nPUT 0 0\nPUT 1 1\nGET 0\nGET 1\nGET 0\nPUT 2 2\nGET 1",
+        "expected": "0\n1\n0\n-1"
+      },
+      { "input": "3\n3\nGET 0\nGET 1\nGET 2", "expected": "-1\n-1\n-1" },
+      {
+        "input": "2\n8\nPUT 1 1\nPUT 2 2\nGET 1\nPUT 3 3\nGET 2\nPUT 4 4\nGET 1\nGET 3",
+        "expected": "1\n-1\n-1\n3"
+      }
+    ],
+    "referencePython": "import sys\nfrom collections import OrderedDict\n\ndef main():\n    data = sys.stdin.read().splitlines()\n    capacity = int(data[0])\n    q = int(data[1])\n    cache = OrderedDict()\n    out = []\n    for i in range(2, 2 + q):\n        line = data[i].split()\n        op = line[0]\n        if op == 'GET':\n            k = int(line[1])\n            if k in cache:\n                cache.move_to_end(k)\n                out.append(str(cache[k]))\n            else:\n                out.append('-1')\n        elif op == 'PUT':\n            k, v = int(line[1]), int(line[2])\n            if k in cache:\n                cache.move_to_end(k)\n                cache[k] = v\n            else:\n                if len(cache) >= capacity:\n                    cache.popitem(last=False)\n                cache[k] = v\n    print('\\n'.join(out))\n\nmain()"
+  }
+]

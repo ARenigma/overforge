@@ -66,3 +66,48 @@ export interface OracleDecision {
 
 /** Events the driver feeds the machine. `decision` is only consulted in the coding phase. */
 export type InterviewEvent = { type: 'start' } | { type: 'answer'; decision?: OracleDecision };
+
+// ─────────────────────── Coding problems (curated bank) ───────────────────────
+
+/** One example shown to the candidate (never a hidden test). */
+export interface CodingProblemExample {
+  input: string;
+  output: string;
+  explanation?: string;
+}
+
+/** A hidden test: stdin `input` → the program's stdout must equal `expected` (compared trimmed).
+ *  NEVER shown to the candidate or returned over the wire. */
+export interface CodingProblemTest {
+  input: string;
+  expected: string;
+}
+
+/** A curated, offline-verified coding problem. Stdin→stdout I/O so it's language-agnostic. The
+ *  hidden tests give factual correctness; the LLM only words probes/hints, never invents problems. */
+export interface CodingProblem {
+  slug: string;
+  title: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  /** Seniority levels this problem suits: 'junior' | 'mid' | 'senior' | 'staff'. */
+  levels: string[];
+  tags: string[];
+  /** Full statement (markdown) incl. the stdin/stdout I/O format. Presented to the candidate verbatim. */
+  statement: string;
+  examples: CodingProblemExample[];
+  constraints: string;
+  /** Hidden tests — server-side only, drive grading + correctness-aware hints. */
+  hiddenTests: CodingProblemTest[];
+  /** A correct python3 reference (stdin→stdout) used ONLY for offline test verification. Server-side. */
+  referencePython: string;
+}
+
+/** Per-run hidden-test outcome. Persisted on the run + fed to the scorer; NEVER returned to the
+ *  candidate (no leak). `cases` records per-test pass/fail (no expected outputs) for audit. */
+export interface TestResults {
+  passed: number;
+  total: number;
+  /** True if execution short-circuited (crash/timeout) before all tests ran. */
+  incomplete?: boolean;
+  cases?: { index: number; passed: boolean }[];
+}
