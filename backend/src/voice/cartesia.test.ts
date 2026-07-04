@@ -1,4 +1,35 @@
-import { Pcm16Aligner, SseEventParser, splitSentences } from './cartesia';
+import { Pcm16Aligner, SseEventParser, prepareTranscript, splitSentences } from './cartesia';
+
+describe('prepareTranscript (TTS spoken-text normalization)', () => {
+  test('expands snake_case identifiers to spoken words', () => {
+    expect(prepareTranscript('what max_attempts did you set')).toBe(
+      'what max attempts did you set'
+    );
+    expect(prepareTranscript('retry_count and dag_id')).toBe('retry count and dag id');
+  });
+
+  test('splits camelCase / PascalCase identifiers', () => {
+    expect(prepareTranscript('the ExternalTaskSensor timed out')).toBe(
+      'the External Task Sensor timed out'
+    );
+    expect(prepareTranscript('set maxAttempts high')).toBe('set max Attempts high');
+  });
+
+  test('strips backticks', () => {
+    expect(prepareTranscript('use the `retry` flag')).toBe('use the retry flag');
+  });
+
+  test('leaves ordinary prose untouched', () => {
+    const prose = 'Can you walk me through the hardest decision and why you made it?';
+    expect(prepareTranscript(prose)).toBe(prose);
+  });
+
+  test('does not mangle hyphenated words or all-caps acronyms', () => {
+    expect(prepareTranscript('a state-of-the-art DAG on AWS')).toBe(
+      'a state-of-the-art DAG on AWS'
+    );
+  });
+});
 
 describe('Pcm16Aligner', () => {
   test('passes even-length chunks through unchanged', () => {

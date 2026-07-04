@@ -184,6 +184,9 @@ const INTERVIEWER_SYSTEM =
   'short turn at a time. You have no name and represent no specific company — NEVER emit ' +
   'placeholders like "[Interviewer Name]" or "[Company]" (your turns are read ALOUD); just speak ' +
   'naturally without one. ' +
+  'SPOKEN OUTPUT RULE: every turn is read aloud by text-to-speech, so NEVER emit code identifiers, ' +
+  'snake_case, camelCase, backticks, or symbols — say them as natural words (e.g. "max attempts", ' +
+  'NOT "max_attempts"; "external task sensor", NOT "ExternalTaskSensor"). ' +
   'BREVITY RULE (non-negotiable): every spoken turn must be 1–3 sentences maximum. ONE question ' +
   'per turn. No throat-clearing, preamble, or meta-commentary (e.g. no "That\'s a great point", ' +
   '"Thanks for sharing that", "Good answer"). Cut any sentence that does not directly advance the ' +
@@ -213,7 +216,9 @@ const INTERVENER_SYSTEM =
   'You are a balanced, senior technical interviewer stepping in mid-problem — present but not ' +
   'overbearing, like a real human interviewer. Speak in the first person, ONE short turn (1–2 ' +
   'sentences). Be specific and encouraging. NEVER write code or give away the solution; guide ' +
-  'the candidate to reach it themselves. Never reveal scores or internal reasoning.';
+  'the candidate to reach it themselves. Your turn is read ALOUD by text-to-speech: never speak ' +
+  'code identifiers/snake_case/camelCase/backticks — say them as natural words ("max attempts", ' +
+  'not "max_attempts"). Never reveal scores or internal reasoning.';
 
 const KIND_GUIDANCE: Record<InterventionKind, string> = {
   counter_question:
@@ -280,9 +285,11 @@ function effectGuidance(effect: Effect): string {
   switch (effect.kind) {
     case 'greet':
       return (
-        'OPENING turn: greet the candidate warmly in one sentence, then invite them to walk you ' +
-        'through the most technically challenging project they have worked on recently — their OWN ' +
-        'work. One inviting question.'
+        'OPENING turn: FIRST introduce yourself — say you are the technical interviewer for this ' +
+        'session and briefly what it covers (a walkthrough of one of their recent projects, then a ' +
+        'few deeper technical areas). THEN invite them to walk you through the most technically ' +
+        'challenging project they have built recently — their OWN work. 2–3 sentences total, warm, ' +
+        'ending in one inviting question. Do not use any name or company.'
       );
     case 'ask_oral':
       return effect.index === 0
@@ -342,7 +349,11 @@ function buildEvaluatePrompt(req: EvaluateRequest): string {
   return [
     `Candidate answer:\n${req.answer}`,
     req.code ? `Their code:\n${req.code.slice(0, 1500)}` : '',
-    'Does this answer warrant a deeper follow-up? Return the JSON only.',
+    // Guard the disfluency case: a filler-only "answer" (the candidate is still thinking, not
+    // answering) must NOT trigger a follow-up — that reads as the interviewer interrupting a pause.
+    'If the answer is only a filler or disfluency (e.g. "um", "uh", "hmm", "let me think") with no ' +
+      'substance, set followUp=false and signal=0. Otherwise: does this answer warrant a deeper ' +
+      'follow-up? Return the JSON only.',
   ]
     .filter(Boolean)
     .join('\n\n');

@@ -278,10 +278,16 @@ router.post('/:id/run', async (req: Request, res: Response): Promise<void> => {
 router.post('/:id/speak', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { token, source, chunk } = req.body as {
+    const {
+      token,
+      source,
+      chunk,
+      text: providedText,
+    } = req.body as {
       token?: string;
       source?: 'turn' | 'run';
       chunk?: number;
+      text?: unknown;
     };
 
     await validateCandidate(id, token ?? '');
@@ -296,7 +302,13 @@ router.post('/:id/speak', async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const text = await orchestrator.latestSpeakable(id, source === 'run' ? 'run' : 'turn');
+    // Prefer the exact utterance the turn cue carried (authoritative for THIS turn — and the only
+    // way to voice the voice-service-only idle probe, which is never persisted). Fall back to the
+    // latest interviewer turn / run-hint when no text is supplied (e.g. the run-hint path).
+    const text =
+      typeof providedText === 'string' && providedText.trim()
+        ? providedText.slice(0, 2000)
+        : await orchestrator.latestSpeakable(id, source === 'run' ? 'run' : 'turn');
     if (!text) {
       res.status(404).json({ error: 'Nothing to speak yet.' });
       return;
@@ -326,8 +338,9 @@ router.post('/:id/speak', async (req: Request, res: Response): Promise<void> => 
 });
 
 // ─────────────────────── POST /api/interviews/:id/speak-stream ───────────────────────
-// Streaming TTS (P1-B): same server-authoritative text resolution as /speak (latest interviewer
-// turn or run-hint — never client-supplied text), but the audio is PROXIED CHUNK-BY-CHUNK from
+// Streaming TTS (P1-B): synthesizes the utterance the turn cue carried (`text`, authoritative for
+// this turn — required for the voice-service-only idle probe that is never persisted), else falls
+// back to the latest interviewer turn / run-hint. Audio is PROXIED CHUNK-BY-CHUNK from
 // Cartesia's SSE endpoint as raw pcm_s16le mono @ STREAM_SAMPLE_RATE, so the room's first audio
 // lands at ~TTFB instead of after full-sentence synthesis. One request per utterance.
 // Upstream failure BEFORE the first byte → 502 JSON (the room falls back to the chunked /speak
@@ -336,7 +349,11 @@ router.post('/:id/speak', async (req: Request, res: Response): Promise<void> => 
 router.post('/:id/speak-stream', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { token, source } = req.body as { token?: string; source?: 'turn' | 'run' };
+    const {
+      token,
+      source,
+      text: providedText,
+    } = req.body as { token?: string; source?: 'turn' | 'run'; text?: unknown };
 
     await validateCandidate(id, token ?? '');
     await enforceRateLimit(`speakstream:${hashToken(token ?? '')}`, {
@@ -350,7 +367,13 @@ router.post('/:id/speak-stream', async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    const text = await orchestrator.latestSpeakable(id, source === 'run' ? 'run' : 'turn');
+    // Prefer the exact utterance the turn cue carried (authoritative for THIS turn — and the only
+    // way to voice the voice-service-only idle probe, which is never persisted). Fall back to the
+    // latest interviewer turn / run-hint when no text is supplied.
+    const text =
+      typeof providedText === 'string' && providedText.trim()
+        ? providedText.slice(0, 2000)
+        : await orchestrator.latestSpeakable(id, source === 'run' ? 'run' : 'turn');
     if (!text) {
       res.status(404).json({ error: 'Nothing to speak yet.' });
       return;

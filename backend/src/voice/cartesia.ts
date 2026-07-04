@@ -43,6 +43,21 @@ export function splitSentences(text: string, maxChunks = MAX_CHUNKS): string[] {
   return head;
 }
 
+/** Normalize interviewer text for TEXT-TO-SPEECH. Code identifiers read aloud badly — Cartesia
+ *  pronounces "max_attempts" as "max underscore attempts" and "ExternalTaskSensor" as one mashed
+ *  word. This converts snake_case / camelCase identifiers and strips backticks so they're spoken as
+ *  natural words. Applied ONLY to TTS input; the stored transcript (scoring + on-screen display) is
+ *  untouched. Normal prose (no underscores/camelCase/backticks) passes through unchanged. Exported
+ *  for unit tests. */
+export function prepareTranscript(text: string): string {
+  return text
+    .replace(/`/g, '') // drop code backticks
+    .replace(/_/g, ' ') // snake_case → words: "max_attempts" → "max attempts"
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2') // camelCase → words: "maxAttempts" → "max Attempts"
+    .replace(/[ \t]{2,}/g, ' ') // collapse doubled spaces introduced above
+    .trim();
+}
+
 export interface CartesiaConfig {
   apiKey: string;
   voiceId: string;
@@ -90,7 +105,7 @@ export async function synthesize(
     headers: authHeaders(cfg),
     body: JSON.stringify({
       model_id: cfg.model,
-      transcript: text.slice(0, MAX_CHARS),
+      transcript: prepareTranscript(text).slice(0, MAX_CHARS),
       voice: { mode: 'id', id: cfg.voiceId },
       output_format: { container: 'wav', encoding: 'pcm_s16le', sample_rate: SAMPLE_RATE },
     }),
@@ -168,7 +183,7 @@ export async function* synthesizeStream(
     headers: authHeaders(cfg),
     body: JSON.stringify({
       model_id: cfg.model,
-      transcript: text.slice(0, MAX_CHARS),
+      transcript: prepareTranscript(text).slice(0, MAX_CHARS),
       voice: { mode: 'id', id: cfg.voiceId },
       output_format: {
         container: 'raw',
