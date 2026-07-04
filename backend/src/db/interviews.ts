@@ -335,6 +335,10 @@ export interface VoiceTurnRecord {
   shadowTranscript?: string | null;
   /** Rough shadow finalization latency (ms). */
   shadowSttMs?: number | null;
+  /** ms from window start to the shadow's first semantic endpoint (its EOT); null if none fired. */
+  shadowEndpointMs?: number | null;
+  /** Count of shadow semantic endpoints in the window (0 = never ended; >=2 = would have split). */
+  shadowEndpointCount?: number | null;
 }
 
 /** Insert one voice-turn telemetry row.  Throws on DB error (the route swallows it). */
@@ -363,6 +367,8 @@ export async function recordVoiceTurn(interviewId: string, t: VoiceTurnRecord): 
     shadow_engine: t.shadowEngine ?? null,
     shadow_transcript: t.shadowTranscript ?? null,
     shadow_stt_ms: safeNum(t.shadowSttMs),
+    shadow_endpoint_ms: safeNum(t.shadowEndpointMs),
+    shadow_endpoint_count: t.shadowEndpointCount == null ? null : Math.round(t.shadowEndpointCount),
   });
 
   if (error) throw new Error(`recordVoiceTurn: ${error.message}`);

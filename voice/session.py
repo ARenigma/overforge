@@ -37,6 +37,7 @@ from contracts import (
     BrainTransientError,
     EndpointerLike,
     NoopTtsSink,
+    ShadowSnapshot,
     ShadowSttLike,
     SttLike,
     SttStreamerLike,
@@ -488,20 +489,19 @@ class VoiceSession:
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
 
-    def _snapshot_shadow(self) -> tuple[str | None, str | None, float | None]:
-        """Consume the shadow's current-window ``(engine, transcript, latency_ms)`` for telemetry.
+    def _snapshot_shadow(self) -> tuple[str | None, ShadowSnapshot | None]:
+        """Consume the shadow's current-window ``(engine, ShadowSnapshot)`` for telemetry.
 
-        Best-effort: any shadow error yields ``(None, None, None)`` so a shadow fault can never
-        break a turn. Called once per committed turn from :meth:`_log_turn`.
+        Best-effort: any shadow error yields ``(None, None)`` so a shadow fault can never break a
+        turn. Called once per committed turn from :meth:`_log_turn`.
         """
         if self._shadow is None:
-            return None, None, None
+            return None, None
         try:
-            text, latency_ms = self._shadow.take_snapshot()
-            return self._shadow.engine, text, latency_ms
+            return self._shadow.engine, self._shadow.take_snapshot()
         except Exception:
-            logger.exception("Shadow STT snapshot failed — omitting shadow transcript this turn.")
-            return None, None, None
+            logger.exception("Shadow STT snapshot failed — omitting shadow fields this turn.")
+            return None, None
 
     def _fallback_to_local(self) -> None:
         """Flip (once) to the local endpointer + whisper path after a fatal streamer failure.
@@ -761,8 +761,8 @@ class VoiceSession:
             " empty=1" if empty else "",
             " terminal=1" if terminal else "",
         )
-        # Consume the shadow's per-turn transcript (A/B). Once per turn, aligned to this commit.
-        shadow_engine, shadow_transcript, shadow_stt_ms = self._snapshot_shadow()
+        # Consume the shadow's per-turn observation (A/B). Once per turn, aligned to this commit.
+        shadow_engine, snap = self._snapshot_shadow()
         t = TurnTelemetry(
             request_id=rid,
             commit=commit,
@@ -776,8 +776,10 @@ class VoiceSession:
             terminal=terminal,
             primary_transcript=transcript,
             shadow_engine=shadow_engine,
-            shadow_transcript=shadow_transcript,
-            shadow_stt_ms=shadow_stt_ms,
+            shadow_transcript=snap.transcript if snap else None,
+            shadow_stt_ms=snap.stt_ms if snap else None,
+            shadow_endpoint_ms=snap.endpoint_ms if snap else None,
+            shadow_endpoint_count=snap.endpoint_count if snap else None,
         )
         self._safe_telemetry(t)
 

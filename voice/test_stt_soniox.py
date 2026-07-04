@@ -20,7 +20,7 @@ _VOICE_DIR = Path(__file__).parent
 if str(_VOICE_DIR) not in sys.path:
     sys.path.insert(0, str(_VOICE_DIR))
 
-from contracts import AnswerResult, Utterance  # noqa: E402
+from contracts import AnswerResult, ShadowSnapshot, Utterance  # noqa: E402
 from session import VoiceSession  # noqa: E402
 from stt_soniox import SonioxConfig, SonioxShadow, _f32_to_pcm16  # noqa: E402
 from test_session import (  # noqa: E402
@@ -93,10 +93,16 @@ def test_config_message_includes_terms_when_present() -> None:
     assert msg["audio_format"] == "s16le"
     assert msg["sample_rate"] == 16_000
     assert msg["context"] == {"terms": ["mutex", "quicksort"]}
+    assert msg["enable_endpoint_detection"] is True  # semantic endpointing on by default (A/B)
 
 
 def test_config_message_omits_context_without_terms() -> None:
     assert "context" not in SonioxConfig(api_key="k").config_message()
+
+
+def test_endpoint_detection_can_be_disabled() -> None:
+    cfg = SonioxConfig.from_env({"SONIOX_API_KEY": "k", "SONIOX_ENDPOINT_DETECTION": "0"})
+    assert "enable_endpoint_detection" not in cfg.config_message()
 
 
 def test_from_env_reads_key_and_shared_keyterms() -> None:
@@ -144,10 +150,10 @@ async def test_accumulates_finals_and_snapshot_consumes() -> None:
     assert shadow._recv_task is not None
     await asyncio.wait_for(shadow._recv_task, timeout=1)
 
-    text, _latency = shadow.take_snapshot()
-    assert text == "binary search"  # tokens joined with "" (they carry their own spaces), stripped
+    snap = shadow.take_snapshot()
+    assert snap.transcript == "binary search"  # tokens joined with "" (own spaces), stripped
     # snapshot consumes: a second snapshot in the same window is empty.
-    assert shadow.take_snapshot()[0] == ""
+    assert shadow.take_snapshot().transcript == ""
     await shadow.close()
 
 
@@ -168,7 +174,23 @@ async def test_control_tokens_excluded_from_snapshot() -> None:
     await shadow.start()
     assert shadow._recv_task is not None
     await asyncio.wait_for(shadow._recv_task, timeout=1)
-    assert shadow.take_snapshot()[0] == "binary search"  # <fin> dropped
+    assert shadow.take_snapshot().transcript == "binary search"  # <fin> dropped
+    await shadow.close()
+
+
+async def test_semantic_endpoint_captured_and_excluded_from_transcript() -> None:
+    # Soniox's <end> token is its OWN turn-detection decision — captured (timing + count) for the
+    # A/B against the primary's cut, but never treated as transcript.
+    ws = FakeWs([_tokens_msg((" done", True), ("<end>", True), finished=True)])
+    shadow = _shadow(ws)
+    await shadow.start()
+    await shadow.feed(_frame())  # sets the window clock so endpoint_ms can be measured
+    assert shadow._recv_task is not None
+    await asyncio.wait_for(shadow._recv_task, timeout=1)
+    snap = shadow.take_snapshot()
+    assert snap.transcript == "done"  # <end> excluded from the transcript
+    assert snap.endpoint_count == 1  # one semantic endpoint fired
+    assert snap.endpoint_ms is not None  # timed relative to the window start
     await shadow.close()
 
 
@@ -178,7 +200,7 @@ async def test_partials_are_not_accumulated() -> None:
     await shadow.start()
     assert shadow._recv_task is not None
     await asyncio.wait_for(shadow._recv_task, timeout=1)
-    assert shadow.take_snapshot()[0] == "final"
+    assert shadow.take_snapshot().transcript == "final"
     await shadow.close()
 
 
@@ -189,7 +211,7 @@ async def test_reset_clears_window() -> None:
     assert shadow._recv_task is not None
     await asyncio.wait_for(shadow._recv_task, timeout=1)
     shadow.reset()
-    assert shadow.take_snapshot()[0] == ""
+    assert shadow.take_snapshot().transcript == ""
     await shadow.close()
 
 
@@ -215,9 +237,11 @@ async def test_snapshot_latency_none_when_nothing_finalized() -> None:
     shadow = _shadow(ws)
     await shadow.start()
     await shadow.feed(_frame())
-    text, latency = shadow.take_snapshot()
-    assert text == ""
-    assert latency is None
+    snap = shadow.take_snapshot()
+    assert snap.transcript == ""
+    assert snap.stt_ms is None
+    assert snap.endpoint_ms is None  # no <end> fired
+    assert snap.endpoint_count == 0
     await shadow.close()
 
 
@@ -257,8 +281,10 @@ class FakeShadow:
     def reset(self) -> None:
         self.reset_calls += 1
 
-    def take_snapshot(self) -> tuple[str, float | None]:
-        return self._transcript, 42.0
+    def take_snapshot(self) -> ShadowSnapshot:
+        return ShadowSnapshot(
+            transcript=self._transcript, stt_ms=42.0, endpoint_ms=99.0, endpoint_count=1
+        )
 
     async def close(self) -> None:
         self.closed = True
@@ -295,6 +321,8 @@ async def test_session_tees_frames_and_records_both_transcripts() -> None:
     assert rec.shadow_engine == "soniox"
     assert rec.shadow_transcript == "shadow transcript"
     assert rec.shadow_stt_ms == 42.0
+    assert rec.shadow_endpoint_ms == 99.0  # Soniox's own EOT timing landed in telemetry
+    assert rec.shadow_endpoint_count == 1
 
     session.arm_next_turn()  # a voiced turn re-arms → shadow window realigns
     assert shadow.reset_calls >= 1
@@ -306,7 +334,7 @@ async def test_session_shadow_snapshot_failure_never_breaks_turn() -> None:
     # A shadow that raises on snapshot must not derail the turn — telemetry still lands, without
     # shadow fields.
     class BoomShadow(FakeShadow):
-        def take_snapshot(self) -> tuple[str, float | None]:
+        def take_snapshot(self) -> ShadowSnapshot:
             raise RuntimeError("shadow exploded")
 
     ep = FakeEndpointer(fire_after=3)

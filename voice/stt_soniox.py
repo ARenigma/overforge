@@ -43,7 +43,7 @@ from typing import Protocol
 
 import numpy as np
 
-from contracts import AudioArray
+from contracts import AudioArray, ShadowSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,10 @@ class SonioxConfig:
     language_hints: tuple[str, ...] = ("en",)
     #: Domain terms for context biasing (shared with the primary via ``STT_KEYTERMS``).
     keyterms: tuple[str, ...] = ()
+    #: Soniox's OWN semantic endpoint detection (default ON for the A/B): it emits an ``<end>``
+    #: token where IT thinks the turn ended (pauses/intonation/context, not pure silence). We
+    #: capture that timing to compare Soniox's turn detection vs the AAI primary's — log-only.
+    enable_endpoint_detection: bool = True
     url: str = _DEFAULT_WS_URL
 
     @classmethod
@@ -98,10 +102,12 @@ class SonioxConfig:
     ) -> SonioxConfig:
         """Build from the environment.
 
-        - ``SONIOX_API_KEY``   raw API key (required for the soniox shadow).
-        - ``STT_KEYTERMS``     comma-separated domain terms → ``context.terms`` (shared with
+        - ``SONIOX_API_KEY``           raw API key (required for the soniox shadow).
+        - ``STT_KEYTERMS``             comma-separated domain terms → ``context.terms`` (shared with
           the primary engine so both are biased identically — a fair comparison).
-        - ``SONIOX_MODEL``     model override (default ``stt-rt-v5``).
+        - ``SONIOX_MODEL``             model override (default ``stt-rt-v5``).
+        - ``SONIOX_ENDPOINT_DETECTION`` set to ``0`` to disable Soniox's semantic endpointing
+          (default on — it's how we A/B Soniox's turn detection against the primary).
         """
         e: Mapping[str, str] = env if env is not None else os.environ
         keyterms = tuple(t.strip() for t in e.get("STT_KEYTERMS", "").split(",") if t.strip())
@@ -109,6 +115,7 @@ class SonioxConfig:
             api_key=e.get("SONIOX_API_KEY", ""),
             model=e.get("SONIOX_MODEL", "stt-rt-v5"),
             keyterms=keyterms,
+            enable_endpoint_detection=e.get("SONIOX_ENDPOINT_DETECTION", "1") != "0",
             language_hints=(language,),
         )
 
@@ -124,6 +131,8 @@ class SonioxConfig:
         }
         if self.keyterms:
             msg["context"] = {"terms": list(self.keyterms)}
+        if self.enable_endpoint_detection:
+            msg["enable_endpoint_detection"] = True
         return msg
 
 
@@ -148,7 +157,8 @@ class SonioxShadow:
         any failure just leaves the shadow disabled, ``failed=True``).
       - ``await feed(f32)``  float32→PCM16 → enqueue (non-blocking, drop-oldest when full).
       - ``reset()``          open a fresh per-turn window (clear accumulator + window clock).
-      - ``take_snapshot()``  consume this window's ``(transcript, latency_ms)``.
+      - ``take_snapshot()``  consume this window's ShadowSnapshot (transcript + latency +
+        Soniox's own semantic endpoint timing/count).
       - ``await close()``    flush + Soniox EOS + close (idempotent, exception-safe).
       - ``failed``           True once the connection is permanently unusable.
     """
@@ -178,6 +188,8 @@ class SonioxShadow:
         self._finals: list[str] = []
         self._window_start: float | None = None
         self._last_final_t: float | None = None
+        # perf_counter timestamps of Soniox's own semantic endpoints (<end>) in this window.
+        self._endpoints: list[float] = []
 
     # ── lifecycle ────────────────────────────────────────────────────────────────
 
@@ -245,21 +257,32 @@ class SonioxShadow:
         self._finals.clear()
         self._window_start = None
         self._last_final_t = None
+        self._endpoints.clear()
 
-    def take_snapshot(self) -> tuple[str, float | None]:
-        """Consume the current window's shadow transcript + rough finalization latency.
+    def take_snapshot(self) -> ShadowSnapshot:
+        """Consume the current window's shadow observation (transcript + latency + endpoints).
 
-        Returns ``(transcript, latency_ms)`` where ``latency_ms`` is the span from the first
-        fed frame to the last final token (``None`` if nothing finalized). Clears the
-        accumulator so the next window starts clean even before :meth:`reset`.
+        ``endpoint_ms`` is when Soniox FIRST decided the turn ended (its own semantic EOT),
+        relative to the window start — compare it against when the primary actually cut the
+        turn. Clears the accumulators so the next window starts clean even before :meth:`reset`.
         """
         text = "".join(self._finals).strip()
         latency_ms: float | None = None
         if self._window_start is not None and self._last_final_t is not None:
             latency_ms = max(0.0, (self._last_final_t - self._window_start) * 1000.0)
+        endpoint_ms: float | None = None
+        if self._window_start is not None and self._endpoints:
+            endpoint_ms = max(0.0, (self._endpoints[0] - self._window_start) * 1000.0)
+        endpoint_count = len(self._endpoints)
         self._finals.clear()
         self._last_final_t = None
-        return text, latency_ms
+        self._endpoints.clear()
+        return ShadowSnapshot(
+            transcript=text,
+            stt_ms=latency_ms,
+            endpoint_ms=endpoint_ms,
+            endpoint_count=endpoint_count,
+        )
 
     async def close(self) -> None:
         """Flush + send Soniox's end-of-audio frame + close the socket. Idempotent."""
@@ -322,7 +345,7 @@ class SonioxShadow:
             self.failed = True
 
     async def _recv_loop(self) -> None:
-        """Accumulate ``is_final`` token text; stamp the last-final clock for latency."""
+        """Accumulate final token text; stamp the last-final + semantic-endpoint (<end>) clocks."""
         ws = self._ws
         if ws is None:
             return
@@ -332,11 +355,16 @@ class SonioxShadow:
                 msg = json.loads(raw)
                 got_final = False
                 for tok in msg.get("tokens", []):
+                    text = tok.get("text", "")
+                    if text == "<end>":
+                        # Soniox's OWN semantic endpoint (its EOT decision) — timestamp it for the
+                        # A/B against the primary's cut; never treat it as transcript.
+                        self._endpoints.append(time.perf_counter())
+                        continue
                     if not tok.get("is_final"):
                         continue
-                    text = tok.get("text", "")
                     if text in _CONTROL_TOKENS:
-                        continue  # finalize/endpoint sentinels — control tokens, not transcript
+                        continue  # <fin> finalize sentinel — control token, not transcript
                     self._finals.append(text)
                     got_final = True
                 if got_final:

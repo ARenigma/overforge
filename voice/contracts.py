@@ -132,6 +132,25 @@ class SttStreamerLike(Protocol):
     async def close(self) -> None: ...
 
 
+@dataclass(frozen=True)
+class ShadowSnapshot:
+    """One shadow engine's per-turn observation, consumed at the primary's end-of-turn.
+
+    - ``transcript``      the shadow's text for this turn window (for cross-engine WER).
+    - ``stt_ms``          window-start → last final token (rough finalization latency).
+    - ``endpoint_ms``     window-start → the shadow's FIRST semantic endpoint decision
+                          (its own EOT), or None if it never fired one. Compare against when
+                          the PRIMARY actually cut the turn to A/B turn-detection.
+    - ``endpoint_count``  how many endpoints the shadow fired in the window (0 = never ended;
+                          >=2 = it would have SPLIT the primary's single turn).
+    """
+
+    transcript: str
+    stt_ms: float | None
+    endpoint_ms: float | None
+    endpoint_count: int
+
+
 class ShadowSttLike(Protocol):
     """The slice of ``SonioxShadow`` that ``VoiceSession`` depends on.
 
@@ -140,7 +159,7 @@ class ShadowSttLike(Protocol):
     its methods are best-effort and swallow their own errors, so the session calls them
     unguarded. ``feed`` is fed the same LISTENING frames as the primary; ``reset`` opens a
     fresh per-turn window (on each re-arm); ``take_snapshot`` consumes that window's
-    ``(transcript, latency_ms)`` at commit; ``close`` is idempotent + exception-safe.
+    :class:`ShadowSnapshot` at commit; ``close`` is idempotent + exception-safe.
     """
 
     engine: str
@@ -149,7 +168,7 @@ class ShadowSttLike(Protocol):
     async def feed(self, pcm_f32: AudioArray) -> None: ...
     async def flush_turn(self) -> None: ...
     def reset(self) -> None: ...
-    def take_snapshot(self) -> tuple[str, float | None]: ...
+    def take_snapshot(self) -> ShadowSnapshot: ...
     async def close(self) -> None: ...
 
 

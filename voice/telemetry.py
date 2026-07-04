@@ -44,6 +44,11 @@ class TurnTelemetry:
     shadow_transcript: str | None = None
     #: Rough shadow finalization latency (ms from window start to last shadow final token).
     shadow_stt_ms: float | None = None
+    #: When the shadow engine's OWN semantic endpoint (its EOT) first fired, ms from window start
+    #: (None = it never fired). Compare to audio_s*1000 (when the primary actually cut the turn).
+    shadow_endpoint_ms: float | None = None
+    #: Count of shadow semantic endpoints in the window (0 = never ended; >=2 = would have split).
+    shadow_endpoint_count: int | None = None
 
 
 class TelemetrySink(Protocol):
@@ -118,6 +123,8 @@ class RestTelemetrySink:
                 "shadowEngine": t.shadow_engine,
                 "shadowTranscript": t.shadow_transcript,
                 "shadowSttMs": t.shadow_stt_ms,
+                "shadowEndpointMs": t.shadow_endpoint_ms,
+                "shadowEndpointCount": t.shadow_endpoint_count,
             }
             resp = await self._client.post(path, json=body)
             if resp.status_code not in (200, 204):

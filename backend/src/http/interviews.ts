@@ -481,6 +481,8 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       shadowEngine,
       shadowTranscript,
       shadowSttMs,
+      shadowEndpointMs,
+      shadowEndpointCount,
     } = req.body as {
       token?: string;
       requestId?: string;
@@ -497,6 +499,8 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       shadowEngine?: unknown;
       shadowTranscript?: unknown;
       shadowSttMs?: unknown;
+      shadowEndpointMs?: unknown;
+      shadowEndpointCount?: unknown;
     };
 
     await validateCandidate(id, token ?? '');
@@ -537,6 +541,11 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       shadowEngine: typeof shadowEngine === 'string' ? shadowEngine.slice(0, 32) : null,
       shadowTranscript: toText(shadowTranscript),
       shadowSttMs: toNum(shadowSttMs),
+      shadowEndpointMs: toNum(shadowEndpointMs),
+      shadowEndpointCount: (() => {
+        const n = toNum(shadowEndpointCount);
+        return n == null ? null : Math.round(n);
+      })(),
     });
 
     res.status(204).end();
