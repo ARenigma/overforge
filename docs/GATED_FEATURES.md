@@ -4,7 +4,7 @@ Features the product owner (Amit) has **explicitly designated as gated, held, or
 Do **not** implement these without explicit authorization, even if adjacent work makes them easy.
 This is the living list — append a row when a new gate is declared, strike one when it's lifted.
 
-_Last updated: 2026-06-30._
+_Last updated: 2026-07-04._
 
 **Recently SHIPPED:** Candidate camera + behavioral anti-cheat **Phase 1** (approved + deployed
 2026-06-30) — in-browser MediaPipe, flags-only, required gate, advisory scorecard. See the struck
@@ -40,8 +40,11 @@ background idle-watcher is what's held. See `overforge-usp` memory.
 ## 3. Mid-speech active-listening backchannels (held — V1.1-adjacent)
 
 Lightweight audio backchannels ("mm-hmm", "right") injected *during* a long candidate answer (not just
-post-EOT). Infrastructure already exists (`backend/src/voice/fillers.ts` + `fillerCache.ts`), so it's
-cheap — but it is adjacent to the V1.1 proactive hold and **requires explicit authorization**.
+post-EOT). The old post-EOT "thinking filler" infrastructure (`backend/src/voice/fillers.ts` +
+`fillerCache.ts` + `frontend/lib/voice/play-filler.ts`) was **removed as slop 2026-07-04** — the
+thinking filler was killed (it bled into the mic → self-echo), so its code was dead. This feature
+would be **rebuilt from spec** if authorized; it stays adjacent to the V1.1 proactive hold and
+**requires explicit authorization**.
 
 - **Revisit trigger:** explicit go from Amit (bundled with, or after, the V1.1 decision).
 

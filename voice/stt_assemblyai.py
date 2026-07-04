@@ -29,8 +29,12 @@ Query params used (names verified against the v3 streaming API spec):
   - ``min_turn_silence``   (ms) — minimum trailing silence before a confident EOT may fire.
                            Generous 800 ms default: interview clause-pauses stay uncut.
   - ``max_turn_silence``   (ms) — acoustic backstop: silence alone force-commits the turn.
-                           Generous 3000 ms default (matches the local endpointer's backstop)
-                           so a candidate thinking mid-answer is not cut off.
+                           3000 ms code default; PROD sets STT_MAX_TURN_SILENCE_MS=6000 to give
+                           candidates room for deep-recall thinking pauses without being cut off.
+  - ``prompt``             (u3-pro only) transcription instructions that steer punctuation, which IS
+                           turn detection on u3-pro; defaults to a filler-continuation prompt so a
+                           lone "um"/"uh" + pause gets no terminal punctuation → no premature EOT.
+                           MUTUALLY EXCLUSIVE with ``keyterms_prompt``.
   - ``keyterms_prompt``    JSON-encoded array of domain terms (max 100, ≤50 chars each).
 
 BILLING TRAP: an unterminated v3 session auto-closes only after 3 HOURS and bills the full

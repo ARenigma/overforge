@@ -16,8 +16,6 @@ import {
   splitSentences,
   STREAM_SAMPLE_RATE,
 } from '../voice/cartesia';
-import { pickFillerIndex } from '../voice/fillers';
-import { getFillerAudio } from '../voice/fillerCache';
 
 const router = Router();
 
@@ -427,40 +425,6 @@ router.post('/:id/speak-stream', async (req: Request, res: Response): Promise<vo
         res.end();
       }
     }
-  } catch (err) {
-    sendError(res, err);
-  }
-});
-
-// ─────────────────────── POST /api/interviews/:id/filler ───────────────────────
-// Voice backchannel (P2-B.3): a short "thinking" acknowledgement ("Hmm.", "Let me think.") played
-// the instant the candidate stops speaking, masking STT + LLM latency before the real reply.
-// Server-authoritative like /speak — the body carries NO text; ONE phrase is chosen at random from
-// a fixed in-code list (never client input, never written to the transcript). 503 when Cartesia is
-// off (the room stays silent). The clip is synthesized once per process then served from cache.
-
-router.post('/:id/filler', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { id } = req.params;
-    const { token } = req.body as { token?: string };
-
-    await validateCandidate(id, token ?? '');
-    await enforceRateLimit(`filler:${hashToken(token ?? '')}`, {
-      // One request per turn; its OWN bucket so filler can't starve /speak's budget (and vice-versa).
-      limit: 60,
-      windowMs: 600_000,
-      message: 'Too many requests; please slow down.',
-    });
-
-    if (!isCartesiaConfigured()) {
-      res.status(503).json({ error: 'Voice is not enabled for this interview.' });
-      return;
-    }
-
-    const audio = await getFillerAudio(pickFillerIndex());
-    res.setHeader('Content-Type', 'audio/wav');
-    res.setHeader('Cache-Control', 'no-store');
-    res.send(audio);
   } catch (err) {
     sendError(res, err);
   }
