@@ -263,9 +263,7 @@ router.post('/:id/run', async (req: Request, res: Response): Promise<void> => {
     const result = await orchestrator.recordRun(id, { language, source, stdin });
     // Never leak hidden-test correctness to the candidate live — they see only their own
     // stdout/stderr + any interviewer hint. testResults is persisted server-side for grading + hints.
-    const candidateSafe = { ...result };
-    delete candidateSafe.testResults;
-    res.json(candidateSafe);
+    res.json(orchestrator.stripHiddenTests(result));
   } catch (err) {
     sendError(res, err);
   }

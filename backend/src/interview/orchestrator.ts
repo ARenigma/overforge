@@ -317,7 +317,8 @@ export async function getCandidateState(interviewId: string): Promise<CandidateS
     durationSeconds: Math.round(interviewDurationMs(interview) / 1000),
     devMode: interview.dev_mode,
     language: interview.code_language ?? null,
-    lastRunResult: runs.length > 0 ? runs[runs.length - 1] : null,
+    // Strip hidden-test correctness — a reload must not leak what the live /run response withholds.
+    lastRunResult: runs.length > 0 ? stripHiddenTests(runs[runs.length - 1]) : null,
   };
 }
 
@@ -606,6 +607,14 @@ const MAX_HIDDEN_TESTS = 12;
 function assignedProblem(interview: Interview, codeIndex: number): CodingProblem | null {
   const slug = interview.coding_problem_ids?.[codeIndex];
   return slug ? getProblemBySlug(slug) : null;
+}
+
+/** A candidate-safe copy of a run: hidden-test correctness is NEVER exposed to the candidate (they
+ *  see only their own stdout/stderr + any interviewer hint). Used on every candidate-facing run. */
+export function stripHiddenTests(run: RunResult): RunResult {
+  const safe = { ...run };
+  delete safe.testResults;
+  return safe;
 }
 
 /** The candidate-safe problem for the CURRENT coding question (no hidden tests / reference). The
