@@ -630,9 +630,9 @@ export async function currentCodingProblem(
 
 /**
  * Run the assigned problem's HIDDEN tests against the candidate's code (server-injected stdin —
- * never the candidate's). Sequential with short-circuit on a crash/timeout status (those repeat, so
- * we don't burn N containers on broken code). Returns null when the question has no assigned problem
- * (legacy) so callers fall back to clean-exit grading. Best-effort: any failure yields null.
+ * never the candidate's). Sequential with short-circuit on a non-'Accepted' status (crash / timeout /
+ * compile error — they repeat across inputs, so we don't burn N containers on broken code).
+ * `incomplete` marks an early stop. The caller invokes this only when a problem with tests exists.
  */
 async function runHiddenTests(
   problem: CodingProblem,

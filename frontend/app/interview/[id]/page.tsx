@@ -520,17 +520,26 @@ export default function InterviewPage() {
     activeTokenRef.current = activeToken;
   }, [activeToken]);
 
-  // Fetch the current coding problem when in the coding phase; re-fetch on each turn (messages.length)
-  // so the panel follows codeIndex as the candidate moves between coding questions. Cleared otherwise.
+  // Fetch the current coding problem in the coding phase; re-checked on each turn so the panel
+  // follows codeIndex across coding questions. Deduped by codeIndex so an unchanged problem never
+  // triggers a re-render (avoids churn from the per-message re-check). Cleared outside coding.
+  const problemCodeIndexRef = useRef(-1);
   const refetchProblem = useCallback(async () => {
     const tok = activeTokenRef.current;
     if (!tok) return;
     const res = await fetchCodingProblem(id, tok);
-    if (res) setCodingProblem(res.problem);
+    if (res && res.codeIndex !== problemCodeIndexRef.current) {
+      problemCodeIndexRef.current = res.codeIndex;
+      setCodingProblem(res.problem);
+    }
   }, [id]);
   useEffect(() => {
-    if (phase === 'coding') void refetchProblem();
-    else setCodingProblem(null);
+    if (phase === 'coding') {
+      void refetchProblem();
+    } else {
+      problemCodeIndexRef.current = -1;
+      setCodingProblem(null);
+    }
   }, [phase, messages.length, refetchProblem]);
 
   const handleVoiceReady = useCallback((cue: ServerReady) => {
