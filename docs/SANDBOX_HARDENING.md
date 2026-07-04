@@ -70,19 +70,33 @@ docker run --rm --runtime=runsc hello-world           # smoke
 
 ## Remaining plan (prioritized)
 
-### 1. Tecnativa docker-socket-proxy — closes threat #3 (backend RCE → host root)
+### 1. Backend RCE → host root — EVALUATED, socket-proxy REJECTED as the fix (2026-07-04)
 
 The backend mounts `/var/run/docker.sock` (docker-out-of-docker). A backend RCE could
-`docker run -v /:/host` and own the VPS. Put a filtering proxy in front:
+`docker run -v /:/host` (or `--privileged`, `--pid host`) and own the VPS. We evaluated the
+Tecnativa docker-socket-proxy as the fix and **proved on the VPS it does NOT close this path.**
 
-- Add `tecnativa/docker-socket-proxy` to `deploy/docker-compose.yml` on a private network,
-  env `CONTAINERS=1 POST=1 IMAGES=1` and everything else `0` (`EXEC=0 SECRETS=0 SWARM=0 BUILD=0
-  NETWORKS=0`). Set `VOLUMES=1` only if the `of-go-cache` named volume needs listing (else
-  pre-create it and leave `VOLUMES=0`).
-- Point the backend at `DOCKER_HOST=tcp://socket-proxy:2375` instead of the raw socket.
-- Net: the backend can create/start/wait/kill/rm sandbox containers but not build, `exec`, or read
-  secrets. ~2h, compose-only, no daemon restart. **Verify `docker run --runtime=runsc` still works
-  through the proxy before flipping.**
+**Live evidence (isolated proxy, `CONTAINERS=1 POST=1 IMAGES=1`):** Tecnativa filters URL path +
+HTTP method ONLY — it never inspects request bodies. Through the proxy:
+- `POST /containers/create {HostConfig:{Binds:["/:/host"]}}` → **201** (a `-v /etc:/hostetc` run
+  printed the host's hostname `beef-server`).
+- `--privileged` and `--pid host` creates → **201**.
+- It *does* block `exec`/`swarm`/`build`/`secrets`/`networks`/`volumes`/`system` (all 403) and does
+  not break `/run` (`--runtime=runsc`, `-v of-go-cache`, `docker rm -f` all work).
+
+So it's ~40% blast-radius reduction (kills the exec/build/swarm/plugin/secrets pivots) but is **not a
+fix for create-with-bind** — shipping it as "socket hardening done" would be security theater.
+
+**Decision (2026-07-04): SKIP.** gVisor (live) already contains the PRIMARY threat — candidate code.
+The socket path requires *first* achieving RCE in the Node backend (secondary), and gVisor does not
+help there. Rather than add prod infra churn for a partial measure, we accept the documented residual
+and revisit with a REAL fix when warranted. Real fixes, strongest first:
+1. **Rootless Docker** — a full escape lands unprivileged; host `/` never exposed. Prod daemon
+   migration (downtime + revalidate all 7 langs + gVisor + of-go-cache UID remap). Recommended when done.
+2. **`--userns-remap`** daemon-wide — bind-mounted host paths map to a non-root subuid (blunts, not full).
+3. **~100-line body-filtering sidecar** — rejects create bodies with `Binds`/`Privileged`/`PidMode:host`/
+   `NetworkMode:host`/`CapAdd`/`Devices`. Surgical, keeps rootful Docker, but bespoke security code to own.
+   (Tecnativa can sit under any of these as a second layer, but adds nothing on its own.)
 
 ### 2. Custom seccomp profile — shrinks syscall surface (defense-in-depth atop gVisor)
 
