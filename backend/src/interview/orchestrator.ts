@@ -251,7 +251,16 @@ export async function begin(
     level: interview.level,
     roleBrief: interview.role_brief,
   };
-  const utterance = await oracle.generateUtterance(req);
+  // Greeting must never hard-fail: a fast-oracle hiccup (e.g. Groq 429 under load) at the
+  // coldest token path would 500 /begin and block the candidate from ever starting. Fall back
+  // to the deterministic greeting — same pattern as submitAnswer.
+  let utterance: Utterance;
+  try {
+    utterance = await oracle.generateUtterance(req);
+  } catch (err) {
+    console.error(`[orchestrator] greeting generation failed for ${interviewId}:`, err);
+    utterance = await new DeterministicOracle().generateUtterance(req);
+  }
 
   // Rotate the access token: the invite-link token is consumed here and replaced by a
   // fresh session token bound to the candidate's browser. A forwarded invite link can no
@@ -759,7 +768,7 @@ async function attachRunIntervention(
         ? `ran clean and passed all ${tr.total} hidden tests`
         : `passed ${tr.passed}/${tr.total} hidden tests${tr.incomplete ? ' (stopped early on an error/timeout)' : ' — wrong output on some cases'}`
       : null;
-    const utterance = await oracle.generateIntervention({
+    const interventionReq = {
       kind: decision.kind,
       ctx,
       transcript: interview.transcript ?? [],
@@ -769,7 +778,16 @@ async function attachRunIntervention(
       roleBrief: interview.role_brief,
       problemStatement: problem?.statement ?? null,
       testSummary,
-    });
+    };
+    // A decided hint should reach a stuck candidate even if the fast oracle is rate-limited —
+    // fall back to the deterministic hint rather than staying silent this run.
+    let utterance: Utterance;
+    try {
+      utterance = await oracle.generateIntervention(interventionReq);
+    } catch (err) {
+      console.error(`[orchestrator] run-hint generation failed for ${interview.id}:`, err);
+      utterance = await new DeterministicOracle().generateIntervention(interventionReq);
+    }
     if (utterance.text) {
       result.intervention = { text: utterance.text, kind: decision.kind };
     }

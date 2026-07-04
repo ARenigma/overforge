@@ -24,6 +24,30 @@ if (process.env.NODE_ENV === 'production' && frontendUrl.includes('localhost')) 
   throw new Error('FRONTEND_URL must be the production origin in production (got localhost)');
 }
 
+// Email deliverability guard (loud, NOT fatal — a healthy API must not go down over email config).
+// Resend rejects free-mail sender domains with HTTP 403, which silently dead-letters every
+// scorecard/no-show email. Surface it unmissably at boot instead of discovering it per-interview.
+if (process.env.RESEND_API_KEY) {
+  const from = process.env.RESEND_FROM ?? '';
+  const domain = from.split('@')[1]?.toLowerCase() ?? '';
+  const freeMail = [
+    'gmail.com',
+    'yahoo.com',
+    'hotmail.com',
+    'outlook.com',
+    'icloud.com',
+    'aol.com',
+    'proton.me',
+    'protonmail.com',
+  ];
+  if (!from || freeMail.includes(domain)) {
+    console.error(
+      `[email] ⚠️  RESEND_FROM="${from || '(unset)'}" uses a free-mail/unset domain — Resend will 403 and ALL result emails will silently fail to send. ` +
+        `Set RESEND_FROM to a domain verified in Resend (SPF/DKIM). Results remain visible in the dashboard until fixed.`
+    );
+  }
+}
+
 // Behind Caddy: trust the proxy so req.ip reflects the real client (used for rate limiting).
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
