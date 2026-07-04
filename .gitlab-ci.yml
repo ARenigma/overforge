@@ -142,6 +142,36 @@ e2e-playwright:
     paths: [frontend/playwright-report]
     expire_in: 7 days
 
+# ─────────────────────── Optional: automated candidate-mimic (manual) ───────────
+# A real headless Chromium drives the WHOLE interview against the LIVE deploy (prod by default),
+# exactly as a candidate would: consent gate -> oral -> coding -> RUN -> terminal. Standalone
+# package in playwright/ (not the workspace). Manual + gated on OF_TEST_PASSWORD so it never runs
+# on a normal push (it creates real interviews + burns oracle/TTS budget). Add these CI variables:
+#   OF_TEST_PASSWORD (masked) — dev@overforge.local password (a DEV_EMAILS account)
+#   OF_SUPABASE_URL, OF_SUPABASE_ANON_KEY — public Supabase values
+#   OF_API_URL (optional) — backend base; defaults to the VPS
+# Point OF_FRONTEND_URL at a Vercel preview to test that instead (the backend must allow its origin).
+e2e-mimic:
+  stage: deploy
+  image: mcr.microsoft.com/playwright:v1.48.0-jammy
+  needs: []
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $OF_TEST_PASSWORD'
+      when: manual
+  allow_failure: true
+  variables:
+    HEADLESS: '1'
+  before_script:
+    - apt-get update && apt-get install -y ffmpeg
+    - cd playwright && npm ci --no-audit --no-fund && npx playwright install chromium
+  script:
+    - bash fixtures/make-fixtures.sh || true
+    - npm run test:mimic
+  artifacts:
+    when: always
+    paths: [playwright/playwright-report, playwright/test-results]
+    expire_in: 7 days
+
 # ─────────────────────── 5. Deploy frontend → Vercel (private repo, no git link) ───
 # Runs on main once VERCEL_TOKEN (masked) is set in CI/CD variables. The Vercel project
 # already holds the NEXT_PUBLIC_* vars, so the remote build embeds them. Vercel never
