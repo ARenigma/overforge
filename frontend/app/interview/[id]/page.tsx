@@ -37,10 +37,12 @@ import {
   runCode as apiRunCode,
   speakChunk,
   speakStream,
+  fetchCodingProblem,
   finishInterview,
   getInterviewState,
   type InterviewPhase,
   type RunResult,
+  type PublicProblem,
 } from '@/lib/api';
 import {
   AlertCircle,
@@ -353,6 +355,11 @@ export default function InterviewPage() {
 
   // Interview state
   const [phase, setPhase] = useState<InterviewPhase>('greeting');
+  // The current coding problem (statement/examples/constraints — never hidden tests), shown in the
+  // room's problem panel during the coding phase. Fetched server-side; re-fetched as the question
+  // advances (codeIndex) so the panel always shows the problem in play.
+  const [codingProblem, setCodingProblem] = useState<PublicProblem | null>(null);
+  const [problemOpen, setProblemOpen] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
   const [aiThinking, setAiThinking] = useState(false);
 
@@ -512,6 +519,19 @@ export default function InterviewPage() {
   useEffect(() => {
     activeTokenRef.current = activeToken;
   }, [activeToken]);
+
+  // Fetch the current coding problem when in the coding phase; re-fetch on each turn (messages.length)
+  // so the panel follows codeIndex as the candidate moves between coding questions. Cleared otherwise.
+  const refetchProblem = useCallback(async () => {
+    const tok = activeTokenRef.current;
+    if (!tok) return;
+    const res = await fetchCodingProblem(id, tok);
+    if (res) setCodingProblem(res.problem);
+  }, [id]);
+  useEffect(() => {
+    if (phase === 'coding') void refetchProblem();
+    else setCodingProblem(null);
+  }, [phase, messages.length, refetchProblem]);
 
   const handleVoiceReady = useCallback((cue: ServerReady) => {
     lastExpectsRef.current = cue.expects;
@@ -1470,6 +1490,64 @@ export default function InterviewPage() {
               </div>
 
               {/* Transcript scroll area */}
+              {/* Problem panel — the assigned coding problem (statement/examples/constraints), pinned
+                  above the chat during the coding phase. Hidden tests are NEVER sent here. */}
+              {phase === 'coding' && codingProblem && (
+                <div className="shrink-0 border-b border-border">
+                  <button
+                    type="button"
+                    onClick={() => setProblemOpen((o) => !o)}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-left hover:bg-muted/50"
+                  >
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-primary">
+                      Problem
+                    </span>
+                    <span className="truncate text-xs font-semibold text-foreground">
+                      {codingProblem.title}
+                    </span>
+                    <span className="ml-auto shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[9px] font-mono uppercase text-muted-foreground">
+                      {codingProblem.difficulty}
+                    </span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {problemOpen ? '▾' : '▸'}
+                    </span>
+                  </button>
+                  {problemOpen && (
+                    <div className="max-h-[42vh] overflow-y-auto px-4 pb-3 text-sm text-foreground">
+                      <MarkdownMessage text={codingProblem.statement} />
+                      {codingProblem.examples.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {codingProblem.examples.map((ex, i) => (
+                            <div
+                              key={i}
+                              className="rounded-md border border-border bg-surface-deep p-2 font-mono text-[11px]"
+                            >
+                              <div className="text-muted-foreground">Input</div>
+                              <pre className="whitespace-pre-wrap break-all text-foreground">
+                                {ex.input}
+                              </pre>
+                              <div className="mt-1 text-muted-foreground">Output</div>
+                              <pre className="whitespace-pre-wrap break-all text-foreground">
+                                {ex.output}
+                              </pre>
+                              {ex.explanation && (
+                                <div className="mt-1 text-muted-foreground">{ex.explanation}</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {codingProblem.constraints && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          <span className="font-semibold">Constraints:</span>{' '}
+                          {codingProblem.constraints}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex-1 space-y-4 overflow-y-auto p-4">
                 {messages.map((msg, idx) => {
                   const isCandidate = msg.role === 'candidate';

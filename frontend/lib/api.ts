@@ -362,3 +362,35 @@ export async function speakStream(
     return null; // voice is best-effort; never break the interview
   }
 }
+
+/** Candidate-safe coding problem (never includes hidden tests or the reference solution). */
+export interface PublicProblem {
+  slug: string;
+  title: string;
+  difficulty: string;
+  statement: string;
+  examples: { input: string; output: string; explanation?: string }[];
+  constraints: string;
+}
+
+/**
+ * POST /api/interviews/:id/coding-problem — the current coding problem for the room's problem panel.
+ * Returns null on any failure (the room just hides the panel). `problem` is null outside the coding
+ * phase or for legacy interviews with no assigned bank problem.
+ */
+export async function fetchCodingProblem(
+  id: string,
+  token: string
+): Promise<{ codeIndex: number; problem: PublicProblem | null } | null> {
+  try {
+    const res = await fetch(`${BASE_URL}/api/interviews/${id}/coding-problem`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as { codeIndex: number; problem: PublicProblem | null };
+  } catch {
+    return null;
+  }
+}
