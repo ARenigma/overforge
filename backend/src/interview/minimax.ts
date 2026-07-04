@@ -242,9 +242,11 @@ function buildInterventionPrompt(req: InterventionRequest): string {
   return [
     levelGuidance(req.level),
     brief ? `Role context:\n${brief.slice(0, 2000)}` : '',
+    req.problemStatement ? `The coding problem:\n${req.problemStatement.slice(0, 1500)}` : '',
     KIND_GUIDANCE[req.kind],
     req.code ? `Candidate's current code:\n${req.code.slice(0, 1500)}` : '',
     runs ? `Recent run results (oldest→newest):\n${runs}` : '',
+    req.testSummary ? `Latest run outcome: ${req.testSummary}` : '',
     recent ? `Recent transcript:\n${recent}` : '',
     'Produce only your single short intervention.',
   ]
@@ -306,7 +308,13 @@ function effectGuidance(effect: Effect): string {
         'or similar. ONE sentence question only. This is the last prompt on this topic before moving on.'
       );
     case 'ask_code':
-      return 'Introduce a coding problem suited to their level; state it clearly and concisely.';
+      return (
+        "OPEN the coding portion for a problem that is ALREADY DISPLAYED on the candidate's screen " +
+        '(full statement + examples + constraints). Give a brief, warm spoken intro (1–2 sentences): ' +
+        'tell them the problem is on their screen, a ONE-LINE gist of what it asks, and invite them ' +
+        'to read it and share their approach before coding. Do NOT read the full statement aloud or ' +
+        'restate the details — it is on their screen.'
+      );
     case 'ask_followup':
       return 'Ask ONE focused follow-up that challenges their coding approach or reasoning.';
     case 'handoff':
@@ -332,6 +340,10 @@ function buildUtterancePrompt(req: UtteranceRequest): string {
       : '',
     `Phase: ${req.ctx.phase}. Next action: ${req.effect.kind}.`,
     effectGuidance(req.effect),
+    req.problemStatement
+      ? "The coding problem is ALREADY on the candidate's screen (do NOT read it verbatim — give " +
+        `only a one-line gist):\n${req.problemStatement.slice(0, 1500)}`
+      : '',
     req.code ? `Candidate code so far:\n${req.code.slice(0, 1500)}` : '',
     recent ? `Recent transcript:\n${recent}` : '',
     lastCandidate

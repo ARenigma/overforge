@@ -3,7 +3,7 @@
 
 // The kernel itself never sets `intervention` — the orchestrator attaches it (USP). The type is
 // imported only to keep the union strong end-to-end.
-import { InterventionKind } from '../interview/types';
+import { InterventionKind, TestResults } from '../interview/types';
 
 export interface RunRequest {
   language: string; // canonical name, e.g. 'python', 'javascript', 'java'
@@ -32,6 +32,10 @@ export interface RunResult {
   /** An autonomous interviewer hint surfaced for this run (USP) — set by the orchestrator so the
    *  room can show it immediately. Persisted on the run (race-free) and read by the scorer. */
   intervention?: { text: string; kind: InterventionKind };
+  /** Hidden-test outcome for the assigned coding problem — set by the orchestrator (server-side),
+   *  persisted on the run + read by the scorer/intervention. MUST be stripped from the candidate's
+   *  /run response (correctness is never leaked live). Absent when the question has no problem/tests. */
+  testResults?: TestResults;
 }
 
 export interface ExecutionKernel {

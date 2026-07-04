@@ -17,10 +17,14 @@ export interface RunSignals {
   hasErrorOutput: boolean;
 }
 
-/** A run "passed" if it ran clean: Accepted status, no error exit, no stderr. The interview IDE
- *  has no hidden test cases, so this means "the program executed without error" — the best
- *  available proxy for forward progress. */
+/** A run "passed" if it is correct. When the question has hidden tests, that means ALL tests green
+ *  — a wrong-but-clean run counts as a FAILURE so the intervention engine + scorer see it. When
+ *  there are no tests (legacy/no assigned problem), fall back to "ran clean" (Accepted, no error
+ *  exit, no stderr) as the best available proxy for forward progress. */
 export function runPassed(r: RunResult): boolean {
+  if (r.testResults) {
+    return r.testResults.total > 0 && r.testResults.passed === r.testResults.total;
+  }
   const cleanExit = r.exitCode === 0 || r.exitCode === null;
   const noStderr = !(r.stderr && r.stderr.trim());
   return r.status === 'Accepted' && cleanExit && noStderr;

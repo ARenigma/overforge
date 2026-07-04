@@ -261,6 +261,26 @@ router.post('/:id/run', async (req: Request, res: Response): Promise<void> => {
     }
 
     const result = await orchestrator.recordRun(id, { language, source, stdin });
+    // Never leak hidden-test correctness to the candidate live — they see only their own
+    // stdout/stderr + any interviewer hint. testResults is persisted server-side for grading + hints.
+    const candidateSafe = { ...result };
+    delete candidateSafe.testResults;
+    res.json(candidateSafe);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ─────────────────────── POST /api/interviews/:id/coding-problem ───────────────────────
+// The candidate's room fetches the CURRENT coding problem (statement/examples/constraints — NEVER
+// hidden tests or the reference solution) to render the problem panel. Candidate-token auth.
+
+router.post('/:id/coding-problem', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { token } = req.body as { token?: string };
+    await validateCandidate(id, token ?? '');
+    const result = await orchestrator.currentCodingProblem(id);
     res.json(result);
   } catch (err) {
     sendError(res, err);

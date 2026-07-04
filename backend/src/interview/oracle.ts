@@ -21,6 +21,9 @@ export interface UtteranceRequest {
   level?: string;
   /** Free-text role/JD context — steers the topic/domain of questions (not count). */
   roleBrief?: string | null;
+  /** For `ask_code`: the assigned coding problem's full statement, presented VERBATIM (the oracle
+   *  must not invent a problem). Absent for non-coding effects / legacy interviews without a bank. */
+  problemStatement?: string | null;
 }
 
 export interface Utterance {
@@ -46,6 +49,11 @@ export interface InterventionRequest {
   recentRuns?: { status: string; stderr?: string }[];
   level?: string;
   roleBrief?: string | null;
+  /** The assigned coding problem's statement, so a hint is grounded in the actual task. */
+  problemStatement?: string | null;
+  /** Short factual note on the latest run's hidden-test outcome (e.g. "ran clean but failed 2/6
+   *  hidden tests" vs "errored") so the hint targets the real failure — never the raw test I/O. */
+  testSummary?: string | null;
 }
 
 export interface Oracle {
@@ -86,7 +94,12 @@ export class DeterministicOracle implements Oracle {
         return { text: "Great — let's move to the coding portion.", expects: 'text' };
       case 'ask_code':
         return {
-          text: `Coding question ${e.index + 1}: implement the solution and explain it.`,
+          // The full problem is shown on the candidate's screen (problem panel); the interviewer
+          // gives a brief spoken intro, never reads the whole statement aloud.
+          text:
+            e.index === 0
+              ? "Let's move into the coding part. Your first problem is on the screen now — take a minute to read it, then walk me through your approach before you start coding."
+              : "Here's your next problem, up on the screen. Have a read and tell me how you'd approach it.",
           expects: 'code',
         };
       case 'ask_followup':

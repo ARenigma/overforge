@@ -5,9 +5,10 @@
 
 import { advance, initialContext } from './machine';
 import { DeterministicOracle, Oracle, TranscriptTurn, UtteranceRequest, Utterance } from './oracle';
-import { InterviewContext, Effect, InterventionKind } from './types';
+import { InterviewContext, Effect, InterventionKind, CodingProblem, TestResults } from './types';
 import { deriveRunSignals } from './signals';
 import { decideRunIntervention, deriveRunAssistBudget } from './intervention';
+import { selectProblems, getProblemBySlug, toPublicProblem, PublicProblem } from './problems';
 import {
   createMinimaxClient,
   MinimaxClient,
@@ -182,6 +183,12 @@ export async function createInterview(input: {
   const expiresAt = tokenExpiry();
   const fsmState = initialContext();
 
+  // Assign the coding problems NOW (deterministic selection by level; no LLM), so every candidate
+  // on a given problem gets the identical, gradeable question. One per core coding question.
+  const codingProblemIds = selectProblems(input.level, fsmState.config.coreQuestions).map(
+    (p) => p.slug
+  );
+
   const interview = await dbCreateInterview({
     interviewerId: input.interviewerId,
     candidateEmail: input.candidateEmail,
@@ -193,6 +200,7 @@ export async function createInterview(input: {
     level: input.level,
     roleBrief: input.roleBrief ?? null,
     devMode: input.devMode ?? false,
+    codingProblemIds,
   });
 
   return { id: interview.id, token: rawToken, expiresAt };
@@ -535,6 +543,14 @@ export async function submitAnswer(
     ...(interview.transcript ?? []),
     { role: 'candidate', text: answer },
   ];
+  // For a coding question, the assigned problem (shown on the candidate's screen) grounds the
+  // interviewer's intro + any follow-up hint. codeIndex identifies which question is in play.
+  const codingProblem =
+    effect.kind === 'ask_code'
+      ? assignedProblem(interview, effect.index)
+      : effect.kind === 'ask_followup'
+        ? assignedProblem(interview, effect.codeIndex)
+        : null;
   const req: UtteranceRequest = {
     effect,
     ctx: newCtx,
@@ -542,6 +558,7 @@ export async function submitAnswer(
     code: interview.code_snapshot,
     level: interview.level,
     roleBrief: interview.role_brief,
+    problemStatement: codingProblem?.statement ?? null,
   };
 
   // A follow-up is voiced as a typed intervention (counter-question / probe / hint) so it reads
@@ -557,6 +574,7 @@ export async function submitAnswer(
     code: interview.code_snapshot,
     level: interview.level,
     roleBrief: interview.role_brief,
+    problemStatement: codingProblem?.statement ?? null,
   };
   let utterance: Utterance;
   let assist: { kind: InterventionKind; strength: number } | undefined;
@@ -578,6 +596,65 @@ export async function submitAnswer(
   await persistTransition(interview, newCtx, effect, utterance, answer, requestId, assist);
 
   return { utterance, phase: newCtx.phase, state: newCtx };
+}
+
+/** Cap hidden tests executed per Run — bounds container spend on the shared box (bank problems
+ *  have ≤10; this is the ceiling regardless). */
+const MAX_HIDDEN_TESTS = 12;
+
+/** The coding problem assigned to a given coding question (codeIndex), or null (legacy/no bank). */
+function assignedProblem(interview: Interview, codeIndex: number): CodingProblem | null {
+  const slug = interview.coding_problem_ids?.[codeIndex];
+  return slug ? getProblemBySlug(slug) : null;
+}
+
+/** The candidate-safe problem for the CURRENT coding question (no hidden tests / reference). The
+ *  room fetches this to render the problem panel; null outside coding / for legacy interviews. */
+export async function currentCodingProblem(
+  interviewId: string
+): Promise<{ codeIndex: number; problem: PublicProblem | null }> {
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  const ctx = interview.fsm_state as InterviewContext;
+  const p = assignedProblem(interview, ctx.codeIndex);
+  return { codeIndex: ctx.codeIndex, problem: p ? toPublicProblem(p) : null };
+}
+
+/**
+ * Run the assigned problem's HIDDEN tests against the candidate's code (server-injected stdin —
+ * never the candidate's). Sequential with short-circuit on a crash/timeout status (those repeat, so
+ * we don't burn N containers on broken code). Returns null when the question has no assigned problem
+ * (legacy) so callers fall back to clean-exit grading. Best-effort: any failure yields null.
+ */
+async function runHiddenTests(
+  problem: CodingProblem,
+  language: string,
+  source: string
+): Promise<TestResults> {
+  const kernel = getExecutionKernel();
+  const tests = problem.hiddenTests.slice(0, MAX_HIDDEN_TESTS);
+  const cases: { index: number; passed: boolean }[] = [];
+  let passed = 0;
+  let incomplete = false;
+  for (let i = 0; i < tests.length; i++) {
+    let r: RunResult;
+    try {
+      r = await kernel.run({ language, source, stdin: tests[i].input });
+    } catch {
+      incomplete = true; // executor error — stop; don't hammer the box
+      break;
+    }
+    // The kernel returns 'Accepted' for ANY clean run; correctness is our own stdout comparison.
+    const ok = r.status === 'Accepted' && r.stdout.trim() === tests[i].expected.trim();
+    if (ok) passed++;
+    cases.push({ index: i, passed: ok });
+    // A non-clean status (crash / timeout / compile error) repeats across inputs — stop early so
+    // broken code can't burn N containers (a wrong-but-clean 'Accepted' run continues normally).
+    if (r.status !== 'Accepted') {
+      incomplete = true;
+      break;
+    }
+  }
+  return { passed, total: tests.length, ...(incomplete ? { incomplete: true } : {}), cases };
 }
 
 export async function recordRun(interviewId: string, req: RunRequest): Promise<RunResult> {
@@ -602,6 +679,18 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
   const result = await kernel.run(req);
   result.language = req.language;
   result.codeIndex = runCtx.codeIndex; // tag with the question in play, for signal scoping
+
+  // Grade against the assigned problem's HIDDEN tests (server-injected stdin). Server-side only:
+  // persisted on the run + used by the intervention engine + scorer, but STRIPPED from the /run
+  // response so correctness is never leaked to the candidate live. Best-effort — never fail the run.
+  const problem = assignedProblem(interview, runCtx.codeIndex);
+  if (problem && problem.hiddenTests.length > 0) {
+    try {
+      result.testResults = await runHiddenTests(problem, req.language, req.source);
+    } catch (err) {
+      console.error(`[orchestrator] hidden-test grading failed for ${interviewId}:`, err);
+    }
+  }
 
   // ── Autonomous intervention (USP): a balanced interviewer notices repeated failing runs and
   // steps in. We decide + word the hint BEFORE persisting, so it rides along ON the run in the
@@ -653,6 +742,14 @@ async function attachRunIntervention(
       .filter((r) => r.codeIndex === ctx.codeIndex)
       .slice(-4)
       .map((r) => ({ status: r.status, stderr: r.stderr }));
+    const problem = assignedProblem(interview, ctx.codeIndex);
+    // Tell the oracle the REAL failure mode so the hint targets it — never the raw test I/O.
+    const tr = result.testResults;
+    const testSummary = tr
+      ? tr.passed === tr.total
+        ? `ran clean and passed all ${tr.total} hidden tests`
+        : `passed ${tr.passed}/${tr.total} hidden tests${tr.incomplete ? ' (stopped early on an error/timeout)' : ' — wrong output on some cases'}`
+      : null;
     const utterance = await oracle.generateIntervention({
       kind: decision.kind,
       ctx,
@@ -661,6 +758,8 @@ async function attachRunIntervention(
       recentRuns,
       level: interview.level,
       roleBrief: interview.role_brief,
+      problemStatement: problem?.statement ?? null,
+      testSummary,
     });
     if (utterance.text) {
       result.intervention = { text: utterance.text, kind: decision.kind };
@@ -699,6 +798,9 @@ export async function finishAndScore(
     language: r.language ?? 'unknown',
     status: r.status,
     stderr: r.stderr,
+    ...(r.testResults
+      ? { testResults: { passed: r.testResults.passed, total: r.testResults.total } }
+      : {}),
     ...(r.intervention
       ? { intervention: { kind: r.intervention.kind, text: r.intervention.text } }
       : {}),

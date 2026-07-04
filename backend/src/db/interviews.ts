@@ -51,6 +51,8 @@ export interface Interview {
   dev_mode: boolean;
   code_language: string | null;
   code_runs: RunResult[];
+  /** Ordered slugs of the coding problems assigned at creation (index = coding question). */
+  coding_problem_ids: string[];
   evaluation_score: Scorecard | null;
   scorecard_sent_at: string | null;
   last_request_id: string | null;
@@ -73,6 +75,8 @@ export interface CreateInterviewInput {
   roleBrief?: string | null;
   /** Dev/testing interview (server only honors this for DEV_EMAILS accounts). */
   devMode?: boolean;
+  /** Slugs of the coding problems assigned to this interview (one per coding question). */
+  codingProblemIds?: string[];
 }
 
 export type UpdateInterviewInput = Partial<{
@@ -114,6 +118,7 @@ export async function createInterview(input: CreateInterviewInput): Promise<Inte
       ...(input.level ? { level: input.level } : {}),
       role_brief: input.roleBrief ?? null,
       dev_mode: input.devMode ?? false,
+      coding_problem_ids: input.codingProblemIds ?? [],
     })
     .select()
     .single();

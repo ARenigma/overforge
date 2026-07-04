@@ -15,6 +15,8 @@ export interface CodeRunSummary {
   language: string;
   status: string;
   stderr?: string;
+  /** Hidden-test outcome for this run (factual correctness). Absent when the question had no tests. */
+  testResults?: { passed: number; total: number };
   /** An autonomous interviewer hint triggered by this run (USP) — factored into the grade. */
   intervention?: { kind: string; text?: string };
 }
@@ -73,9 +75,22 @@ export function buildScoringPrompt(input: ScoringInput): string {
   const transcript = input.transcript.map((t) => `${t.role}: ${t.text}`).join('\n');
   const runs = input.codeRuns
     .map(
-      (r) => `- ${r.language}: ${r.status}${r.stderr ? ` (stderr: ${r.stderr.slice(0, 120)})` : ''}`
+      (r) =>
+        `- ${r.language}: ${r.status}` +
+        (r.testResults ? ` [hidden tests: ${r.testResults.passed}/${r.testResults.total}]` : '') +
+        (r.stderr ? ` (stderr: ${r.stderr.slice(0, 120)})` : '')
     )
     .join('\n');
+  // Factual correctness from executing the candidate's code against hidden tests. Weigh this into
+  // problem_solving + code_quality — but do NOT hard-gate (a strong approach that ran out of time
+  // still merits partial credit; the rubric stays holistic).
+  const anyTests = input.codeRuns.some((r) => r.testResults);
+  const correctnessLine = anyTests
+    ? "CODE CORRECTNESS: the [hidden tests: X/Y] figures above are FACTUAL — the candidate's code " +
+      'was executed against hidden tests. Passing all tests is strong evidence of a correct ' +
+      'solution; failing tests indicate real bugs. Weigh correctness into problem_solving and ' +
+      'code_quality, but do not hard-gate — reward sound approaches even if not all tests passed.'
+    : '';
   const levelLine =
     LEVEL_GRADING_GUIDANCE[(input.level ?? 'mid').toLowerCase()] ?? LEVEL_GRADING_GUIDANCE.mid;
   const brief = input.roleBrief?.trim();
@@ -117,6 +132,7 @@ export function buildScoringPrompt(input: ScoringInput): string {
     `TRANSCRIPT:\n${transcript || '(none)'}`,
     input.finalCode ? `FINAL CODE:\n${input.finalCode.slice(0, 4000)}` : '',
     runs ? `CODE RUNS:\n${runs}` : '',
+    correctnessLine,
     assistLine,
     proctorLine,
     'Grade per the rubric, calibrated to the candidate level above. Return the JSON only.',
