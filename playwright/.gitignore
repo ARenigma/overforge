@@ -1,0 +1,10 @@
+node_modules/
+test-results/
+playwright-report/
+blob-report/
+.last-run.json
+# Media fixtures are generated locally (make-fixtures.sh) / provided as CI artifacts — keep binaries out of git.
+fixtures/*.y4m
+fixtures/*.wav
+fixtures/*.jpg
+fixtures/*.aiff

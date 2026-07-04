@@ -1,0 +1,44 @@
+// Creates an interview via the real interviewer API and returns its candidate link. Always uses
+// devMode:true — the room's paste-guard blocks programmatic editor insertion unless the interview
+// is a dev interview (server-authoritative; only honored for a DEV_EMAILS account). devMode also
+// picks the short dev duration, which keeps the whole run fast.
+
+import { config } from './env';
+import { getAccessToken } from './auth';
+
+export interface CreatedInterview {
+  id: string;
+  /** The invite token (consumed by /begin). */
+  token: string;
+  /** Full candidate URL (frontend origin + ?t=token), as the backend builds it. */
+  link: string;
+}
+
+export interface CreateOpts {
+  language?: string;
+  level?: string;
+  candidateEmail?: string;
+  roleBrief?: string;
+}
+
+export async function createInterview(opts: CreateOpts = {}): Promise<CreatedInterview> {
+  const accessToken = await getAccessToken();
+  const res = await fetch(`${config.apiUrl}/api/interviews`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      candidateEmail: opts.candidateEmail ?? 'mimic@overforge.local',
+      language: opts.language ?? 'python',
+      level: opts.level ?? 'mid',
+      ...(opts.roleBrief ? { roleBrief: opts.roleBrief } : {}),
+      devMode: true,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`createInterview failed (${res.status}): ${body.slice(0, 300)}`);
+  }
+  const json = (await res.json()) as CreatedInterview;
+  if (!json.link) throw new Error('createInterview returned no link');
+  return json;
+}

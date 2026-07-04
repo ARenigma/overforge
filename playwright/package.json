@@ -1,0 +1,19 @@
+{
+  "name": "overforge-playwright-mimic",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Automated candidate-mimic E2E: a real headed Chromium drives the full interview (consent gate -> oral turn-taking -> coding -> RUN) exactly as a candidate would. Not part of the npm workspace; install + run from this dir.",
+  "scripts": {
+    "install:browser": "playwright install chromium",
+    "fixtures": "bash fixtures/make-fixtures.sh",
+    "test": "playwright test",
+    "test:mimic": "playwright test --project=mimic",
+    "test:stt": "playwright test --project=stt",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}

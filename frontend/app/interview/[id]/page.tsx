@@ -1143,6 +1143,7 @@ export default function InterviewPage() {
           )}
 
           <Button
+            data-testid="consent-begin"
             onClick={() => void handleBegin()}
             disabled={cameraRequesting}
             className="w-full h-11 rounded-md bg-primary text-primary-foreground hover:opacity-90 active:scale-[0.98] font-medium transition-opacity focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:opacity-60"
@@ -1278,7 +1279,11 @@ export default function InterviewPage() {
       {isDone ? (
         // Done state — full-width thank-you
         <div className="flex-1 flex items-center justify-center px-4">
-          <div className="w-full max-w-md bg-card border border-success/40 rounded-xl p-8 text-center space-y-4">
+          <div
+            data-testid="interview-done"
+            data-concluded-by-time={concludedByTime ? 'true' : 'false'}
+            className="w-full max-w-md bg-card border border-success/40 rounded-xl p-8 text-center space-y-4"
+          >
             <CheckCircle className="w-10 h-10 text-success mx-auto" />
             <h2 className="text-base font-medium text-foreground">
               {concludedByTime ? 'Time’s up — interview concluded' : 'Interview complete'}
@@ -1374,9 +1379,10 @@ export default function InterviewPage() {
                   </Alert>
                 )}
                 {runResult ? (
-                  <div className="space-y-1">
+                  <div className="space-y-1" data-testid="run-output">
                     <div className="flex items-center gap-3 text-muted-foreground text-[10px] uppercase tracking-wider font-mono">
                       <span
+                        data-testid="run-status"
                         className={runResult.exitCode === 0 ? 'text-success' : 'text-destructive'}
                       >
                         {runResult.status}
@@ -1511,7 +1517,7 @@ export default function InterviewPage() {
               {/* Problem panel — the assigned coding problem (statement/examples/constraints), pinned
                   above the chat during the coding phase. Hidden tests are NEVER sent here. */}
               {phase === 'coding' && codingProblem && (
-                <div className="shrink-0 border-b border-border">
+                <div className="shrink-0 border-b border-border" data-testid="problem-panel">
                   <button
                     type="button"
                     onClick={() => setProblemOpen((o) => !o)}
@@ -1520,7 +1526,10 @@ export default function InterviewPage() {
                     <span className="text-[10px] font-mono uppercase tracking-wider text-primary">
                       Problem
                     </span>
-                    <span className="truncate text-xs font-semibold text-foreground">
+                    <span
+                      data-testid="problem-title"
+                      className="truncate text-xs font-semibold text-foreground"
+                    >
                       {codingProblem.title}
                     </span>
                     <span
@@ -1582,6 +1591,8 @@ export default function InterviewPage() {
                   return (
                     <div
                       key={idx}
+                      data-testid={isCandidate ? 'candidate-message' : 'ai-message'}
+                      data-assist={msg.role === 'ai' && msg.assist ? msg.assist : undefined}
                       className={`flex flex-col gap-1 ${isCandidate ? 'items-end' : 'items-start'}`}
                     >
                       {/* Per-message speaker label — the clearest contrast cue (who said what). */}
@@ -1619,7 +1630,7 @@ export default function InterviewPage() {
                 })}
 
                 {aiThinking && (
-                  <div className="flex justify-start">
+                  <div className="flex justify-start" data-testid="ai-thinking">
                     <div className="flex items-center gap-2 bg-card px-4 py-2.5 text-[13px] font-medium italic text-muted-foreground">
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
                       Thinking…
