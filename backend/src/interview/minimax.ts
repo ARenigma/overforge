@@ -84,19 +84,44 @@ export function groqConfigFromEnv(): MinimaxConfig {
 }
 
 /**
- * SECONDARY Groq model for failover. Groq rate-limits are PER-MODEL, so when the primary
- * (gpt-oss-120b) 429s, a different model has its own untouched bucket — effectively free extra
- * capacity + resilience. Default qwen/qwen3-32b. IMPORTANT: qwen3 is a reasoning model that REJECTS
- * reasoning_effort='low' (400) and would let hidden "thinking" eat the token budget + truncate JSON
- * — so default it to 'none' (verified: clean JSON, ~66ms). Keep it a DISTINCT model from the primary.
+ * Ordered Groq failover chain. Groq rate-limits are PER-MODEL, so each entry is a distinct model
+ * with its OWN untouched bucket — cascading on a 429 is free extra capacity, not limit-dodging
+ * (single key, legit calls). Each carries its VERIFIED reasoning_effort — a wrong value 400s the
+ * request (verified live: qwen3/qwen3.6 REJECT 'low' → use 'none'; llama-3.3/llama-4 reject it at
+ * all → omit). '' means omit. Override the whole chain via GROQ_FALLBACK_CHAIN_JSON.
  */
-export function groqFallbackConfigFromEnv(): MinimaxConfig {
-  return {
+interface GroqChainEntry {
+  model: string;
+  reasoningEffort: string; // '' = omit
+}
+
+const DEFAULT_GROQ_CHAIN: GroqChainEntry[] = [
+  {
+    model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
+    reasoningEffort: process.env.GROQ_REASONING_EFFORT || 'low',
+  },
+  { model: 'qwen/qwen3-32b', reasoningEffort: 'none' },
+  { model: 'qwen/qwen3.6-27b', reasoningEffort: 'none' },
+  { model: 'llama-3.3-70b-versatile', reasoningEffort: '' },
+  { model: 'meta-llama/llama-4-scout-17b-16e-instruct', reasoningEffort: '' },
+];
+
+export function groqChainConfigs(): MinimaxConfig[] {
+  let chain = DEFAULT_GROQ_CHAIN;
+  const override = process.env.GROQ_FALLBACK_CHAIN_JSON;
+  if (override) {
+    try {
+      chain = JSON.parse(override) as GroqChainEntry[];
+    } catch {
+      // malformed override → keep the verified default chain
+    }
+  }
+  return chain.map((e) => ({
     apiKey: process.env.GROQ_API_KEY ?? '',
-    model: process.env.GROQ_FALLBACK_MODEL || 'qwen/qwen3-32b',
+    model: e.model,
     baseUrl: GROQ_BASE_URL,
-    reasoningEffort: process.env.GROQ_FALLBACK_REASONING_EFFORT || 'none',
-  };
+    reasoningEffort: e.reasoningEffort || undefined, // '' → undefined → omitted by the client
+  }));
 }
 
 /**
@@ -119,9 +144,12 @@ export function createFailoverClient(
         } catch (err) {
           lastErr = err;
           const status = (err as { status?: number } | undefined)?.status;
-          const retryable = status === undefined || status === 429 || status >= 500;
           const hasNext = i < entries.length - 1;
-          if (!retryable || !hasNext) throw err;
+          // In degradation mode already (the primary failed), so try the NEXT model on ANY error —
+          // 429/5xx/network AND a 4xx model-incompat — rather than let one model's quirk break the
+          // whole chain. Only when the last client fails do we surface to the caller's deterministic
+          // fallback. Each config is pre-verified, so a 4xx here means real config drift (logged).
+          if (!hasNext) throw err;
           console.warn(
             `[oracle] model "${name}" failed (status=${status ?? 'network'}); failing over to "${entries[i + 1].name}"`
           );

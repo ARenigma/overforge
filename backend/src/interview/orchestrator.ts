@@ -14,8 +14,7 @@ import {
   MinimaxClient,
   MinimaxOracle,
   minimaxConfigFromEnv,
-  groqConfigFromEnv,
-  groqFallbackConfigFromEnv,
+  groqChainConfigs,
   createFailoverClient,
 } from './minimax';
 import { generateToken, hashToken } from './token';
@@ -56,13 +55,13 @@ export function getOracle(): Oracle {
   // catch. So a per-model 429 under load degrades to another real model, not to canned lines — the
   // autonomous-interviewer USP (clarify / hint / counter-question) stays crisp.
   if (process.env.GROQ_API_KEY) {
-    const chain = [{ name: 'groq:primary', client: createMinimaxClient(groqConfigFromEnv()) }];
-    if (process.env.GROQ_FALLBACK_MODEL !== 'off') {
-      chain.push({
-        name: 'groq:fallback',
-        client: createMinimaxClient(groqFallbackConfigFromEnv()),
-      });
-    }
+    // Ordered chain: gpt-oss-120b → qwen3-32b → qwen3.6-27b → llama-3.3-70b → llama-4-scout, each a
+    // separate Groq rate-limit bucket, then MiniMax (different provider), then the caller's
+    // DeterministicOracle catch. GROQ_FALLBACK_CHAIN_JSON overrides the model list.
+    const chain = groqChainConfigs().map((cfg, i) => ({
+      name: i === 0 ? 'groq:primary' : `groq:${cfg.model}`,
+      client: createMinimaxClient(cfg),
+    }));
     if (process.env.MINIMAX_API_KEY) {
       chain.push({
         name: 'minimax',
