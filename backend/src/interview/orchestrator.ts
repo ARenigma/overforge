@@ -15,6 +15,8 @@ import {
   MinimaxOracle,
   minimaxConfigFromEnv,
   groqConfigFromEnv,
+  groqFallbackConfigFromEnv,
+  createFailoverClient,
 } from './minimax';
 import { generateToken, hashToken } from './token';
 import {
@@ -46,8 +48,26 @@ export function getOracle(): Oracle {
   // Real-time conversational turns want the FASTEST good model. Prefer Groq (GPT-OSS on the LPU,
   // ~0.5s TTFT) when configured; else the MiniMax fast model; else the deterministic stub. The final
   // scorecard grading stays on MiniMax (getScoringClient) — split-brain: fast turns, deep scoring.
+  //
+  // Failover chain (Groq rate-limits are PER-MODEL): primary gpt-oss-120b → a DIFFERENT Groq model
+  // (qwen3-32b, its own bucket) → MiniMax fast (different provider) → the caller's DeterministicOracle
+  // catch. So a per-model 429 under load degrades to another real model, not to canned lines — the
+  // autonomous-interviewer USP (clarify / hint / counter-question) stays crisp.
   if (process.env.GROQ_API_KEY) {
-    return new MinimaxOracle(createMinimaxClient(groqConfigFromEnv()));
+    const chain = [{ name: 'groq:primary', client: createMinimaxClient(groqConfigFromEnv()) }];
+    if (process.env.GROQ_FALLBACK_MODEL !== 'off') {
+      chain.push({
+        name: 'groq:fallback',
+        client: createMinimaxClient(groqFallbackConfigFromEnv()),
+      });
+    }
+    if (process.env.MINIMAX_API_KEY) {
+      chain.push({
+        name: 'minimax',
+        client: createMinimaxClient(minimaxConfigFromEnv({ fast: true })),
+      });
+    }
+    return new MinimaxOracle(createFailoverClient(chain));
   }
   if (process.env.MINIMAX_API_KEY) {
     return new MinimaxOracle(createMinimaxClient(minimaxConfigFromEnv({ fast: true })));

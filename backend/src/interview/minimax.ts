@@ -82,6 +82,55 @@ export function groqConfigFromEnv(): MinimaxConfig {
   };
 }
 
+/**
+ * SECONDARY Groq model for failover. Groq rate-limits are PER-MODEL, so when the primary
+ * (gpt-oss-120b) 429s, a different model has its own untouched bucket — effectively free extra
+ * capacity + resilience. Default qwen/qwen3-32b. IMPORTANT: qwen3 is a reasoning model that REJECTS
+ * reasoning_effort='low' (400) and would let hidden "thinking" eat the token budget + truncate JSON
+ * — so default it to 'none' (verified: clean JSON, ~66ms). Keep it a DISTINCT model from the primary.
+ */
+export function groqFallbackConfigFromEnv(): MinimaxConfig {
+  return {
+    apiKey: process.env.GROQ_API_KEY ?? '',
+    model: process.env.GROQ_FALLBACK_MODEL || 'qwen/qwen3-32b',
+    baseUrl: GROQ_BASE_URL,
+    reasoningEffort: process.env.GROQ_FALLBACK_REASONING_EFFORT || 'none',
+  };
+}
+
+/**
+ * Chains clients so a rate-limited / down primary transparently fails over to the next. Advances to
+ * the next client ONLY on a retryable failure (HTTP 429, any 5xx, or a network error with no status)
+ * — a 4xx config error is rethrown immediately (another model won't fix a malformed request). The
+ * caller keeps its own last-resort (DeterministicOracle) for when every client in the chain fails.
+ */
+export function createFailoverClient(
+  entries: { name: string; client: MinimaxClient }[]
+): MinimaxClient {
+  if (entries.length === 0) throw new Error('createFailoverClient: no clients');
+  return {
+    async complete(messages: ChatMessage[], opts: CompleteOptions = {}): Promise<string> {
+      let lastErr: unknown;
+      for (let i = 0; i < entries.length; i++) {
+        const { name, client } = entries[i];
+        try {
+          return await client.complete(messages, opts);
+        } catch (err) {
+          lastErr = err;
+          const status = (err as { status?: number } | undefined)?.status;
+          const retryable = status === undefined || status === 429 || status >= 500;
+          const hasNext = i < entries.length - 1;
+          if (!retryable || !hasNext) throw err;
+          console.warn(
+            `[oracle] model "${name}" failed (status=${status ?? 'network'}); failing over to "${entries[i + 1].name}"`
+          );
+        }
+      }
+      throw lastErr; // unreachable (loop returns or throws), satisfies the type checker
+    },
+  };
+}
+
 /** Real Minimax HTTP client (Node 20 global fetch). Throws clearly if unconfigured. */
 export function createMinimaxClient(config: MinimaxConfig): MinimaxClient {
   return {
@@ -118,7 +167,11 @@ export function createMinimaxClient(config: MinimaxConfig): MinimaxClient {
 
       if (!res.ok) {
         const body = await res.text().catch(() => '');
-        throw new Error(`Minimax HTTP ${res.status}: ${body.slice(0, 300)}`);
+        // Attach the HTTP status so the failover client can decide whether to try the next model
+        // (429 rate-limit / 5xx) vs give up (4xx config error that another model won't fix).
+        throw Object.assign(new Error(`Minimax HTTP ${res.status}: ${body.slice(0, 300)}`), {
+          status: res.status,
+        });
       }
       const data: unknown = await res.json();
       const content = extractContent(data);
