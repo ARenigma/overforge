@@ -37,9 +37,31 @@ app.use((_req, res, next) => {
   next();
 });
 
+// Opt-in preview allowance. When CORS_PREVIEW_REGEX is unset (prod default) only FRONTEND_URL is
+// allowed — byte-for-byte the previous static behavior. When set, an origin ALSO matching the
+// (anchored) regex is allowed, so per-deploy Vercel preview origins can reach this single backend
+// during MR E2E. credentials:true is preserved; the candidate token rides in the request body (not
+// a cookie), so an allowed preview origin gains no ambient cross-origin secret.
+const previewRe: RegExp | null = process.env.CORS_PREVIEW_REGEX
+  ? new RegExp(process.env.CORS_PREVIEW_REGEX)
+  : null;
+if (process.env.NODE_ENV === 'production' && previewRe) {
+  console.warn(
+    `[cors] CORS_PREVIEW_REGEX is ACTIVE in production: ${previewRe.source} — preview origins may call this backend`
+  );
+}
+
 app.use(
   cors({
-    origin: frontendUrl,
+    origin: (origin, cb) => {
+      // No Origin header (same-origin, curl, health checks, server-to-server) → allow.
+      if (!origin) return cb(null, true);
+      if (origin === frontendUrl) return cb(null, true);
+      if (previewRe && previewRe.test(origin)) return cb(null, true);
+      // Silent-deny: the cors package omits the ACAO header and the browser blocks — matching the
+      // old static-origin behavior. Throwing here would surface denied origins as 500s (log noise).
+      return cb(null, false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

@@ -39,6 +39,10 @@ export const config = {
    *  rewritten to this — e.g. point a `next dev` on http://localhost:3000 (or a Vercel preview) at
    *  the prod backend. Unset → use the link as the backend built it (its FRONTEND_URL). */
   frontendUrl: process.env.OF_FRONTEND_URL,
+  /** Vercel "Protection Bypass for Automation" secret. When set, the invite link gets the
+   *  x-vercel-protection-bypass params so the headless browser clears SSO-walled preview deploys
+   *  (Vercel sets a bypass cookie on first load). Only needed when targeting a protected preview. */
+  vercelBypass: process.env.OF_VERCEL_BYPASS,
   /** Supabase project — public URL + anon key (fall back to frontend/.env.local). */
   supabaseUrl: required(
     'OF_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL',

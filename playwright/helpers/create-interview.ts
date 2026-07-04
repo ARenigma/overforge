@@ -49,5 +49,14 @@ export async function createInterview(opts: CreateOpts = {}): Promise<CreatedInt
     u.host = override.host;
     json.link = u.toString();
   }
+  // Clear a Vercel SSO-protected preview: the bypass params make Vercel's edge set a bypass cookie
+  // on the first load, so the headless browser reaches the app instead of the login wall. Vercel
+  // consumes its own params; the candidate ?t= token survives.
+  if (config.vercelBypass) {
+    const u = new URL(json.link);
+    u.searchParams.set('x-vercel-protection-bypass', config.vercelBypass);
+    u.searchParams.set('x-vercel-set-bypass-cookie', 'true');
+    json.link = u.toString();
+  }
   return json;
 }

@@ -172,6 +172,45 @@ e2e-mimic:
     paths: [playwright/playwright-report, playwright/test-results]
     expire_in: 7 days
 
+# ─────────────────────── Optional: candidate-mimic vs a Vercel PREVIEW (manual, MR-only) ───
+# Same mimic, but against a fresh Vercel PREVIEW deploy of this MR's frontend (backend stays prod).
+# So a frontend PR gets a full-interview smoke BEFORE merge. Manual + gated on the secrets so it
+# never runs on a normal MR push (deploys a preview + creates real interviews + burns oracle/TTS).
+# Preview deploys are SSO-walled → the mimic clears them with the Vercel automation-bypass secret
+# (OF_VERCEL_BYPASS, via URL param). REQUIRES the prod backend to have CORS_PREVIEW_REGEX set
+# (deploy/backend.env) or the preview room is CORS-blocked calling the prod backend.
+# CI vars: VERCEL_TOKEN, OF_VERCEL_BYPASS, OF_TEST_PASSWORD (all masked), OF_SUPABASE_URL/ANON_KEY.
+e2e-mimic-preview:
+  stage: deploy
+  image: mcr.microsoft.com/playwright:v1.48.0-jammy
+  needs: []
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" && $OF_TEST_PASSWORD && $VERCEL_TOKEN && $OF_VERCEL_BYPASS'
+      when: manual
+  allow_failure: true
+  variables:
+    HEADLESS: '1'
+    VERCEL_ORG_ID: 'team_3gHsyR3zCdpVWtnv3r0SJ5Vq'
+    VERCEL_PROJECT_ID: 'prj_l87xKr7EHmwof8lhSHquhXlPEL5B'
+  before_script:
+    - apt-get update && apt-get install -y ffmpeg
+  script:
+    # Deploy a preview (remote build — same pattern as deploy-frontend, minus --prod). The ORG/PROJECT
+    # id env vars link the unlinked dir; the CLI prints the deploy URL as its last stdout line.
+    - cd frontend
+    - npx --yes vercel@latest deploy --yes --token="$VERCEL_TOKEN" > ../preview-url.txt 2> ../preview-build.log || (cat ../preview-build.log; exit 1)
+    - PREVIEW_URL="$(grep -Eo 'https://overforge-[a-z0-9-]+-arenigmas-projects\.vercel\.app' ../preview-url.txt | tail -n1)"
+    - echo "Preview = $PREVIEW_URL"
+    - case "$PREVIEW_URL" in https://overforge-*-arenigmas-projects.vercel.app): ;; *) echo "Unexpected preview URL"; cat ../preview-url.txt; exit 1;; esac
+    # Run the mimic against the preview frontend + prod backend. OF_API_URL unset → env.ts default (VPS).
+    - cd ../playwright && npm ci --no-audit --no-fund && npx playwright install chromium
+    - bash fixtures/make-fixtures.sh || true
+    - OF_FRONTEND_URL="$PREVIEW_URL" npm run test:mimic
+  artifacts:
+    when: always
+    paths: [playwright/playwright-report, playwright/test-results, preview-build.log]
+    expire_in: 7 days
+
 # ─────────────────────── 5. Deploy frontend → Vercel (private repo, no git link) ───
 # Runs on main once VERCEL_TOKEN (masked) is set in CI/CD variables. The Vercel project
 # already holds the NEXT_PUBLIC_* vars, so the remote build embeds them. Vercel never
