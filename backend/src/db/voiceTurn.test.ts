@@ -16,7 +16,20 @@ describe('voice-turn telemetry field coercion', () => {
     return Math.max(0, v);
   };
 
-  const VALID_COMMITS = new Set(['smartturn', 'backstop', 'maxlen', 'false-fire']);
+  const VALID_COMMITS = new Set([
+    'smartturn',
+    'backstop',
+    'maxlen',
+    'assemblyai_eot',
+    'soniox_eot',
+  ]);
+
+  const MAX_TRANSCRIPT_CHARS = 4000;
+  // Mirror of the `toText` helper in the route: strings only, length-capped, else null.
+  const toText = (v: unknown): string | null => {
+    if (typeof v !== 'string') return null;
+    return v.slice(0, MAX_TRANSCRIPT_CHARS);
+  };
 
   describe('toNum (route coercion)', () => {
     test('passes through finite positive numbers', () => {
@@ -71,15 +84,47 @@ describe('voice-turn telemetry field coercion', () => {
 
   describe('commit validation', () => {
     test('accepts all valid commit kinds', () => {
-      for (const c of ['smartturn', 'backstop', 'maxlen', 'false-fire']) {
+      for (const c of ['smartturn', 'backstop', 'maxlen', 'assemblyai_eot', 'soniox_eot']) {
         expect(VALID_COMMITS.has(c)).toBe(true);
       }
+    });
+
+    test('accepts assemblyai_eot (regression: this being missing 400-rejected all AAI telemetry)', () => {
+      expect(VALID_COMMITS.has('assemblyai_eot')).toBe(true);
+    });
+
+    test('rejects phases that are not commit kinds', () => {
+      // false-fire / hallucination / done are PHASE values, never commit kinds.
+      expect(VALID_COMMITS.has('false-fire')).toBe(false);
+      expect(VALID_COMMITS.has('hallucination')).toBe(false);
+      expect(VALID_COMMITS.has('done')).toBe(false);
     });
 
     test('rejects unknown commit kinds', () => {
       expect(VALID_COMMITS.has('unknown')).toBe(false);
       expect(VALID_COMMITS.has('')).toBe(false);
       expect(VALID_COMMITS.has('SMARTTURN')).toBe(false);
+    });
+  });
+
+  describe('toText (transcript coercion)', () => {
+    test('passes through normal strings', () => {
+      expect(toText('binary search over the sorted array')).toBe(
+        'binary search over the sorted array'
+      );
+      expect(toText('')).toBe('');
+    });
+
+    test('returns null for non-strings', () => {
+      expect(toText(null)).toBeNull();
+      expect(toText(undefined)).toBeNull();
+      expect(toText(42)).toBeNull();
+      expect(toText({ text: 'x' })).toBeNull();
+    });
+
+    test('caps length at MAX_TRANSCRIPT_CHARS', () => {
+      const long = 'a'.repeat(MAX_TRANSCRIPT_CHARS + 500);
+      expect(toText(long)?.length).toBe(MAX_TRANSCRIPT_CHARS);
     });
   });
 

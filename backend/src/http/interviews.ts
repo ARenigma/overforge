@@ -465,7 +465,15 @@ router.post('/:id/finish', async (req: Request, res: Response): Promise<void> =>
 // the service-role client) writes the row.  Best-effort: the voice side fires-and-forgets,
 // so a 500 here is harmless.  Rate-limited to 120 req/10 min per token (≈ one per turn).
 
-const VALID_COMMITS = new Set(['smartturn', 'backstop', 'maxlen', 'false-fire']);
+// The EOT "commit kind" the voice service reports per turn. These are the endpointer/stream
+// reasons a turn was committed — NOT the phase (false-fire / hallucination / done are phases).
+// assemblyai_eot MUST be here or the AAI streaming path's telemetry is silently 400-rejected;
+// soniox_eot covers the dev-only alternate-primary shadow path.
+const VALID_COMMITS = new Set(['smartturn', 'backstop', 'maxlen', 'assemblyai_eot', 'soniox_eot']);
+
+// Candidate speech can be long; cap stored transcripts so a runaway turn can't bloat a telemetry
+// row. Generous — a normal spoken answer is well under this.
+const MAX_TRANSCRIPT_CHARS = 4000;
 
 router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void> => {
   try {
@@ -482,6 +490,10 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       phase,
       empty,
       terminal,
+      primaryTranscript,
+      shadowEngine,
+      shadowTranscript,
+      shadowSttMs,
     } = req.body as {
       token?: string;
       requestId?: string;
@@ -494,6 +506,10 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       phase?: string;
       empty?: unknown;
       terminal?: unknown;
+      primaryTranscript?: unknown;
+      shadowEngine?: unknown;
+      shadowTranscript?: unknown;
+      shadowSttMs?: unknown;
     };
 
     await validateCandidate(id, token ?? '');
@@ -513,6 +529,11 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       const n = Number(v);
       return isFinite(n) ? Math.max(0, n) : null;
     };
+    // Transcript fields: accept strings only, length-capped; anything else → null.
+    const toText = (v: unknown): string | null => {
+      if (typeof v !== 'string') return null;
+      return v.slice(0, MAX_TRANSCRIPT_CHARS);
+    };
 
     await recordVoiceTurn(id, {
       requestId: typeof requestId === 'string' ? requestId : null,
@@ -525,6 +546,10 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       phase: typeof phase === 'string' ? phase : null,
       empty: empty === true,
       terminal: terminal === true,
+      primaryTranscript: toText(primaryTranscript),
+      shadowEngine: typeof shadowEngine === 'string' ? shadowEngine.slice(0, 32) : null,
+      shadowTranscript: toText(shadowTranscript),
+      shadowSttMs: toNum(shadowSttMs),
     });
 
     res.status(204).end();

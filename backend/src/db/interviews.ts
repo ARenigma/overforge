@@ -327,6 +327,14 @@ export interface VoiceTurnRecord {
   phase: string | null | undefined;
   empty: boolean;
   terminal: boolean;
+  /** Primary-engine transcript for this turn — the pairwise reference for A/B disagreement. */
+  primaryTranscript?: string | null;
+  /** Shadow STT engine run in parallel on the same audio (e.g. "soniox"); null when none ran. */
+  shadowEngine?: string | null;
+  /** Shadow transcript for the same audio window as primaryTranscript (log-only). */
+  shadowTranscript?: string | null;
+  /** Rough shadow finalization latency (ms). */
+  shadowSttMs?: number | null;
 }
 
 /** Insert one voice-turn telemetry row.  Throws on DB error (the route swallows it). */
@@ -351,6 +359,10 @@ export async function recordVoiceTurn(interviewId: string, t: VoiceTurnRecord): 
     phase: t.phase ?? null,
     empty: t.empty,
     terminal: t.terminal,
+    primary_transcript: t.primaryTranscript ?? null,
+    shadow_engine: t.shadowEngine ?? null,
+    shadow_transcript: t.shadowTranscript ?? null,
+    shadow_stt_ms: safeNum(t.shadowSttMs),
   });
 
   if (error) throw new Error(`recordVoiceTurn: ${error.message}`);
