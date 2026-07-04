@@ -65,6 +65,13 @@ _CLOSE_TIMEOUT_S = 3.0
 #: Sentinel enqueued by :meth:`close` to tell the sender to emit Soniox's end-of-audio frame.
 _EOS = object()
 
+#: Sentinel enqueued by :meth:`flush_turn` → the sender emits a mid-stream ``{"type":"finalize"}``
+#: control frame, flushing pending tokens to ``is_final`` WITHOUT ending the session.
+_FINALIZE = object()
+
+#: Control tokens Soniox emits (finalize / endpoint sentinels) — not real transcript, so skip them.
+_CONTROL_TOKENS = frozenset({"<fin>", "<end>"})
+
 
 def _f32_to_pcm16(pcm_f32: AudioArray) -> bytes:
     """Convert float32 [-1, 1] mono PCM to little-endian int16 bytes (``pcm_s16le``)."""
@@ -216,6 +223,19 @@ class SonioxShadow:
             except (asyncio.QueueEmpty, asyncio.QueueFull):
                 pass
 
+    async def flush_turn(self) -> None:
+        """Finalize all audio streamed so far MID-STREAM (the session stays open) so the current
+        turn's tail tokens become ``is_final`` before the next :meth:`take_snapshot`. Without this,
+        Soniox leaves the tail non-final until the next window's audio arrives, so a snapshot taken
+        at the primary's end-of-turn misses the tail (it bleeds into the next turn). Best-effort;
+        never raises — the shadow is an observer."""
+        if self.failed or self._closed or self._ws is None:
+            return
+        try:
+            self._send_q.put_nowait(_FINALIZE)
+        except asyncio.QueueFull:
+            pass
+
     def reset(self) -> None:
         """Begin a new per-turn listening window: clear the accumulator + window clock.
 
@@ -283,6 +303,14 @@ class SonioxShadow:
                     if self._ws is not None:
                         await self._ws.send("")  # Soniox end-of-audio
                     return
+                if item is _FINALIZE:
+                    # Flush buffered audio FIRST (so finalize covers it), then the control frame.
+                    if buf and self._ws is not None:
+                        await self._ws.send(bytes(buf))
+                        buf.clear()
+                    if self._ws is not None:
+                        await self._ws.send('{"type": "finalize"}')  # flush → is_final; stays open
+                    continue
                 buf.extend(item)  # type: ignore[arg-type]
                 if len(buf) >= self._min_send_bytes and self._ws is not None:
                     await self._ws.send(bytes(buf))
@@ -304,9 +332,13 @@ class SonioxShadow:
                 msg = json.loads(raw)
                 got_final = False
                 for tok in msg.get("tokens", []):
-                    if tok.get("is_final"):
-                        self._finals.append(tok.get("text", ""))
-                        got_final = True
+                    if not tok.get("is_final"):
+                        continue
+                    text = tok.get("text", "")
+                    if text in _CONTROL_TOKENS:
+                        continue  # finalize/endpoint sentinels — control tokens, not transcript
+                    self._finals.append(text)
+                    got_final = True
                 if got_final:
                     self._last_final_t = time.perf_counter()
                 if msg.get("finished"):

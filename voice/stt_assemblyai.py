@@ -78,6 +78,20 @@ _RECONNECT_BACKOFF_S = 0.75
 _OPEN_TIMEOUT_S = 10.0
 _TERMINATE_TIMEOUT_S = 3.0
 
+# Default transcription prompt (universal-3-5-pro / u3-pro only). On u3-pro, end-of-turn is
+# PUNCTUATION-driven: the model committing a lone filler as "Um." (with a terminal period) is what
+# fires a premature end-of-turn (observed in prod). This is AssemblyAI's own recommended fix —
+# rule 5 makes the model withhold terminal punctuation after a filler, so a thinking pause after
+# "um"/"uh" does NOT commit a turn. MUTUALLY EXCLUSIVE with keyterms_prompt (AAI rejects both).
+_DEFAULT_PROMPT = (
+    "Transcribe verbatim. Rules:\n"
+    "1) Always include punctuation in output.\n"
+    "2) Use period/question mark ONLY for complete sentences.\n"
+    "3) Use comma for mid-sentence pauses.\n"
+    "4) Use no punctuation for incomplete trailing speech.\n"
+    "5) Filler words (um, uh, so, like) indicate the speaker will continue."
+)
+
 
 def _f32_to_pcm16(pcm_f32: AudioArray) -> bytes:
     """Convert float32 [-1, 1] mono PCM to little-endian int16 bytes (``pcm_s16le``)."""
@@ -98,6 +112,11 @@ class AssemblyAIConfig:
     sample_rate: int = _SR
     format_turns: bool = True
     keyterms: tuple[str, ...] = ()
+    #: → prompt (u3-pro only): steers punctuation, which IS turn detection on u3-pro. The default
+    #: filler-continuation prompt stops a lone "um"/"uh" + thinking pause from getting terminal
+    #: punctuation (→ no premature end-of-turn). MUTUALLY EXCLUSIVE with keyterms_prompt; set to ""
+    #: to disable (falls back to AAI's built-in default + keyterms).
+    prompt: str = _DEFAULT_PROMPT
     #: → end_of_turn_confidence_threshold (confidence-based tiers only; harmless otherwise).
     end_of_turn_confidence: float = 0.4
     #: → min_turn_silence (ms). 800 ms ≈ the validated local hold gate — clause pauses uncut.
@@ -114,7 +133,12 @@ class AssemblyAIConfig:
         """Build from the environment. Env vars (all optional except the key):
 
         - ``ASSEMBLYAI_API_KEY``          raw API key (required for the assemblyai provider).
-        - ``STT_KEYTERMS``                comma-separated domain terms → ``keyterms_prompt``.
+        - ``STT_KEYTERMS``                comma-separated domain terms → ``keyterms_prompt`` (only
+                                          used when ``STT_PROMPT`` is empty — the two are mutually
+                                          exclusive on u3-pro).
+        - ``STT_PROMPT``                  transcription prompt (u3-pro) steering punctuation/turns;
+                                          defaults to the filler-continuation prompt. Set to "" to
+                                          disable and fall back to AAI's built-in default.
         - ``STT_SPEECH_MODEL``            tier override (default ``universal-3-5-pro``).
         - ``STT_EOT_CONFIDENCE``          → ``end_of_turn_confidence_threshold``.
         - ``STT_MIN_TURN_SILENCE_MS``     → ``min_turn_silence``.
@@ -126,6 +150,7 @@ class AssemblyAIConfig:
             api_key=e.get("ASSEMBLYAI_API_KEY", ""),
             speech_model=e.get("STT_SPEECH_MODEL", "universal-3-5-pro"),
             keyterms=keyterms,
+            prompt=e.get("STT_PROMPT", _DEFAULT_PROMPT),
             end_of_turn_confidence=float(e.get("STT_EOT_CONFIDENCE", "0.4")),
             min_turn_silence_ms=int(e.get("STT_MIN_TURN_SILENCE_MS", "800")),
             max_turn_silence_ms=int(e.get("STT_MAX_TURN_SILENCE_MS", "3000")),
@@ -143,7 +168,11 @@ class AssemblyAIConfig:
             "min_turn_silence": str(self.min_turn_silence_ms),
             "max_turn_silence": str(self.max_turn_silence_ms),
         }
-        if self.keyterms:
+        # `prompt` and `keyterms_prompt` are MUTUALLY EXCLUSIVE on u3-pro (AAI rejects a request
+        # that sends both), so the prompt wins when set; keyterms only apply when no prompt.
+        if self.prompt:
+            params["prompt"] = self.prompt
+        elif self.keyterms:
             params["keyterms_prompt"] = json.dumps(list(self.keyterms))
         if self.language and self.language != "en":
             # universal-3-5-pro / universal-streaming-multilingual accept language_codes;

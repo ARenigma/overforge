@@ -313,6 +313,38 @@ async def test_real_short_answer_not_filtered() -> None:
     assert session.take_rearm() is False  # a real turn must NOT request a re-arm
 
 
+async def test_filler_only_turn_kept_listening_not_answered() -> None:
+    # A thinking-pause filler the STT committed as a turn ("Um.") must NOT be submitted as an answer
+    # (that fires a spurious follow-up). Drop it, re-arm, and request a browser mic re-arm.
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("Um.")
+    brain = FakeBrain()
+    tel = FakeTelemetrySink()
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        telemetry=tel,
+    )
+    turn = await _drive(session, 5)
+    await asyncio.sleep(0)
+    assert turn is None
+    assert len(brain.calls) == 0  # never submitted to the brain
+    assert session.take_rearm() is True  # browser mic re-armed to keep listening
+    assert tel.records[0].phase == "filler_continuation"
+
+
+async def test_multiword_filler_dropped() -> None:
+    # Every token a filler ("um, uh") → still a thinking pause; dropped, not answered.
+    ep = FakeEndpointer(fire_after=5)
+    brain = FakeBrain()
+    session = _session(ep, FakeSTT("um, uh"), brain)
+    assert await _drive(session, 5) is None
+    assert len(brain.calls) == 0
+
+
 async def test_streaming_finalize_transcribes_only_the_tail(monkeypatch) -> None:
     # Phase 2b: with STT_STREAMING on and a segment already committed during LISTENING, the EOT
     # finalize must transcribe ONLY the trailing tail (not the whole buffer) and concatenate it onto

@@ -151,6 +151,27 @@ async def test_accumulates_finals_and_snapshot_consumes() -> None:
     await shadow.close()
 
 
+async def test_flush_turn_sends_finalize_control_frame() -> None:
+    ws = FakeWs()
+    shadow = _shadow(ws)
+    await shadow.start()
+    await shadow.feed(_frame())
+    await shadow.flush_turn()
+    await shadow.close()  # drains the sender (finalize is enqueued before the EOS)
+    assert '{"type": "finalize"}' in ws.sent  # mid-stream flush control frame was sent
+
+
+async def test_control_tokens_excluded_from_snapshot() -> None:
+    # The <fin> (finalize) / <end> (endpoint) sentinels are control tokens, never transcript.
+    ws = FakeWs([_tokens_msg((" binary", True), ("<fin>", True), (" search", True), finished=True)])
+    shadow = _shadow(ws)
+    await shadow.start()
+    assert shadow._recv_task is not None
+    await asyncio.wait_for(shadow._recv_task, timeout=1)
+    assert shadow.take_snapshot()[0] == "binary search"  # <fin> dropped
+    await shadow.close()
+
+
 async def test_partials_are_not_accumulated() -> None:
     ws = FakeWs([_tokens_msg((" draft", False), (" final", True), finished=True)])
     shadow = _shadow(ws)
@@ -221,6 +242,7 @@ class FakeShadow:
         self.fed: list[np.ndarray] = []
         self.started = False
         self.reset_calls = 0
+        self.flush_calls = 0
         self.closed = False
 
     async def start(self) -> None:
@@ -228,6 +250,9 @@ class FakeShadow:
 
     async def feed(self, pcm_f32: np.ndarray) -> None:
         self.fed.append(np.asarray(pcm_f32))
+
+    async def flush_turn(self) -> None:
+        self.flush_calls += 1
 
     def reset(self) -> None:
         self.reset_calls += 1
@@ -263,6 +288,7 @@ async def test_session_tees_frames_and_records_both_transcripts() -> None:
     assert turn is not None
     assert shadow.started
     assert len(shadow.fed) == 3  # every LISTENING frame was tee'd to the shadow
+    assert shadow.flush_calls >= 1  # finalize fired at end-of-turn so the snapshot gets the tail
     assert len(tel.records) == 1
     rec = tel.records[0]
     assert rec.primary_transcript == "primary transcript"

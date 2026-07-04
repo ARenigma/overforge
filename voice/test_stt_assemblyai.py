@@ -160,9 +160,11 @@ def _stream_session(
 
 
 def test_query_params_use_verified_v3_names() -> None:
+    # prompt="" exercises the keyterms_prompt path (prompt and keyterms are mutually exclusive).
     cfg = AssemblyAIConfig(
         api_key="k",
         keyterms=("Overforge", "hash map"),
+        prompt="",
         end_of_turn_confidence=0.4,
         min_turn_silence_ms=800,
         max_turn_silence_ms=3000,
@@ -176,8 +178,28 @@ def test_query_params_use_verified_v3_names() -> None:
     assert params["min_turn_silence"] == "800"
     assert params["max_turn_silence"] == "3000"
     assert json.loads(params["keyterms_prompt"]) == ["Overforge", "hash map"]
+    assert "prompt" not in params  # empty prompt is not sent
     assert "language_codes" not in params  # omitted for English (default)
     assert cfg.ws_url().startswith("wss://streaming.assemblyai.com/v3/ws?")
+
+
+def test_prompt_replaces_keyterms_and_is_default_on() -> None:
+    # A prompt is set by default (from_env) and, being mutually exclusive with keyterms_prompt on
+    # u3-pro, REPLACES it — a request must never send both.
+    cfg = AssemblyAIConfig.from_env({"ASSEMBLYAI_API_KEY": "k", "STT_KEYTERMS": "DAG,Airflow"})
+    assert cfg.prompt  # default filler-continuation prompt is on
+    assert "filler" in cfg.prompt.lower()
+    params = cfg.query_params()
+    assert params["prompt"] == cfg.prompt
+    assert "keyterms_prompt" not in params  # prompt wins; both are never sent together
+
+    # STT_PROMPT="" disables the prompt → keyterms_prompt applies again.
+    cfg2 = AssemblyAIConfig.from_env(
+        {"ASSEMBLYAI_API_KEY": "k", "STT_KEYTERMS": "DAG", "STT_PROMPT": ""}
+    )
+    params2 = cfg2.query_params()
+    assert "prompt" not in params2
+    assert json.loads(params2["keyterms_prompt"]) == ["DAG"]
 
 
 def test_config_from_env() -> None:

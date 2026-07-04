@@ -25,6 +25,7 @@ import asyncio
 import enum
 import logging
 import os
+import re
 import time
 import uuid
 
@@ -99,6 +100,22 @@ def _is_hallucination(text: str) -> bool:
     if not normalized:
         return True  # pure punctuation / dots
     return normalized in _WHISPER_HALLUCINATIONS
+
+
+# Disfluency/filler interjections a candidate emits while THINKING, not answering. A turn whose
+# EVERY token is one of these is a thinking pause the STT committed as a turn (e.g. AAI punctuating
+# a lone "Um." as a complete sentence) — we keep listening instead of treating it as a thin answer
+# and firing a follow-up. Interjections ONLY (never "ok"/"so"/"like") so a real short reply
+# ("no", "yes", "three") is never eaten. Engine-agnostic backstop for the AAI turn-prompt fix.
+_FILLER_WORDS = frozenset(
+    {"um", "umm", "uh", "uhh", "uhm", "hmm", "hm", "hmmm", "mhm", "mm", "er", "err", "eh", "ah"}
+)
+
+
+def _is_filler_only(text: str) -> bool:
+    """True if every token in ``text`` is a filler interjection (a thinking pause, not an answer)."""  # noqa: E501
+    tokens = re.findall(r"[a-z0-9]+", text.lower())
+    return len(tokens) > 0 and all(tok in _FILLER_WORDS for tok in tokens)
 
 # Backend FSM phases that mean the interview is over. The backend normalizes every terminal path to
 # 'done'; 'scoring' is accepted defensively in case a transitional state ever leaks through.
@@ -454,6 +471,23 @@ class VoiceSession:
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
 
+    def _flush_shadow(self) -> None:
+        """Fire the shadow's mid-stream finalize (fire-and-forget) at end-of-turn so its tail tokens
+        become final before we snapshot (~brain+speak later). Best-effort; never blocks the turn."""
+        if self._shadow is None:
+            return
+        shadow = self._shadow
+
+        async def _run() -> None:
+            try:
+                await shadow.flush_turn()
+            except Exception:
+                logger.exception("Shadow flush failed — snapshot may miss this turn's tail.")
+
+        task = asyncio.create_task(_run(), name="shadow-flush")
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
     def _snapshot_shadow(self) -> tuple[str | None, str | None, float | None]:
         """Consume the shadow's current-window ``(engine, transcript, latency_ms)`` for telemetry.
 
@@ -602,6 +636,10 @@ class VoiceSession:
         """
         rid = self._request_id
 
+        # Ask the shadow (if any) to finalize its tail NOW so the per-turn snapshot taken in
+        # _log_turn (after brain + speak) captures this turn's full transcript, not a lagged one.
+        self._flush_shadow()
+
         if not transcript:
             # False fire (cough / clipped silence): never submit an empty answer; re-arm + listen.
             self._log_turn(
@@ -618,6 +656,20 @@ class VoiceSession:
             logger.debug("Dropping STT hallucination: %r (%.1fs audio)", transcript, audio_s)
             self._log_turn(
                 rid, reason, audio_s, stt_ms, None, None, "hallucination",
+                transcript=transcript, empty=True,
+            )
+            self._recover()
+            self._rearm_pending = True  # browser was disarmed by {thinking}; tell it to re-arm
+            return None
+
+        if _is_filler_only(transcript):
+            # The candidate is thinking out loud ("um", "uh", "hmm"), not answering — the STT
+            # committed a filler as a turn (e.g. AAI punctuating "Um." as a sentence). Never submit
+            # it as an answer (that fires a spurious follow-up). Keep listening: re-arm + re-arm the
+            # browser mic, exactly like a false-fire. Logged phase=filler_continuation for tuning.
+            logger.debug("Filler-only turn %r (%.1fs) — keep listening.", transcript, audio_s)
+            self._log_turn(
+                rid, reason, audio_s, stt_ms, None, None, "filler_continuation",
                 transcript=transcript, empty=True,
             )
             self._recover()
