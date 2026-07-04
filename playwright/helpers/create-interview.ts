@@ -40,5 +40,14 @@ export async function createInterview(opts: CreateOpts = {}): Promise<CreatedInt
   }
   const json = (await res.json()) as CreatedInterview;
   if (!json.link) throw new Error('createInterview returned no link');
+  // Optionally retarget the frontend origin (local next dev / preview deploy) while keeping the
+  // path + token the backend issued.
+  if (config.frontendUrl) {
+    const u = new URL(json.link);
+    const override = new URL(config.frontendUrl);
+    u.protocol = override.protocol;
+    u.host = override.host;
+    json.link = u.toString();
+  }
   return json;
 }

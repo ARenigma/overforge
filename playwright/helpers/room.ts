@@ -85,22 +85,44 @@ export class CandidateRoom {
     await this.waitForSettled(timeout);
   }
 
-  /** True once the coding phase has begun (the problem panel is mounted). */
-  async isCoding(): Promise<boolean> {
-    return (await this.page.getByTestId('problem-panel').count()) > 0;
+  /** Authoritative interview phase, read from the room root (set synchronously with the FSM state,
+   *  so it never races the async problem-panel fetch). One of greeting|oral|handoff|coding|
+   *  wrap_up|done, or '' before the room mounts. */
+  async phase(): Promise<string> {
+    const root = this.page.getByTestId('interview-root');
+    if ((await root.count()) === 0) return '';
+    return (await root.getAttribute('data-phase')) ?? '';
   }
 
-  /** Poll until the coding phase begins or we run out of oral turns. Answers each interviewer
-   *  question with a substantive canned reply (quality doesn't gate FSM progression). */
-  async advanceThroughOral(cannedAnswer: string, maxTurns = 6): Promise<number> {
+  async isCoding(): Promise<boolean> {
+    return (await this.phase()) === 'coding';
+  }
+
+  /** Answer until the FSM leaves the oral rounds (reaches coding / wrap-up / done) or we run out of
+   *  turns. The interviewer may probe/counter each answer, so allow generous headroom. Answers with
+   *  a substantive canned reply (quality doesn't gate FSM progression). */
+  async advanceThroughOral(cannedAnswer: string, maxTurns = 10): Promise<number> {
+    const oralPhases = new Set(['greeting', 'oral', 'handoff', '']);
     let turns = 0;
     for (let i = 0; i < maxTurns; i++) {
-      if (await this.isCoding()) break;
+      const p = await this.phase();
+      if (!oralPhases.has(p)) break; // reached coding / wrap_up / done
       if (await this.isDone()) break;
       await this.answer(cannedAnswer);
       turns++;
     }
     return turns;
+  }
+
+  /** Wait until the coding phase begins (root data-phase flips), then the problem panel mounts. */
+  async waitForCoding(timeout = 30_000): Promise<void> {
+    await this.page.waitForFunction(
+      () =>
+        document.querySelector('[data-testid="interview-root"]')?.getAttribute('data-phase') ===
+        'coding',
+      undefined,
+      { timeout }
+    );
   }
 
   async problemTitle(timeout = 30_000): Promise<string> {

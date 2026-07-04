@@ -1175,7 +1175,11 @@ export default function InterviewPage() {
   const progressPct = (phaseIdx / (PHASE_ORDER.length - 1)) * 100;
 
   return (
-    <div className="h-[100svh] bg-background text-foreground flex flex-col overflow-hidden">
+    <div
+      data-testid="interview-root"
+      data-phase={phase}
+      className="h-[100svh] bg-background text-foreground flex flex-col overflow-hidden"
+    >
       {/* Transient hint when a paste/drop is blocked (integrity). */}
       {pasteBlocked && (
         <div

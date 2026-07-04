@@ -35,6 +35,10 @@ function required(name: string, value: string | undefined): string {
 export const config = {
   /** Backend REST base (candidate + interviewer API). */
   apiUrl: process.env.OF_API_URL ?? 'https://140.245.14.50.sslip.io',
+  /** Optional override for the candidate frontend origin. When set, the invite link's origin is
+   *  rewritten to this — e.g. point a `next dev` on http://localhost:3000 (or a Vercel preview) at
+   *  the prod backend. Unset → use the link as the backend built it (its FRONTEND_URL). */
+  frontendUrl: process.env.OF_FRONTEND_URL,
   /** Supabase project — public URL + anon key (fall back to frontend/.env.local). */
   supabaseUrl: required(
     'OF_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_URL',

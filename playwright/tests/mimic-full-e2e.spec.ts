@@ -21,6 +21,9 @@ const GENERIC_ATTEMPT = ['import sys', 'data = sys.stdin.read().split()', 'print
 );
 
 test('candidate mimic: consent -> oral -> coding -> run, no hidden-test leak', async ({ page }) => {
+  // The dev interview caps at ~2 min from begin; the mimic drives the interactive path then waits
+  // out the cap to observe the terminal state — give the whole run generous headroom.
+  test.setTimeout(220_000);
   const interview = await createInterview({ language: 'python', level: 'mid' });
   test.info().annotations.push({ type: 'interview', description: interview.id });
   const room = new CandidateRoom(page);
@@ -33,9 +36,10 @@ test('candidate mimic: consent -> oral -> coding -> run, no hidden-test leak', a
   expect(greeting.length, 'greeting should be non-empty').toBeGreaterThan(10);
   console.log(`[greeting] ${greeting.slice(0, 120)}`);
 
-  // 2) Oral round — answer until the coding phase begins.
+  // 2) Oral round — answer until the FSM leaves the oral rounds.
   const turns = await room.advanceThroughOral(ORAL_ANSWER);
-  console.log(`[oral] answered ${turns} turn(s)`);
+  console.log(`[oral] answered ${turns} turn(s); phase now = ${await room.phase()}`);
+  await room.waitForCoding(30_000);
   expect(await room.isCoding(), 'should reach the coding phase after the oral round').toBeTruthy();
 
   // 3) Coding round — the assigned problem must be shown (statement, never hidden tests).
@@ -58,7 +62,7 @@ test('candidate mimic: consent -> oral -> coding -> run, no hidden-test leak', a
   await room.assertNoHiddenTestLeak();
 
   // 6) Terminal: the interview concludes — either by completing the flow or by the dev time cap.
-  await room.waitForDone(150_000);
+  await room.waitForDone(140_000);
   console.log(`[done] concludedByTime=${await room.concludedByTime()}`);
   expect(await room.isDone()).toBeTruthy();
 });
