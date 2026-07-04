@@ -88,7 +88,7 @@ export function NewInterviewDialog() {
   function resetState() {
     setCandidateEmail('');
     setCandidateName('');
-    setLanguage('any');
+    setLanguage('python');
     setLevel('mid');
     setRoleBrief('');
     setDevMode(false);

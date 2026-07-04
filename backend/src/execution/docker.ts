@@ -91,7 +91,13 @@ const LANGS: Readonly<Record<string, LangSpec>> = {
       fallback: '/work/.cache/go-build',
     },
   },
-  java: { image: 'eclipse-temurin:21-jdk', file: 'Main.java', cmd: 'javac Main.java && java Main' },
+  // -XX:+UseG1GC is JDK21's default, pinned explicitly: ZGC/Shenandoah rely on userfaultfd, which
+  // is unimplemented under gVisor on ARM64 — this keeps Java working when SANDBOX_RUNTIME=runsc.
+  java: {
+    image: 'eclipse-temurin:21-jdk',
+    file: 'Main.java',
+    cmd: 'javac Main.java && java -XX:+UseG1GC Main',
+  },
   cpp: { image: 'gcc:13', file: 'main.cpp', cmd: 'g++ -O2 -o app main.cpp && ./app' },
 };
 
@@ -105,10 +111,18 @@ export interface DockerKernelConfig {
 
 const b64 = (s: string): string => Buffer.from(s ?? '', 'utf8').toString('base64');
 
+// Container runtime. Defaults to stock runc; set SANDBOX_RUNTIME=runsc on a host with gVisor
+// installed to run every sandbox under gVisor's user-space kernel (Sentry) — a ~20-syscall host
+// surface instead of the full Linux ABI. Inert until the env is set, so shipping this is a no-op
+// until the VPS has `runsc` registered; rollback is `unset SANDBOX_RUNTIME` (no redeploy).
+const SANDBOX_RUNTIME = process.env.SANDBOX_RUNTIME ?? 'runc';
+
 export function createDockerKernel(config: DockerKernelConfig = {}): ExecutionKernel {
   const cpus = config.cpus ?? '1';
   const memory = config.memory ?? '256m';
-  const pids = config.pidsLimit ?? 128;
+  // 64 is safe headroom for all 7 langs (JVM G1GC peaks ~25-30 threads under --cpus 1, the GCC
+  // pipeline is ~3 children); verified on the VPS. Lower than the old 128 to shrink the fork surface.
+  const pids = config.pidsLimit ?? 64;
   const wallMs = config.wallTimeoutMs ?? 15_000;
 
   return {
@@ -161,6 +175,8 @@ export function createDockerKernel(config: DockerKernelConfig = {}): ExecutionKe
         '-i',
         '--name',
         containerName,
+        // gVisor / alternate runtime when SANDBOX_RUNTIME is set (else stock runc — no flag).
+        ...(SANDBOX_RUNTIME !== 'runc' ? ['--runtime', SANDBOX_RUNTIME] : []),
         // Images are pre-pulled (deploy/pull-runtimes.sh); never hit a registry at run time.
         '--pull',
         'never',
@@ -185,6 +201,26 @@ export function createDockerKernel(config: DockerKernelConfig = {}): ExecutionKe
         'ALL',
         '--security-opt',
         'no-new-privileges',
+        // No SysV IPC namespace sharing (blocks shared-memory / semaphore side channels).
+        '--ipc',
+        'none',
+        // Resource ulimits (defense-in-depth atop the cgroup caps above):
+        //   core=0      — never write a core dump (no disk churn, no info leak)
+        //   nofile=256  — cap open file descriptors
+        //   nproc=64    — per-UID process cap (shared across UID 65534 containers; ~16/container
+        //                 at EXEC_MAX_CONCURRENCY=4 — raise proportionally if concurrency grows)
+        //   fsize=8MB   — max single-file write (all 7 langs' compiled binaries are <5 MB)
+        '--ulimit',
+        'core=0:0',
+        '--ulimit',
+        'nofile=256:256',
+        '--ulimit',
+        'nproc=64:64',
+        '--ulimit',
+        'fsize=8388608:8388608',
+        // Kill the sandbox first on host OOM, protecting the backend + voice service.
+        '--oom-score-adj',
+        '1000',
         ...cacheArgs,
         ...envArgs,
         '-e',
