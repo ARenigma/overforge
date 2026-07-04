@@ -6,8 +6,14 @@
 import { test, expect } from '@playwright/test';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
-import { createInterview } from '../helpers/create-interview';
+import { createInterview, deleteInterview } from '../helpers/create-interview';
 import { CandidateRoom } from '../helpers/room';
+
+let createdId: string | null = null;
+test.afterEach(async () => {
+  if (createdId) await deleteInterview(createdId);
+  createdId = null;
+});
 
 const HAS_SPEECH = existsSync(resolve(__dirname, '../fixtures/answer.wav'));
 
@@ -16,6 +22,7 @@ test.describe('voice path (STT)', () => {
 
   test('spoken answer transcribes and advances the interview', async ({ page }) => {
     const interview = await createInterview({ language: 'python', level: 'mid' });
+    createdId = interview.id;
     test.info().annotations.push({ type: 'interview', description: interview.id });
     const room = new CandidateRoom(page);
 

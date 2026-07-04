@@ -206,6 +206,11 @@ e2e-mimic-preview:
     - cd ../playwright && npm ci --no-audit --no-fund && npx playwright install chromium
     - bash fixtures/make-fixtures.sh || true
     - OF_FRONTEND_URL="$PREVIEW_URL" npm run test:mimic
+  after_script:
+    # Tear down the throwaway preview deploy so runs don't accrue (best-effort; the mimic itself
+    # deletes its interview row in test teardown). Re-derive the URL — after_script is a fresh shell.
+    - URL="$(grep -Eo 'https://overforge-[a-z0-9-]+-arenigmas-projects\.vercel\.app' preview-url.txt 2>/dev/null | tail -n1)"
+    - if [ -n "$URL" ]; then npx --yes vercel@latest rm "$URL" --yes --token="$VERCEL_TOKEN" || true; fi
   artifacts:
     when: always
     paths: [playwright/playwright-report, playwright/test-results, preview-build.log]

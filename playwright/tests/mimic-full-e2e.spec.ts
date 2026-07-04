@@ -5,8 +5,16 @@
 // correctness never leaks to the candidate view.
 
 import { test, expect } from '@playwright/test';
-import { createInterview } from '../helpers/create-interview';
+import { createInterview, deleteInterview } from '../helpers/create-interview';
 import { CandidateRoom } from '../helpers/room';
+
+// Track the interview this run created so we can delete it afterward — otherwise every mimic run
+// leaves a row in the interviewer's dashboard.
+let createdId: string | null = null;
+test.afterEach(async () => {
+  if (createdId) await deleteInterview(createdId);
+  createdId = null;
+});
 
 const ORAL_ANSWER =
   'Sure. I would start by clarifying the requirements and constraints, then sketch a couple of ' +
@@ -25,6 +33,7 @@ test('candidate mimic: consent -> oral -> coding -> run, no hidden-test leak', a
   // out the cap to observe the terminal state — give the whole run generous headroom.
   test.setTimeout(220_000);
   const interview = await createInterview({ language: 'python', level: 'mid' });
+  createdId = interview.id;
   test.info().annotations.push({ type: 'interview', description: interview.id });
   const room = new CandidateRoom(page);
 

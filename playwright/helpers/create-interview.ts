@@ -60,3 +60,17 @@ export async function createInterview(opts: CreateOpts = {}): Promise<CreatedInt
   }
   return json;
 }
+
+/** Best-effort teardown: permanently delete a mimic-created interview so test runs don't accrue
+ *  rows in the interviewer's dashboard. Never throws (cleanup must not fail a green test). */
+export async function deleteInterview(id: string): Promise<void> {
+  try {
+    const accessToken = await getAccessToken();
+    await fetch(`${config.apiUrl}/api/interviews/${id}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  } catch {
+    // swallow — a leftover test interview is a nuisance, not a failure
+  }
+}
