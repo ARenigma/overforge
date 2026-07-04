@@ -505,7 +505,8 @@ export default function InterviewPage() {
 
   // speak() is defined below but the socket cue handlers need it — use a ref.
   const speakRef = useRef<
-    ((source: 'turn' | 'run', tokenOverride?: string) => Promise<void>) | null
+    | ((source: 'turn' | 'run', tokenOverride?: string, textOverride?: string) => Promise<void>)
+    | null
   >(null);
   const activeTokenRef = useRef<string | null>(null);
   useEffect(() => {
@@ -545,7 +546,10 @@ export default function InterviewPage() {
 
       const doSpeak = async () => {
         try {
-          await speakRef.current?.('turn');
+          // Voice the EXACT utterance from this cue (not a server re-fetch). The idle probe's text
+          // lives only in the voice service and is never persisted, so re-deriving it server-side
+          // replayed the last real turn; passing the cue text makes audio always match what's shown.
+          await speakRef.current?.('turn', undefined, cue.utterance.text);
         } catch (err) {
           // speak() now always resolves (it has its own playback timeout), but guard anyway so the
           // finally — which re-arms the mic — can NEVER be skipped by an unexpected throw.
@@ -884,7 +888,7 @@ export default function InterviewPage() {
   // override is needed right after begin() (the state token hasn't flushed yet). source='run'
   // voices a run-triggered hint (which lives on the code run, not the transcript).
   const speak = useCallback(
-    async (source: 'turn' | 'run', tokenOverride?: string) => {
+    async (source: 'turn' | 'run', tokenOverride?: string, textOverride?: string) => {
       const tok = tokenOverride ?? activeToken;
       if (!tok) return;
       const seq = ++speakSeqRef.current; // a newer turn supersedes this playback
@@ -914,7 +918,7 @@ export default function InterviewPage() {
           const watchdog = setTimeout(stopAll, TTS_STREAM_WATCHDOG_MS);
           let streamed = false;
           try {
-            const res = await speakStream(id, tok, source, ctrl.signal);
+            const res = await speakStream(id, tok, source, ctrl.signal, textOverride);
             if (seq !== speakSeqRef.current) return; // superseded while fetching
             if (res?.body) {
               let ctx = ttsCtxRef.current;
@@ -939,13 +943,14 @@ export default function InterviewPage() {
           // else: nothing was played — fall back to the chunked per-sentence path.
         }
 
-        const first = await speakChunk(id, tok, source, 0);
+        const first = await speakChunk(id, tok, source, 0, textOverride);
         if (!first || seq !== speakSeqRef.current) return;
 
         // Prefetch the remaining sentences in parallel so playback is gapless after the first one,
         // while the first sentence already starts playing in ~1–2s.
         const pending: Array<ReturnType<typeof speakChunk>> = [Promise.resolve(first)];
-        for (let i = 1; i < first.count; i++) pending.push(speakChunk(id, tok, source, i));
+        for (let i = 1; i < first.count; i++)
+          pending.push(speakChunk(id, tok, source, i, textOverride));
 
         for (let i = 0; i < first.count; i++) {
           const r = await pending[i];

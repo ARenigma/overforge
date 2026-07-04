@@ -317,13 +317,14 @@ export async function speakChunk(
   id: string,
   token: string,
   source: 'turn' | 'run',
-  chunk: number
+  chunk: number,
+  text?: string
 ): Promise<{ blob: Blob; count: number } | null> {
   try {
     const res = await fetch(`${BASE_URL}/api/interviews/${id}/speak`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, source, chunk }),
+      body: JSON.stringify({ token, source, chunk, ...(text ? { text } : {}) }),
     });
     if (!res.ok || res.status === 204) return null;
     const count = Number(res.headers.get('X-Chunk-Count') || '1') || 1;
@@ -345,13 +346,14 @@ export async function speakStream(
   id: string,
   token: string,
   source: 'turn' | 'run',
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  text?: string
 ): Promise<Response | null> {
   try {
     const res = await fetch(`${BASE_URL}/api/interviews/${id}/speak-stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, source }),
+      body: JSON.stringify({ token, source, ...(text ? { text } : {}) }),
       signal,
     });
     if (!res.ok || !res.body) return null;
