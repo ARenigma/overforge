@@ -25,10 +25,9 @@ import { createInterview, getMe } from '@/lib/api';
 import { InviteLinkPanel } from './invite-link-panel';
 import { Plus } from 'lucide-react';
 
-// Coding languages the interviewer can assign. 'any' = let the candidate choose in-room
-// (today's behavior); a specific value locks the room to that language.
+// Coding languages the interviewer can assign — the room is always locked to one language
+// (no "candidate chooses": a fixed language keeps grading consistent + testing deterministic).
 const LANGUAGE_OPTIONS = [
-  { value: 'any', label: 'Candidate chooses' },
   { value: 'python', label: 'Python' },
   { value: 'javascript', label: 'JavaScript' },
   { value: 'typescript', label: 'TypeScript' },
@@ -54,7 +53,7 @@ export function NewInterviewDialog() {
   // Form state
   const [candidateEmail, setCandidateEmail] = useState('');
   const [candidateName, setCandidateName] = useState('');
-  const [language, setLanguage] = useState<string>('any');
+  const [language, setLanguage] = useState<string>('python');
   const [level, setLevel] = useState<string>('mid');
   const [roleBrief, setRoleBrief] = useState('');
   const [devMode, setDevMode] = useState(false);
@@ -118,7 +117,7 @@ export function NewInterviewDialog() {
       const result = await createInterview(session.access_token, {
         candidateEmail: candidateEmail.trim(),
         ...(candidateName.trim() ? { candidateName: candidateName.trim() } : {}),
-        ...(language !== 'any' ? { language } : {}),
+        language,
         level,
         ...(roleBrief.trim() ? { roleBrief: roleBrief.trim() } : {}),
         ...(isDev && devMode ? { devMode: true } : {}),
@@ -230,9 +229,7 @@ export function NewInterviewDialog() {
                 </SelectContent>
               </Select>
               <p className="mt-1.5 text-xs text-muted-foreground">
-                {language === 'any'
-                  ? 'The candidate picks their language in the room.'
-                  : 'The room is locked to this language.'}
+                The room is locked to this language.
               </p>
             </Field>
 
