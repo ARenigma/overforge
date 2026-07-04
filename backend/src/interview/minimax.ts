@@ -16,6 +16,7 @@ import {
   ClarifyResult,
 } from './oracle';
 import { OracleDecision, InterventionKind, Effect } from './types';
+import { recordLlmUsage } from '../cost/ledger';
 
 // NOTE: MinimaxConfig + createMinimaxClient are OpenAI-compatible (Bearer auth, request shape, and
 // {choices:[{message:{content}}]} response) — so the SAME client backs Groq (see groqConfigFromEnv);
@@ -177,6 +178,28 @@ export function createMinimaxClient(config: MinimaxConfig): MinimaxClient {
       const content = extractContent(data);
       if (content == null) {
         throw new Error('Minimax response missing message content');
+      }
+      // Best-effort cost capture: record token usage against the ambient interview cost context
+      // (a no-op outside one, e.g. tests). Never let cost bookkeeping break a completion.
+      try {
+        const usage = (data as { usage?: Record<string, number> })?.usage;
+        if (usage) {
+          const url = config.baseUrl ?? '';
+          const provider = url.includes('groq.com')
+            ? 'groq'
+            : url.includes('minimax')
+              ? 'minimax'
+              : 'llm';
+          recordLlmUsage({
+            provider,
+            model: config.model,
+            promptTokens: usage.prompt_tokens ?? 0,
+            completionTokens: usage.completion_tokens ?? 0,
+            totalTokens: usage.total_tokens ?? 0,
+          });
+        }
+      } catch {
+        // ignore — cost capture is best-effort
       }
       return content;
     },

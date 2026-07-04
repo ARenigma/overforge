@@ -37,6 +37,8 @@ import {
 } from '../db/interviews';
 import { createDockerKernel } from '../execution/docker';
 import { RunRequest, RunResult } from '../execution/types';
+import { withCostContext } from '../cost/context';
+import { recordExecCost, rollupInterview } from '../cost/ledger';
 import { scoreInterview, CodeRunSummary } from '../scoring/scorer';
 import { Scorecard } from '../scoring/types';
 import { drainOutbox } from '../notify/outbox';
@@ -245,7 +247,10 @@ async function maybeAnswerClarification(
   };
   let result;
   try {
-    result = await oracle.classifyAndAnswer(clarifyReq);
+    result = await withCostContext(
+      { interviewId: interview.id, kind: 'brain', phase: ctx.phase },
+      () => oracle.classifyAndAnswer(clarifyReq)
+    );
   } catch (err) {
     console.error(`[orchestrator] clarify classification failed for ${interview.id}:`, err);
     try {
@@ -359,7 +364,9 @@ export async function begin(
   // to the deterministic greeting — same pattern as submitAnswer.
   let utterance: Utterance;
   try {
-    utterance = await oracle.generateUtterance(req);
+    utterance = await withCostContext({ interviewId, kind: 'brain', phase: newCtx.phase }, () =>
+      oracle.generateUtterance(req)
+    );
   } catch (err) {
     console.error(`[orchestrator] greeting generation failed for ${interviewId}:`, err);
     utterance = await new DeterministicOracle().generateUtterance(req);
@@ -623,12 +630,14 @@ export async function submitAnswer(
   // scores low; we never inflate signal or suppress the thin-answer record.
   let decision: import('./types').OracleDecision | undefined;
   if (ctx.phase === 'oral' || ctx.phase === 'coding') {
-    decision = await oracle.evaluateAnswer({
-      answer,
-      code: interview.code_snapshot,
-      ctx,
-      transcript: interview.transcript ?? [],
-    });
+    decision = await withCostContext({ interviewId, kind: 'brain', phase: ctx.phase }, () =>
+      oracle.evaluateAnswer({
+        answer,
+        code: interview.code_snapshot,
+        ctx,
+        transcript: interview.transcript ?? [],
+      })
+    );
   }
 
   const { ctx: newCtx, effect } = advance(ctx, { type: 'answer', decision });
@@ -702,10 +711,11 @@ export async function submitAnswer(
   let utterance: Utterance;
   let assist: { kind: InterventionKind; strength: number } | undefined;
   try {
-    utterance =
+    utterance = await withCostContext({ interviewId, kind: 'brain', phase: newCtx.phase }, () =>
       effect.kind === 'ask_followup'
-        ? await oracle.generateIntervention(interventionReq)
-        : await oracle.generateUtterance(req);
+        ? oracle.generateIntervention(interventionReq)
+        : oracle.generateUtterance(req)
+    );
   } catch (err) {
     console.error(`[orchestrator] utterance generation failed for ${interviewId}:`, err);
     const fallback = new DeterministicOracle();
@@ -839,6 +849,9 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
     exitCode: result.exitCode,
     timeMs: result.timeMs,
   });
+  // Ledger: sandbox execution time (candidate run; hidden-test containers are additional but
+  // exec cost is ~0 on the self-hosted VPS — the metric value is the run count + ms).
+  if (result.timeMs != null) recordExecCost(interviewId, result.timeMs);
   if (result.intervention) {
     await appendEvent(interviewId, 'utterance', {
       text: result.intervention.text,
@@ -896,7 +909,10 @@ async function attachRunIntervention(
     // fall back to the deterministic hint rather than staying silent this run.
     let utterance: Utterance;
     try {
-      utterance = await oracle.generateIntervention(interventionReq);
+      utterance = await withCostContext(
+        { interviewId: interview.id, kind: 'brain', phase: 'coding' },
+        () => oracle.generateIntervention(interventionReq)
+      );
     } catch (err) {
       console.error(`[orchestrator] run-hint generation failed for ${interview.id}:`, err);
       utterance = await new DeterministicOracle().generateIntervention(interventionReq);
@@ -956,16 +972,18 @@ export async function finishAndScore(
     console.error(`[orchestrator] proctor fetch failed for ${interviewId} (non-fatal):`, err);
   }
 
-  const scorecard = await scoreInterview(
-    {
-      transcript: interview.transcript ?? [],
-      codeRuns,
-      finalCode: interview.code_snapshot || undefined,
-      level: interview.level,
-      roleBrief: interview.role_brief,
-      proctor: proctorData,
-    },
-    minimaxClient
+  const scorecard = await withCostContext({ interviewId, kind: 'scorer', phase: 'scoring' }, () =>
+    scoreInterview(
+      {
+        transcript: interview.transcript ?? [],
+        codeRuns,
+        finalCode: interview.code_snapshot || undefined,
+        level: interview.level,
+        roleBrief: interview.role_brief,
+        proctor: proctorData,
+      },
+      minimaxClient
+    )
   );
 
   // Mutually-exclusive outcome flags: a candidate who never produced an answer is "incomplete"
@@ -985,6 +1003,10 @@ export async function finishAndScore(
   });
 
   await appendEvent(interviewId, 'score', { scorecard });
+
+  // Roll up cost + metrics now that every cost_event (incl. the scorer's own) is recorded.
+  // Best-effort inside — never blocks scorecard delivery.
+  await rollupInterview(interviewId);
 
   await insertOutbox(interviewId);
 

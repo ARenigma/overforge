@@ -9,6 +9,7 @@ import { hashToken } from '../interview/token';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
 import { recordVoiceTurn, recordProctorSignal } from '../db/interviews';
+import { recordTtsCost } from '../cost/ledger';
 import {
   synthesize,
   synthesizeStream,
@@ -345,6 +346,7 @@ router.post('/:id/speak', async (req: Request, res: Response): Promise<void> => 
     }
 
     const audio = await synthesize(toSpeak);
+    recordTtsCost(id, toSpeak.length);
     res.setHeader('Content-Type', 'audio/wav');
     res.setHeader('Cache-Control', 'no-store');
     res.send(audio);
@@ -395,6 +397,7 @@ router.post('/:id/speak-stream', async (req: Request, res: Response): Promise<vo
       return;
     }
 
+    recordTtsCost(id, text.length);
     const stream = synthesizeStream(text);
     // If the candidate disconnects mid-stream, stop pulling from Cartesia (releases the upstream
     // connection via the generator's finally).
