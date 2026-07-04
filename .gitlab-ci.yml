@@ -201,7 +201,7 @@ e2e-mimic-preview:
     - npx --yes vercel@latest deploy --yes --token="$VERCEL_TOKEN" > ../preview-url.txt 2> ../preview-build.log || (cat ../preview-build.log; exit 1)
     - PREVIEW_URL="$(grep -Eo 'https://overforge-[a-z0-9-]+-arenigmas-projects\.vercel\.app' ../preview-url.txt | tail -n1)"
     - echo "Preview = $PREVIEW_URL"
-    - case "$PREVIEW_URL" in https://overforge-*-arenigmas-projects.vercel.app): ;; *) echo "Unexpected preview URL"; cat ../preview-url.txt; exit 1;; esac
+    - echo "$PREVIEW_URL" | grep -qE '^https://overforge-[a-z0-9-]+-arenigmas-projects\.vercel\.app$' || (echo "Unexpected preview URL"; cat ../preview-url.txt; exit 1)
     # Run the mimic against the preview frontend + prod backend. OF_API_URL unset → env.ts default (VPS).
     - cd ../playwright && npm ci --no-audit --no-fund && npx playwright install chromium
     - bash fixtures/make-fixtures.sh || true
