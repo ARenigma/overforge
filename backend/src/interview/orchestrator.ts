@@ -157,6 +157,89 @@ async function persistTransition(
   }
 }
 
+// Max clarifying questions answered on one question before the next utterance is treated as a real
+// answer (advances) — bounds abuse and guarantees the interview always progresses.
+const CLARIFY_CAP = 3;
+
+// Cheap pre-filter so the clarify LLM call only runs on utterances that plausibly ARE questions —
+// the vast majority of answers (no "?", no leading question word) skip it and pay zero extra cost.
+function looksLikeQuestion(text: string): boolean {
+  const t = (text ?? '').trim();
+  if (!t) return false;
+  return (
+    t.includes('?') ||
+    /^(who|what|when|where|why|how|can|could|should|is|are|am|do|does|did|will|would|may|might|which|if)\b/i.test(
+      t
+    ) ||
+    /\b(clarif|assume|assumption|confirm|do you mean|should i|can i|am i allowed)\b/i.test(t)
+  );
+}
+
+/** Persist a clarifying-question turn: append the candidate's question + the interviewer's reply to
+ *  the transcript, but keep the FSM state UNCHANGED (only clarifyCount bumps). No transition event —
+ *  the reply is logged as an utterance tagged clarify:true. Retry-safe via last_request_id. */
+async function persistClarify(
+  interview: Interview,
+  newCtx: InterviewContext,
+  candidateQuestion: string,
+  reply: Utterance,
+  requestId?: string
+): Promise<void> {
+  const transcript: TranscriptTurn[] = interview.transcript ?? [];
+  transcript.push({ role: 'candidate', text: candidateQuestion });
+  transcript.push({ role: 'interviewer', text: reply.text });
+  await updateInterview(interview.id, {
+    fsm_state: newCtx, // phase unchanged; only clarifyCount differs
+    phase: newCtx.phase,
+    transcript,
+    ...(requestId ? { last_request_id: requestId } : {}),
+  });
+  await appendEvent(interview.id, 'utterance', {
+    text: reply.text,
+    expects: reply.expects,
+    clarify: true,
+    question: candidateQuestion.slice(0, 500),
+  });
+}
+
+/** If the candidate's utterance is a clarifying QUESTION, answer it (grounded, no spoilers) without
+ *  advancing the FSM, and return the AnswerResult. Returns null when it's a real answer (or the cap
+ *  is hit, or the classifier fails) so the caller falls through to the normal advancing path. */
+async function maybeAnswerClarification(
+  interview: Interview,
+  ctx: InterviewContext,
+  text: string,
+  oracle: Oracle,
+  requestId?: string
+): Promise<AnswerResult | null> {
+  if ((ctx.clarifyCount ?? 0) >= CLARIFY_CAP) return null; // bounded → treat as an answer
+  if (!looksLikeQuestion(text)) return null; // cheap gate: obvious answers skip the LLM classify
+  const problem = ctx.phase === 'coding' ? assignedProblem(interview, ctx.codeIndex) : null;
+  const clarifyReq = {
+    text,
+    ctx,
+    transcript: interview.transcript ?? [],
+    problemStatement: problem?.statement ?? null,
+    level: interview.level,
+    roleBrief: interview.role_brief,
+  };
+  let result;
+  try {
+    result = await oracle.classifyAndAnswer(clarifyReq);
+  } catch (err) {
+    console.error(`[orchestrator] clarify classification failed for ${interview.id}:`, err);
+    try {
+      result = await new DeterministicOracle().classifyAndAnswer(clarifyReq);
+    } catch {
+      return null; // never block the interview on a classifier failure
+    }
+  }
+  if (result.intent !== 'question' || !result.reply?.text) return null; // real answer → normal path
+  const newCtx: InterviewContext = { ...ctx, clarifyCount: (ctx.clarifyCount ?? 0) + 1 };
+  await persistClarify(interview, newCtx, text, result.reply, requestId);
+  return { utterance: result.reply, phase: ctx.phase, state: newCtx };
+}
+
 // ─────────────────────── Public orchestrator functions ───────────────────────
 
 export interface CreateInterviewResult {
@@ -506,6 +589,14 @@ export async function submitAnswer(
   const ctx = interview.fsm_state as InterviewContext;
   const oracle = getOracle();
 
+  // Clarifying-question handling (humaneness): in oral/coding a candidate may ASK a question rather
+  // than answer (e.g. "can I assume the input is sorted?"). If so, answer it (grounded, no spoilers)
+  // and return WITHOUT advancing the FSM. Bounded by CLARIFY_CAP so it can never stall the interview.
+  if (ctx.phase === 'oral' || ctx.phase === 'coding') {
+    const clarify = await maybeAnswerClarification(interview, ctx, answer, oracle, requestId);
+    if (clarify) return clarify;
+  }
+
   // Evaluate the candidate's answer in both the oral and coding phases so the machine can
   // decide whether to nudge (oral: 1-nudge cap) or follow up (coding: maxFollowUps cap).
   // The signal is always recorded truthfully — a weak answer that received a nudge still
@@ -521,6 +612,8 @@ export async function submitAnswer(
   }
 
   const { ctx: newCtx, effect } = advance(ctx, { type: 'answer', decision });
+  // A real answer advanced the FSM → reset the per-question clarify budget for the next question.
+  newCtx.clarifyCount = 0;
 
   // Record the candidate's answer as an event.
   await appendEvent(interviewId, 'answer', { text: answer });

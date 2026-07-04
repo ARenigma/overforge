@@ -56,11 +56,34 @@ export interface InterventionRequest {
   testSummary?: string | null;
 }
 
+/** A candidate utterance whose intent (a clarifying QUESTION vs an ANSWER) is not yet known. */
+export interface ClarifyRequest {
+  /** The raw candidate text. */
+  text: string;
+  ctx: InterviewContext;
+  transcript: TranscriptTurn[];
+  /** The assigned coding problem's statement (coding phase) — grounds the clarifying reply. */
+  problemStatement?: string | null;
+  level?: string;
+  roleBrief?: string | null;
+}
+
+/** Intent classification + (if a question) the grounded, non-spoiler reply — one bounded seam. */
+export interface ClarifyResult {
+  intent: 'answer' | 'question';
+  /** Present only when intent === 'question': the interviewer's brief clarifying reply. */
+  reply?: Utterance;
+}
+
 export interface Oracle {
   generateUtterance(req: UtteranceRequest): Promise<Utterance>;
   evaluateAnswer(req: EvaluateRequest): Promise<OracleDecision>;
   /** Produce the next interviewer intervention (counter-question / probe / hint / nudge). */
   generateIntervention(req: InterventionRequest): Promise<Utterance>;
+  /** Decide whether a candidate utterance is a clarifying QUESTION (vs an answer) and, if so,
+   *  produce a brief grounded reply that NEVER reveals the solution or hidden tests. Lets the
+   *  interviewer answer questions humanely without advancing the FSM. */
+  classifyAndAnswer(req: ClarifyRequest): Promise<ClarifyResult>;
 }
 
 /**
@@ -136,5 +159,26 @@ export class DeterministicOracle implements Oracle {
       nudge: "Talk me through where you're at — what are you trying right now?",
     };
     return { text: canned[req.kind], expects: 'code' };
+  }
+
+  async classifyAndAnswer(req: ClarifyRequest): Promise<ClarifyResult> {
+    // Heuristic fallback (used only when the live oracle is unavailable): treat text that ends
+    // with "?" or opens with a question word as a clarifying question. Reply is a safe, no-spoiler
+    // redirect that keeps the candidate moving.
+    const t = (req.text ?? '').trim();
+    const isQuestion =
+      /\?\s*$/.test(t) ||
+      /^(who|what|when|where|why|how|can|could|should|is|are|do|does|did|will|would|may|might|which)\b/i.test(
+        t
+      );
+    if (!isQuestion) return { intent: 'answer' };
+    const expects = req.ctx.phase === 'coding' ? 'code' : 'voice';
+    return {
+      intent: 'question',
+      reply: {
+        text: "Go with a reasonable assumption and state it out loud — I'm more interested in your reasoning than in one exact reading of the prompt.",
+        expects,
+      },
+    };
   }
 }

@@ -12,6 +12,8 @@ import {
   Utterance,
   EvaluateRequest,
   InterventionRequest,
+  ClarifyRequest,
+  ClarifyResult,
 } from './oracle';
 import { OracleDecision, InterventionKind, Effect } from './types';
 
@@ -176,6 +178,21 @@ export class MinimaxOracle implements Oracle {
     // headroom (512) like generateUtterance; the prompt already holds it to 1–2 sentences.
     const text = (await this.client.complete(messages, { temperature: 0.5 })).trim();
     return { text, expects: 'code' };
+  }
+
+  async classifyAndAnswer(req: ClarifyRequest): Promise<ClarifyResult> {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: CLARIFIER_SYSTEM },
+      { role: 'user', content: buildClarifyPrompt(req) },
+    ];
+    const raw = await this.client.complete(messages, { json: true, temperature: 0 });
+    const obj = JSON.parse(extractJsonObject(raw)) as { intent?: string; reply?: string };
+    const intent = obj.intent === 'question' ? 'question' : 'answer';
+    if (intent === 'answer') return { intent };
+    const text = typeof obj.reply === 'string' ? obj.reply.trim() : '';
+    // A "question" with no usable reply degrades to an answer so the FSM still advances (never stall).
+    if (!text) return { intent: 'answer' };
+    return { intent, reply: { text, expects: req.ctx.phase === 'coding' ? 'code' : 'voice' } };
   }
 }
 
@@ -366,6 +383,35 @@ function buildEvaluatePrompt(req: EvaluateRequest): string {
     'If the answer is only a filler or disfluency (e.g. "um", "uh", "hmm", "let me think") with no ' +
       'substance, set followUp=false and signal=0. Otherwise: does this answer warrant a deeper ' +
       'follow-up? Return the JSON only.',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+const CLARIFIER_SYSTEM =
+  'You are the technical interviewer in a live interview. The candidate just said something. ' +
+  'Decide its INTENT: "question" if they are asking YOU to clarify the problem, an assumption, ' +
+  'scope, or your prior question; "answer" if they are answering or attempting (even partially, ' +
+  'even thinking aloud). Return ONLY JSON: {"intent":"question"|"answer","reply":"..."}. ' +
+  'If intent is "question": reply = a brief (1-2 sentence), warm, direct answer using ONLY the ' +
+  'problem statement, your prior question, and role context given. NEVER reveal or hint the ' +
+  'intended solution, algorithm, data structure, complexity, or the hidden tests — if asked for ' +
+  'any of those, warmly decline and tell them to state a reasonable assumption and proceed. This ' +
+  'is spoken aloud: plain sentences, no code, no identifiers, no markdown. ' +
+  'If intent is "answer": reply must be "" (empty string).';
+
+function buildClarifyPrompt(req: ClarifyRequest): string {
+  const lastInterviewer = [...req.transcript].reverse().find((t) => t.role === 'interviewer');
+  return [
+    req.roleBrief ? `Role context: ${req.roleBrief}` : '',
+    lastInterviewer
+      ? `Your previous question/prompt was:\n"${lastInterviewer.text.slice(0, 800)}"`
+      : '',
+    req.problemStatement
+      ? `The current coding problem (on the candidate's screen):\n${req.problemStatement.slice(0, 1500)}`
+      : '',
+    `The candidate just said:\n"${(req.text ?? '').slice(0, 1000)}"`,
+    'Classify intent and (only if a question) answer it per the rules. Return the JSON only.',
   ]
     .filter(Boolean)
     .join('\n\n');

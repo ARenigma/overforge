@@ -31,6 +31,11 @@ export interface InterviewContext {
   /** Follow-up nudges issued for the CURRENT oral question (hard cap: 1). Reset to 0 when a
    *  new oral question is asked. Kept at 0 during non-oral phases. */
   oralFollowUps: number;
+  /** Clarifying questions the candidate has asked on the CURRENT question. A clarify is a
+   *  non-advancing self-loop (the interviewer answers without moving on); this bounds it so it
+   *  can't stall the interview, and resets to 0 whenever a real answer advances the FSM. Optional
+   *  for backward-compat with interviews created before this field (treated as 0). */
+  clarifyCount?: number;
   config: InterviewConfig;
 }
 
