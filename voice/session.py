@@ -36,6 +36,7 @@ from contracts import (
     BrainTransientError,
     EndpointerLike,
     NoopTtsSink,
+    ShadowSttLike,
     SttLike,
     SttStreamerLike,
     TerminalError,
@@ -138,6 +139,11 @@ class VoiceSession:
                         on permanent streamer failure the session falls back to the injected
                         ``endpointer``/``stt``. ``None`` (default) = the local whisper path,
                         byte-for-byte unchanged.
+        shadow:         Optional :class:`ShadowSttLike` (Soniox, ``STT_SHADOW=soniox``). A pure
+                        OBSERVER: it transcribes the SAME LISTENING audio in parallel for A/B
+                        comparison, snapshotting its per-turn transcript into telemetry. It
+                        never drives turns and never affects the live interview — all its calls
+                        are best-effort. ``None`` (default) = no shadow.
     """
 
     def __init__(
@@ -152,6 +158,7 @@ class VoiceSession:
         language: str = "en",
         telemetry: TelemetrySink | None = None,
         streamer: SttStreamerLike | None = None,
+        shadow: ShadowSttLike | None = None,
     ) -> None:
         self._interview_id = interview_id
         self._token = session_token
@@ -198,6 +205,13 @@ class VoiceSession:
         self._idle_watchdog_task: asyncio.Task[None] | None = None
         self._probe_fired = False
         self._probe_index = 0
+        # Shadow STT (A/B, STT_SHADOW=soniox). A pure observer: the same LISTENING frames are
+        # tee'd to it, its per-turn transcript is snapshotted into telemetry at commit, and it
+        # is reset on each re-arm. Started lazily on the first frame; closed at teardown. All
+        # calls are best-effort (the shadow swallows its own errors) so it can never break a turn.
+        self._shadow = shadow
+        self._shadow_started = False
+        self._shadow_close_task: asyncio.Task[None] | None = None
 
     @property
     def state(self) -> str:
@@ -225,6 +239,13 @@ class VoiceSession:
         """
         if self._state is not _State.LISTENING:
             return None  # ignore frames while processing / speaking / done
+
+        # Shadow STT (A/B observer): tee every LISTENING frame to the shadow engine so it
+        # transcribes the SAME audio as the primary. Started lazily; best-effort (the shadow
+        # swallows its own errors and never back-pressures this hot path) — never affects the turn.
+        if self._shadow is not None:
+            self._ensure_shadow_started()  # schedules start() off the hot path — never blocks
+            await self._shadow.feed(np.asarray(frame, dtype=np.float32))
 
         streamer = self._streamer
         if streamer is not None and self._stream_mode():
@@ -412,6 +433,42 @@ class VoiceSession:
             self._streamer.speech_activity.clear()
             self._start_idle_watchdog()
 
+    def _ensure_shadow_started(self) -> None:
+        """Schedule the shadow's start ONCE as a background task — NEVER block the hot frame path
+        on the shadow's network connect. A slow/unreachable Soniox must not delay the primary's
+        audio intake, so start() is fire-and-forget: frames fed before the socket is up are simply
+        dropped by the shadow (it no-ops until connected), trimming only the first turn's shadow
+        transcript slightly. A failed start disables the shadow silently (it's just an observer)."""
+        if self._shadow is None or self._shadow_started:
+            return
+        self._shadow_started = True
+        shadow = self._shadow
+
+        async def _run() -> None:
+            try:
+                await shadow.start()
+            except Exception:
+                logger.exception("Shadow STT failed to start — continuing without a shadow.")
+
+        task = asyncio.create_task(_run(), name="shadow-start")
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    def _snapshot_shadow(self) -> tuple[str | None, str | None, float | None]:
+        """Consume the shadow's current-window ``(engine, transcript, latency_ms)`` for telemetry.
+
+        Best-effort: any shadow error yields ``(None, None, None)`` so a shadow fault can never
+        break a turn. Called once per committed turn from :meth:`_log_turn`.
+        """
+        if self._shadow is None:
+            return None, None, None
+        try:
+            text, latency_ms = self._shadow.take_snapshot()
+            return self._shadow.engine, text, latency_ms
+        except Exception:
+            logger.exception("Shadow STT snapshot failed — omitting shadow transcript this turn.")
+            return None, None, None
+
     def _fallback_to_local(self) -> None:
         """Flip (once) to the local endpointer + whisper path after a fatal streamer failure.
 
@@ -547,7 +604,9 @@ class VoiceSession:
 
         if not transcript:
             # False fire (cough / clipped silence): never submit an empty answer; re-arm + listen.
-            self._log_turn(rid, reason, audio_s, stt_ms, None, None, "false-fire", empty=True)
+            self._log_turn(
+                rid, reason, audio_s, stt_ms, None, None, "false-fire", transcript="", empty=True
+            )
             self._recover()
             self._rearm_pending = True  # browser was disarmed by {thinking}; tell it to re-arm
             return None
@@ -557,7 +616,10 @@ class VoiceSession:
             # the candidate's answer. Logged distinctly (phase=hallucination) so the blocklist can
             # be tuned from prod telemetry. Re-arm + keep listening, like an empty false-fire.
             logger.debug("Dropping STT hallucination: %r (%.1fs audio)", transcript, audio_s)
-            self._log_turn(rid, reason, audio_s, stt_ms, None, None, "hallucination", empty=True)
+            self._log_turn(
+                rid, reason, audio_s, stt_ms, None, None, "hallucination",
+                transcript=transcript, empty=True,
+            )
             self._recover()
             self._rearm_pending = True  # browser was disarmed by {thinking}; tell it to re-arm
             return None
@@ -584,7 +646,10 @@ class VoiceSession:
             t_oracle = time.perf_counter()
             await self._safe_speak(turn)
             tts_ms = (time.perf_counter() - t_oracle) * 1000.0
-            self._log_turn(rid, reason, audio_s, stt_ms, oracle_ms, tts_ms, "done", terminal=True)
+            self._log_turn(
+                rid, reason, audio_s, stt_ms, oracle_ms, tts_ms, "done",
+                transcript=transcript, terminal=True,
+            )
             return turn
         oracle_ms = (time.perf_counter() - t_stt) * 1000.0
 
@@ -603,7 +668,8 @@ class VoiceSession:
         tts_ms = (time.perf_counter() - t_oracle) * 1000.0
         self._state = _State.TERMINAL if is_terminal else _State.SPEAKING
         self._log_turn(
-            rid, reason, audio_s, stt_ms, oracle_ms, tts_ms, result.phase, terminal=is_terminal
+            rid, reason, audio_s, stt_ms, oracle_ms, tts_ms, result.phase,
+            transcript=transcript, terminal=is_terminal,
         )
         return turn
 
@@ -617,6 +683,7 @@ class VoiceSession:
         tts_ms: float | None,
         phase: str,
         *,
+        transcript: str = "",
         empty: bool = False,
         terminal: bool = False,
     ) -> None:
@@ -642,6 +709,8 @@ class VoiceSession:
             " empty=1" if empty else "",
             " terminal=1" if terminal else "",
         )
+        # Consume the shadow's per-turn transcript (A/B). Once per turn, aligned to this commit.
+        shadow_engine, shadow_transcript, shadow_stt_ms = self._snapshot_shadow()
         t = TurnTelemetry(
             request_id=rid,
             commit=commit,
@@ -653,6 +722,10 @@ class VoiceSession:
             phase=phase,
             empty=empty,
             terminal=terminal,
+            primary_transcript=transcript,
+            shadow_engine=shadow_engine,
+            shadow_transcript=shadow_transcript,
+            shadow_stt_ms=shadow_stt_ms,
         )
         self._safe_telemetry(t)
 
@@ -753,6 +826,17 @@ class VoiceSession:
                 self._streamer_close_task = loop.create_task(
                     self._streamer.close(), name="session-streamer-close"
                 )
+        if self._shadow is not None and self._shadow_close_task is None:
+            # Best-effort shadow teardown (flush + EOS + close). aclose() awaits it; a bare
+            # close() outside a running loop just skips it (the shadow is disposable).
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                self._shadow_close_task = loop.create_task(
+                    self._shadow.close(), name="session-shadow-close"
+                )
 
     async def aclose(self) -> None:
         """Async terminal teardown: :meth:`close` + AWAIT the streamer's Terminate+close.
@@ -760,13 +844,19 @@ class VoiceSession:
         This is the guaranteed-teardown path the WS layer uses — it must run on every session
         end (normal, error, or disconnect) so a streaming-STT socket is never left open.
         """
-        self.close()  # schedules the streamer close (if any) exactly once
+        self.close()  # schedules the streamer + shadow close (if any) exactly once
         task = self._streamer_close_task
         if task is not None:
             try:
                 await task
             except Exception:
                 logger.exception("Streamer close failed during session teardown — continuing.")
+        shadow_task = self._shadow_close_task
+        if shadow_task is not None:
+            try:
+                await shadow_task
+            except Exception:
+                logger.exception("Shadow close failed during session teardown — continuing.")
 
     def _recover(self, *, new_request_id: bool = True) -> None:
         """Clear the buffer, reset the endpointer, return to LISTENING.
@@ -780,6 +870,8 @@ class VoiceSession:
         self._turn_gen += 1  # invalidate any in-flight streaming-STT segment from the prior turn
         self._stream_frames = 0
         self._drain_stream_events()  # streamed events from the prior listening window are stale
+        if self._shadow is not None:
+            self._shadow.reset()  # align the shadow's window to this fresh listening window
         if new_request_id:
             self._request_id = _new_request_id()
         self._endpointer.reset()

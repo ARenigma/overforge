@@ -132,6 +132,26 @@ class SttStreamerLike(Protocol):
     async def close(self) -> None: ...
 
 
+class ShadowSttLike(Protocol):
+    """The slice of ``SonioxShadow`` that ``VoiceSession`` depends on.
+
+    A pure OBSERVER: it transcribes the same mic audio in parallel with the primary engine
+    for A/B comparison but NEVER drives turn detection and NEVER affects the live turn. All
+    its methods are best-effort and swallow their own errors, so the session calls them
+    unguarded. ``feed`` is fed the same LISTENING frames as the primary; ``reset`` opens a
+    fresh per-turn window (on each re-arm); ``take_snapshot`` consumes that window's
+    ``(transcript, latency_ms)`` at commit; ``close`` is idempotent + exception-safe.
+    """
+
+    engine: str
+
+    async def start(self) -> None: ...
+    async def feed(self, pcm_f32: AudioArray) -> None: ...
+    def reset(self) -> None: ...
+    def take_snapshot(self) -> tuple[str, float | None]: ...
+    async def close(self) -> None: ...
+
+
 class BrainClient(Protocol):
     """Submits a transcribed answer to the interview brain and returns the next utterance.
 

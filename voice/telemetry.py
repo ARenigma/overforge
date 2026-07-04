@@ -36,6 +36,14 @@ class TurnTelemetry:
     phase: str
     empty: bool
     terminal: bool
+    #: Primary-engine transcript for this turn — the pairwise reference for A/B disagreement.
+    primary_transcript: str = ""
+    #: Shadow STT engine run in parallel on the same audio ("soniox"); None when no shadow ran.
+    shadow_engine: str | None = None
+    #: Shadow transcript for the SAME audio window as ``primary_transcript`` (log-only).
+    shadow_transcript: str | None = None
+    #: Rough shadow finalization latency (ms from window start to last shadow final token).
+    shadow_stt_ms: float | None = None
 
 
 class TelemetrySink(Protocol):
@@ -106,6 +114,10 @@ class RestTelemetrySink:
                 "phase": t.phase,
                 "empty": t.empty,
                 "terminal": t.terminal,
+                "primaryTranscript": t.primary_transcript,
+                "shadowEngine": t.shadow_engine,
+                "shadowTranscript": t.shadow_transcript,
+                "shadowSttMs": t.shadow_stt_ms,
             }
             resp = await self._client.post(path, json=body)
             if resp.status_code not in (200, 204):
