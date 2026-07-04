@@ -74,6 +74,9 @@ const VOICE_WS_URL = process.env.NEXT_PUBLIC_VOICE_WS_URL ?? '';
 // can't echo back into the mic and commit as a phantom candidate turn (self-echo). Laptop-speaker
 // room reverb runs ~500–800ms, so the earlier 500ms was too short.
 const SPEAK_TAIL_COOLDOWN_MS = 800;
+/** Suggested time per coding problem (soft — shown for pacing; the interview's overall cap is the
+ *  only hard stop). ~15 min/problem × 2 + counter-questions keeps the session under an hour. */
+const PROBLEM_SOFT_BUDGET_S = 15 * 60;
 // One-time gate at session start: Chrome's AEC3 adaptive filter needs ~2–5s to converge before it
 // actually cancels echo. Keep the mic gated this long after voice engages — the greeting plays
 // during it, so AEC trains on the real speaker+mic path before the first candidate turn is captured.
@@ -524,12 +527,18 @@ export default function InterviewPage() {
   // follows codeIndex across coding questions. Deduped by codeIndex so an unchanged problem never
   // triggers a re-render (avoids churn from the per-message re-check). Cleared outside coding.
   const problemCodeIndexRef = useRef(-1);
+  const problemStartElapsedRef = useRef(0); // `elapsed` (s) when the current problem began
+  const elapsedRef = useRef(0);
+  useEffect(() => {
+    elapsedRef.current = elapsed;
+  }, [elapsed]);
   const refetchProblem = useCallback(async () => {
     const tok = activeTokenRef.current;
     if (!tok) return;
     const res = await fetchCodingProblem(id, tok);
     if (res && res.codeIndex !== problemCodeIndexRef.current) {
       problemCodeIndexRef.current = res.codeIndex;
+      problemStartElapsedRef.current = elapsedRef.current; // reset the per-problem soft clock
       setCodingProblem(res.problem);
     }
   }, [id]);
@@ -1089,7 +1098,7 @@ export default function InterviewPage() {
             <p className="font-medium text-foreground">Before you begin</p>
             <ul className="space-y-1.5 list-disc list-inside">
               <li>This session is being recorded for evaluation purposes.</li>
-              <li>Your responses will be assessed by an AI interviewer.</li>
+              <li>Your responses are evaluated automatically as part of this assessment.</li>
               <li>Do not share your session link with others.</li>
               <li>Attempting to use unauthorized resources may affect your evaluation.</li>
               <li>
@@ -1514,7 +1523,17 @@ export default function InterviewPage() {
                     <span className="truncate text-xs font-semibold text-foreground">
                       {codingProblem.title}
                     </span>
-                    <span className="ml-auto shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[9px] font-mono uppercase text-muted-foreground">
+                    <span
+                      className={`ml-auto shrink-0 font-mono text-[10px] ${
+                        elapsed - problemStartElapsedRef.current > PROBLEM_SOFT_BUDGET_S
+                          ? 'text-primary'
+                          : 'text-muted-foreground'
+                      }`}
+                      title="Suggested time for this problem (soft — only the overall interview limit hard-stops you)"
+                    >
+                      {formatTime(Math.max(0, elapsed - problemStartElapsedRef.current))} / 15:00
+                    </span>
+                    <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[9px] font-mono uppercase text-muted-foreground">
                       {codingProblem.difficulty}
                     </span>
                     <span className="shrink-0 text-xs text-muted-foreground">
