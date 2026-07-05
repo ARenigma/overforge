@@ -36,6 +36,13 @@ export interface InterviewContext {
    *  can't stall the interview, and resets to 0 whenever a real answer advances the FSM. Optional
    *  for backward-compat with interviews created before this field (treated as 0). */
   clarifyCount?: number;
+  /** Resolution of a deep-hint OFFER for a coding question. The offer utterance itself rides on the
+   *  code run (race-free); only its RESOLUTION is stored here — and ONLY submitAnswer (the answer
+   *  path that owns fsm_state) ever writes it, so there's no cross-path write race. The run path
+   *  reads it to know a candidate declined ('declined') or already got the deep hint ('hinted') and
+   *  must not re-hint. Absent = no offer resolved yet for that question. Reset when a real answer
+   *  advances the FSM. */
+  hintOffer?: { codeIndex: number; status: 'declined' | 'hinted' };
   config: InterviewConfig;
 }
 
@@ -43,7 +50,7 @@ export interface InterviewContext {
  *  claim, `probe` digs deeper, `hint` unblocks a stuck candidate, `nudge` is a light prompt.
  *  Run-triggered hints are recorded ON the code run that triggered them (race-free, atomic) — the
  *  FSM context stays pure control state. */
-export type InterventionKind = 'counter_question' | 'probe' | 'hint' | 'nudge';
+export type InterventionKind = 'counter_question' | 'probe' | 'hint' | 'nudge' | 'offer';
 
 /** What the driver should do next. The machine emits exactly one per step. */
 export type Effect =

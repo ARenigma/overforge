@@ -391,14 +391,18 @@ describe('orchestrator end-to-end (offline)', () => {
     const runs = row.code_runs as Array<{ intervention?: { kind: string } }>;
     expect(runs.some((r) => r.intervention?.kind === 'probe')).toBe(true);
 
-    // Cooldown blocks the very next run; the one after escalates to a concrete hint.
+    // Cooldown blocks the very next run; the one after OFFERS a deeper hint (never auto-injects it).
     expect(
       (await orch.recordRun(id, { language: 'python', source: 'x=' })).intervention
     ).toBeUndefined();
     expect(
       (await orch.recordRun(id, { language: 'python', source: 'x=' })).intervention?.kind
+    ).toBe('offer');
+    // Candidate ignored the offer and kept failing → deliver the deep hint (they had the chance to decline).
+    expect(
+      (await orch.recordRun(id, { language: 'python', source: 'x=' })).intervention?.kind
     ).toBe('hint');
-    // Per-question budget (2) is now spent — it goes quiet rather than nagging.
+    // Deep hint delivered — it goes quiet rather than nagging.
     expect(
       (await orch.recordRun(id, { language: 'python', source: 'x=' })).intervention
     ).toBeUndefined();

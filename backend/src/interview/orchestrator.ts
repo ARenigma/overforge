@@ -7,7 +7,11 @@ import { advance, initialContext } from './machine';
 import { DeterministicOracle, Oracle, TranscriptTurn, UtteranceRequest, Utterance } from './oracle';
 import { InterviewContext, Effect, InterventionKind, CodingProblem, TestResults } from './types';
 import { deriveRunSignals } from './signals';
-import { decideRunIntervention, deriveRunAssistBudget } from './intervention';
+import {
+  decideRunIntervention,
+  deriveRunAssistBudget,
+  classifyOfferResponse,
+} from './intervention';
 import { selectProblems, getProblemBySlug, toPublicProblem, PublicProblem } from './problems';
 import {
   createMinimaxClient,
@@ -270,6 +274,115 @@ async function maybeAnswerClarification(
   const newCtx: InterviewContext = { ...ctx, clarifyCount: (ctx.clarifyCount ?? 0) + 1 };
   await persistClarify(interview, newCtx, text, result.reply, requestId);
   return { utterance: result.reply, phase: ctx.phase, state: newCtx };
+}
+
+/** Persist a non-advancing deep-hint offer resolution (accept → hint, decline → ack): append the
+ *  candidate's reply + the interviewer turn, keep the phase unchanged (only hintOffer differs),
+ *  retry-safe. `assist` tags a delivered hint so the scorer discounts the hinted solve. */
+async function persistOfferResolution(
+  interview: Interview,
+  newCtx: InterviewContext,
+  candidateAnswer: string,
+  utterance: Utterance,
+  assist: { kind: InterventionKind; strength: number } | undefined,
+  requestId?: string
+): Promise<void> {
+  const transcript: TranscriptTurn[] = interview.transcript ?? [];
+  transcript.push({ role: 'candidate', text: candidateAnswer });
+  transcript.push({ role: 'interviewer', text: utterance.text, ...(assist ? { assist } : {}) });
+  await updateInterview(interview.id, {
+    fsm_state: newCtx,
+    phase: newCtx.phase,
+    transcript,
+    ...(requestId ? { last_request_id: requestId } : {}),
+  });
+  await appendEvent(interview.id, 'utterance', {
+    text: utterance.text,
+    expects: utterance.expects,
+    ...(assist
+      ? { intervention: true, kind: assist.kind, strength: assist.strength }
+      : { offer_ack: true }),
+  });
+}
+
+/** If a deep-hint OFFER is pending for the current coding question, resolve the candidate's reply:
+ *  accept → deliver the deep hint; decline → warm ack (no hint, no penalty). Either returns WITHOUT
+ *  advancing the FSM. 'other' (a clarifying question / unrelated attempt) → null, so the offer stays
+ *  open and the caller processes the utterance normally. The offer state is written ONLY here (the
+ *  answer path owns fsm_state) — the run path only reads it, so there's no cross-path write race. */
+async function maybeResolveHintOffer(
+  interview: Interview,
+  ctx: InterviewContext,
+  answer: string,
+  oracle: Oracle,
+  requestId?: string
+): Promise<AnswerResult | null> {
+  if (ctx.phase !== 'coding') return null;
+  if (ctx.hintOffer?.codeIndex === ctx.codeIndex) return null; // already resolved for this question
+  const runs = (interview.code_runs ?? []).filter((r) => r.codeIndex === ctx.codeIndex);
+  const latest = runs[runs.length - 1];
+  if (latest?.intervention?.kind !== 'offer') return null; // no pending offer
+  const resp = classifyOfferResponse(answer);
+  if (resp === 'other') return null; // ignore → process normally; the offer stays open
+
+  if (resp === 'decline') {
+    const ack: Utterance = {
+      text: "No problem — take your time. I'm here if you'd like a pointer later.",
+      expects: 'code',
+    };
+    const newCtx: InterviewContext = {
+      ...ctx,
+      hintOffer: { codeIndex: ctx.codeIndex, status: 'declined' },
+    };
+    await persistOfferResolution(interview, newCtx, answer, ack, undefined, requestId);
+    return { utterance: ack, phase: ctx.phase, state: newCtx };
+  }
+
+  // accept → deliver the deep hint (grounded, still no spoiler)
+  const problem = assignedProblem(interview, ctx.codeIndex);
+  const recentRuns = runs.slice(-4).map((r) => ({ status: r.status, stderr: r.stderr }));
+  const tr = latest.testResults;
+  const testSummary = tr
+    ? tr.passed === tr.total
+      ? `ran clean and passed all ${tr.total} hidden tests`
+      : `passed ${tr.passed}/${tr.total} hidden tests${tr.incomplete ? ' (stopped early on an error/timeout)' : ' — wrong output on some cases'}`
+    : null;
+  const req = {
+    kind: 'hint' as const,
+    ctx,
+    transcript: interview.transcript ?? [],
+    code: interview.code_snapshot,
+    recentRuns,
+    level: interview.level,
+    roleBrief: interview.role_brief,
+    problemStatement: problem?.statement ?? null,
+    testSummary,
+    strength: 2,
+    consecutiveFailures: recentRuns.filter((r) => r.status !== 'Accepted').length,
+  };
+  let hint: Utterance;
+  try {
+    hint = await withCostContext(
+      { interviewId: interview.id, kind: 'brain', phase: 'coding' },
+      () => oracle.generateIntervention(req)
+    );
+  } catch (err) {
+    console.error(`[orchestrator] offer-hint generation failed for ${interview.id}:`, err);
+    hint = await new DeterministicOracle().generateIntervention(req);
+  }
+  const newCtx: InterviewContext = {
+    ...ctx,
+    hintOffer: { codeIndex: ctx.codeIndex, status: 'hinted' },
+  };
+  await persistOfferResolution(
+    interview,
+    newCtx,
+    answer,
+    hint,
+    { kind: 'hint', strength: 2 },
+    requestId
+  );
+  return { utterance: hint, phase: ctx.phase, state: newCtx };
 }
 
 // ─────────────────────── Public orchestrator functions ───────────────────────
@@ -623,6 +736,12 @@ export async function submitAnswer(
   const ctx = interview.fsm_state as InterviewContext;
   const oracle = getOracle();
 
+  // Deep-hint OFFER resolution (coding): a yes/no reply to a pending offer is handled here — deliver
+  // the deep hint (accept) or a warm no-penalty ack (decline), WITHOUT advancing. Runs BEFORE clarify
+  // so a "yes" isn't misread as a question. 'other' falls through (offer stays open, processed normally).
+  const offerResolved = await maybeResolveHintOffer(interview, ctx, answer, oracle, requestId);
+  if (offerResolved) return offerResolved;
+
   // Clarifying-question handling (humaneness): in oral/coding a candidate may ASK a question rather
   // than answer (e.g. "can I assume the input is sorted?"). If so, answer it (grounded, no spoilers)
   // and return WITHOUT advancing the FSM. Bounded by CLARIFY_CAP so it can never stall the interview.
@@ -648,8 +767,10 @@ export async function submitAnswer(
   }
 
   const { ctx: newCtx, effect } = advance(ctx, { type: 'answer', decision });
-  // A real answer advanced the FSM → reset the per-question clarify budget for the next question.
+  // A real answer advanced the FSM → reset the per-question clarify budget + hint-offer state so the
+  // next question starts fresh.
   newCtx.clarifyCount = 0;
+  newCtx.hintOffer = undefined;
 
   // Record the candidate's answer as an event.
   await appendEvent(interviewId, 'answer', { text: answer });
@@ -885,7 +1006,11 @@ async function attachRunIntervention(
     const withCurrent = [...prior, result];
     const signals = deriveRunSignals(withCurrent, ctx.codeIndex);
     const budget = deriveRunAssistBudget(prior, ctx.codeIndex); // prior only — current has no hint yet
-    const decision = decideRunIntervention(signals, ctx.phase, budget);
+    // How the candidate answered a prior deep-hint offer (read-only from fsm_state, which only the
+    // answer path writes — no cross-path race). 'declined'/'hinted' stop the run path from re-hinting.
+    const offerResolution =
+      ctx.hintOffer?.codeIndex === ctx.codeIndex ? ctx.hintOffer.status : 'none';
+    const decision = decideRunIntervention(signals, ctx.phase, budget, offerResolution);
     if (!decision.intervene) return;
 
     const oracle = getOracle();
@@ -911,6 +1036,8 @@ async function attachRunIntervention(
       roleBrief: interview.role_brief,
       problemStatement: problem?.statement ?? null,
       testSummary,
+      strength: decision.strength,
+      consecutiveFailures: signals.consecutiveFailures,
     };
     // A decided hint should reach a stuck candidate even if the fast oracle is rate-limited —
     // fall back to the deterministic hint rather than staying silent this run.

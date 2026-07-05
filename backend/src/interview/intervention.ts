@@ -27,21 +27,33 @@ export const BALANCED_RUN_POLICY: RunInterventionPolicy = {
   minFailuresToTrigger: 2,
 };
 
-/** Per-question hint budget, derived from the run log (not stored state) so it can't race. */
+/**
+ * Per-question assist state, DERIVED from the run log (not stored) so overlapping runs can't corrupt
+ * a shared counter. Note: the deep-hint OFFER is a gate, not an assist — it's tracked separately
+ * (offerMade) and excluded from the actual-assist accounting.
+ */
 export interface RunAssistBudget {
-  /** Run-triggered hints already given on this question. */
-  given: number;
-  /** Runs on this question since the last hint (Infinity if none) — drives the cooldown. */
-  runsSinceLastHint: number;
+  /** A gentle probe (or counter-question) has fired on this question. */
+  probeGiven: boolean;
+  /** A deep-hint OFFER has been made on this question (candidate may or may not have responded). */
+  offerMade: boolean;
+  /** The deep hint has been delivered on this question (via the run path). */
+  deepHintGiven: boolean;
+  /** Runs since the last actual assist (probe/hint), Infinity if none — drives the post-probe room. */
+  runsSinceLastAssist: number;
 }
 
 export interface RunDecision {
   intervene: boolean;
   kind: InterventionKind;
-  /** Escalation level: 1 = first (gentle probe), 2 = concrete hint. */
+  /** Escalation level: 1 = gentle probe, 2 = offer / concrete deep hint. Passed to the oracle so a
+   *  deeper rung is worded more specifically than the probe. */
   strength: number;
   reason: string;
 }
+
+/** Resolution of a deep-hint offer, read from fsm_state (written only by the answer path). */
+export type OfferResolution = 'none' | 'declined' | 'hinted';
 
 const QUIET: RunDecision = Object.freeze({
   intervene: false,
@@ -51,53 +63,107 @@ const QUIET: RunDecision = Object.freeze({
 });
 
 /**
- * Reconstruct the hint budget for the current question from the PRIOR run log (the runs before the
- * one that just landed). Hints are recorded on the run that triggered them, so this is derived,
- * never stored — two overlapping runs can't corrupt a shared counter.
+ * Reconstruct the per-question assist state from the PRIOR run log (the runs before the one that
+ * just landed). Interventions are recorded on the run that triggered them, so this is derived,
+ * never stored — two overlapping runs can't corrupt a shared counter. The 'offer' kind is a gate,
+ * not an assist, so it's tracked separately and never counts toward the probe/hint accounting.
  */
 export function deriveRunAssistBudget(priorRuns: RunResult[], codeIndex: number): RunAssistBudget {
   const scoped = priorRuns.filter((r) => r.codeIndex === codeIndex);
-  let given = 0;
-  let lastHintIdx = -1;
+  let probeGiven = false;
+  let offerMade = false;
+  let deepHintGiven = false;
+  let lastAssistIdx = -1;
   scoped.forEach((r, i) => {
-    if (r.intervention) {
-      given++;
-      lastHintIdx = i;
+    const kind = r.intervention?.kind;
+    if (!kind) return;
+    if (kind === 'offer') {
+      offerMade = true;
+    } else if (kind === 'hint') {
+      deepHintGiven = true;
+      lastAssistIdx = i;
+    } else {
+      probeGiven = true; // probe / counter_question / nudge
+      lastAssistIdx = i;
     }
   });
-  const runsSinceLastHint =
-    lastHintIdx === -1 ? Number.POSITIVE_INFINITY : scoped.length - lastHintIdx;
-  return { given, runsSinceLastHint };
+  const runsSinceLastAssist =
+    lastAssistIdx === -1 ? Number.POSITIVE_INFINITY : scoped.length - lastAssistIdx;
+  return { probeGiven, offerMade, deepHintGiven, runsSinceLastAssist };
 }
 
 /**
- * Decide whether to intervene after a code run. `signals` should include the run that just landed;
- * `budget` is derived from the PRIOR runs (excluding it). Pure + deterministic.
+ * Decide whether/how to intervene after a code run. `signals` includes the run that just landed;
+ * `budget` is derived from the PRIOR runs; `offerResolution` comes from fsm_state (how the candidate
+ * answered a prior offer). Pure + deterministic.
+ *
+ * Ladder (per question): gentle PROBE (auto) → after a beat, OFFER a deeper hint (don't inject it) →
+ * then the deep HINT is delivered ONLY if the candidate kept failing after the offer (they didn't
+ * decline). An accept/decline that arrives via the answer path is recorded as offerResolution and
+ * short-circuits here.
  */
 export function decideRunIntervention(
   signals: RunSignals,
   phase: string,
   budget: RunAssistBudget,
+  offerResolution: OfferResolution = 'none',
   policy: RunInterventionPolicy = BALANCED_RUN_POLICY
 ): RunDecision {
-  // Only ever intervene during the coding phase.
   if (phase !== 'coding') return QUIET;
-  // Stay quiet while progressing — the latest run worked, so the candidate is unblocked.
-  if (signals.lastRunPassed) return QUIET;
-  // Need a real struggle signal: repeated failures, not a single typo.
-  if (signals.consecutiveFailures < policy.minFailuresToTrigger) return QUIET;
-  // Per-question budget — a human interviewer doesn't hover over every failure.
-  if (budget.given >= policy.maxPerQuestion) return QUIET;
-  // Cooldown — never fire two hints within `cooldownRuns` of each other (per question).
-  if (budget.runsSinceLastHint < policy.cooldownRuns) return QUIET;
+  if (signals.lastRunPassed) return QUIET; // unblocked — stay quiet
+  if (signals.consecutiveFailures < policy.minFailuresToTrigger) return QUIET; // not a single typo
 
-  // Escalation ladder: first a probe (make them reason about the failure), then a concrete hint.
-  const strength = budget.given + 1;
-  const kind: InterventionKind = budget.given === 0 ? 'probe' : 'hint';
-  return {
-    intervene: true,
-    kind,
-    strength,
-    reason: `${signals.consecutiveFailures} consecutive failing runs`,
-  };
+  // Deep rung already resolved: the candidate declined the offer, or already got the deep hint
+  // (via the answer path). Never re-hint.
+  if (offerResolution === 'declined' || offerResolution === 'hinted') return QUIET;
+  if (budget.deepHintGiven) return QUIET; // deep hint already delivered on the run path
+
+  // The candidate was OFFERED a deeper hint and, instead of answering, kept running while failing —
+  // they're clearly still stuck, so deliver it now (they had the chance to decline).
+  if (budget.offerMade) {
+    return {
+      intervene: true,
+      kind: 'hint',
+      strength: 2,
+      reason: 'candidate kept failing after the hint offer',
+    };
+  }
+
+  // First stuck signal → a gentle Socratic probe, automatically (a real interviewer probes freely).
+  if (!budget.probeGiven) {
+    return { intervene: true, kind: 'probe', strength: 1, reason: 'first repeated failure' };
+  }
+
+  // Probe already fired — give them room, then OFFER a deeper hint (never auto-inject the deep one).
+  if (budget.runsSinceLastAssist < policy.cooldownRuns) return QUIET;
+  return { intervene: true, kind: 'offer', strength: 2, reason: 'still stuck after the probe' };
+}
+
+/**
+ * Classify a candidate's reply to a deep-hint offer: 'accept' (wants the hint), 'decline' (keep
+ * going on their own), or 'other' (neither — e.g. a clarifying question or an unrelated attempt;
+ * the caller leaves the offer open and processes the utterance normally). Pure heuristic — decline
+ * is checked first so "no hint" reads as a decline, not an accept. Fast + no LLM cost; an ambiguous
+ * reply is 'other', which never forces an unwanted hint.
+ */
+export function classifyOfferResponse(text: string): 'accept' | 'decline' | 'other' {
+  const t = (text ?? '').trim().toLowerCase();
+  if (!t) return 'other';
+  if (
+    /^(no|nope|nah)\b/.test(t) ||
+    /\b(keep going|keep trying|i'?m good|i'?m ok|i'?ve got it|got it|on my own|by myself|no thanks|no hint|i'?ll try|let me try|not yet|i'?m fine)\b/.test(
+      t
+    )
+  ) {
+    return 'decline';
+  }
+  if (
+    /^(yes|yeah|yep|sure|ok|okay|yea|please)\b/.test(t) ||
+    /\b(a hint|the hint|give me|show me|go ahead|i'?d like|pointer|point me|help me|would help|yes please)\b/.test(
+      t
+    )
+  ) {
+    return 'accept';
+  }
+  return 'other';
 }

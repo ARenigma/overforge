@@ -364,9 +364,11 @@ const KIND_GUIDANCE: Record<InterventionKind, string> = {
     'Challenge the claim or design choice the candidate just made — ask them to justify it. Do not give the answer.',
   probe:
     'The candidate seems stuck after repeated failing runs. Ask ONE focused question that makes them reason about WHY it is failing — do not tell them the fix.',
-  hint: 'The candidate is still stuck. Give ONE small, concrete nudge toward the issue (e.g. the class of bug, or the specific case to consider) WITHOUT writing the fix or any code.',
+  hint: 'The candidate has ASKED for (or clearly needs) a more concrete hint. Point them at the SPECIFIC failing case or the class of bug — more concrete than a probe — but still WITHOUT writing the fix or any code. The deeper they are stuck, the more specific the pointer.',
   nudge:
     'Gently check in and invite the candidate to talk through their current approach in their own words.',
+  offer:
+    'The candidate is still stuck after your earlier probe. OFFER a more concrete hint — ask, in ONE warm sentence, whether they would like a bigger hint or would rather keep going. Do NOT give the hint itself yet, and do not reveal anything about the solution.',
 };
 
 function buildInterventionPrompt(req: InterventionRequest): string {
@@ -386,6 +388,10 @@ function buildInterventionPrompt(req: InterventionRequest): string {
     req.code ? `Candidate's current code:\n${req.code.slice(0, 1500)}` : '',
     runs ? `Recent run results (oldest→newest):\n${runs}` : '',
     req.testSummary ? `Latest run outcome: ${req.testSummary}` : '',
+    // Depth signal: the more consecutive failures, the more concrete (but still no-spoiler) the hint.
+    req.consecutiveFailures && req.consecutiveFailures >= 4
+      ? `The candidate has failed ${req.consecutiveFailures} runs in a row — they are quite stuck, so be more concrete about WHICH case or bug class to look at (still no code, no full solution).`
+      : '',
     recent ? `Recent transcript:\n${recent}` : '',
     'Produce only your single short intervention.',
   ]

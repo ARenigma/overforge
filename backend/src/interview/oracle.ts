@@ -54,6 +54,11 @@ export interface InterventionRequest {
   /** Short factual note on the latest run's hidden-test outcome (e.g. "ran clean but failed 2/6
    *  hidden tests" vs "errored") so the hint targets the real failure — never the raw test I/O. */
   testSummary?: string | null;
+  /** Escalation level (1 = gentle probe, 2 = deeper hint) — lets a deeper rung be worded more
+   *  specifically than the probe. */
+  strength?: number;
+  /** How many consecutive failing runs the candidate is on — signals HOW stuck they are. */
+  consecutiveFailures?: number;
 }
 
 /** A candidate utterance whose intent (a clarifying QUESTION vs an ANSWER) is not yet known. */
@@ -157,6 +162,8 @@ export class DeterministicOracle implements Oracle {
       probe: "Walk me through what you expected to happen versus what you're seeing.",
       hint: 'Take another look at your edge cases — what happens at the boundaries of your input?',
       nudge: "Talk me through where you're at — what are you trying right now?",
+      offer:
+        "You've hit this a few times — would you like a more concrete hint, or would you rather keep going?",
     };
     return { text: canned[req.kind], expects: 'code' };
   }
