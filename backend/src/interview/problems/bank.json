@@ -19,13 +19,34 @@
     ],
     "constraints": "1 <= len(sentence) <= 1000; sentence contains only printable ASCII; words are separated by exactly one space; no leading/trailing spaces in input.",
     "hiddenTests": [
-      { "input": "one", "expected": "one" },
-      { "input": "a b", "expected": "b a" },
-      { "input": "to be or not to be", "expected": "be to not or be to" },
-      { "input": "abc def ghi jkl mno", "expected": "mno jkl ghi def abc" },
-      { "input": "i love coding interviews", "expected": "interviews coding love i" },
-      { "input": "x", "expected": "x" },
-      { "input": "do or do not", "expected": "not do or do" }
+      {
+        "input": "one",
+        "expected": "one"
+      },
+      {
+        "input": "a b",
+        "expected": "b a"
+      },
+      {
+        "input": "to be or not to be",
+        "expected": "be to not or be to"
+      },
+      {
+        "input": "abc def ghi jkl mno",
+        "expected": "mno jkl ghi def abc"
+      },
+      {
+        "input": "i love coding interviews",
+        "expected": "interviews coding love i"
+      },
+      {
+        "input": "x",
+        "expected": "x"
+      },
+      {
+        "input": "do or do not",
+        "expected": "not do or do"
+      }
     ],
     "referencePython": "import sys\nwords = sys.stdin.read().split()\nprint(' '.join(reversed(words)))"
   },
@@ -49,14 +70,38 @@
     ],
     "constraints": "1 <= len(s) <= 10^5; string contains only lowercase English letters a-z.",
     "hiddenTests": [
-      { "input": "a", "expected": "1 0" },
-      { "input": "b", "expected": "0 1" },
-      { "input": "bcdfg", "expected": "0 5" },
-      { "input": "programming", "expected": "3 8" },
-      { "input": "aabbccdd", "expected": "2 6" },
-      { "input": "aaaa", "expected": "4 0" },
-      { "input": "zzzzzz", "expected": "0 6" },
-      { "input": "abcdefghij", "expected": "3 7" }
+      {
+        "input": "a",
+        "expected": "1 0"
+      },
+      {
+        "input": "b",
+        "expected": "0 1"
+      },
+      {
+        "input": "bcdfg",
+        "expected": "0 5"
+      },
+      {
+        "input": "programming",
+        "expected": "3 8"
+      },
+      {
+        "input": "aabbccdd",
+        "expected": "2 6"
+      },
+      {
+        "input": "aaaa",
+        "expected": "4 0"
+      },
+      {
+        "input": "zzzzzz",
+        "expected": "0 6"
+      },
+      {
+        "input": "abcdefghij",
+        "expected": "3 7"
+      }
     ],
     "referencePython": "import sys\ns = sys.stdin.read().strip()\nvowels = sum(1 for c in s if c in 'aeiou')\nprint(vowels, len(s) - vowels)"
   },
@@ -80,14 +125,38 @@
     ],
     "constraints": "-10^6 <= A <= B <= 10^6.",
     "hiddenTests": [
-      { "input": "1 1", "expected": "1" },
-      { "input": "3 3", "expected": "Fizz" },
-      { "input": "5 5", "expected": "Buzz" },
-      { "input": "15 15", "expected": "FizzBuzz" },
-      { "input": "30 30", "expected": "FizzBuzz" },
-      { "input": "-5 0", "expected": "Buzz\n-4\nFizz\n-2\n-1\nFizzBuzz" },
-      { "input": "1 5", "expected": "1\n2\nFizz\n4\nBuzz" },
-      { "input": "13 16", "expected": "13\n14\nFizzBuzz\n16" }
+      {
+        "input": "1 1",
+        "expected": "1"
+      },
+      {
+        "input": "3 3",
+        "expected": "Fizz"
+      },
+      {
+        "input": "5 5",
+        "expected": "Buzz"
+      },
+      {
+        "input": "15 15",
+        "expected": "FizzBuzz"
+      },
+      {
+        "input": "30 30",
+        "expected": "FizzBuzz"
+      },
+      {
+        "input": "-5 0",
+        "expected": "Buzz\n-4\nFizz\n-2\n-1\nFizzBuzz"
+      },
+      {
+        "input": "1 5",
+        "expected": "1\n2\nFizz\n4\nBuzz"
+      },
+      {
+        "input": "13 16",
+        "expected": "13\n14\nFizzBuzz\n16"
+      }
     ],
     "referencePython": "import sys\na, b = map(int, sys.stdin.read().split())\nfor n in range(a, b + 1):\n    if n % 15 == 0:\n        print('FizzBuzz')\n    elif n % 3 == 0:\n        print('Fizz')\n    elif n % 5 == 0:\n        print('Buzz')\n    else:\n        print(n)"
   },
@@ -112,13 +181,34 @@
     ],
     "constraints": "2 <= N <= 10^5; -10^9 <= each integer <= 10^9; -2*10^9 <= T <= 2*10^9; exactly one solution exists.",
     "hiddenTests": [
-      { "input": "2 0\n-1 1", "expected": "0 1" },
-      { "input": "2 0\n0 0", "expected": "0 1" },
-      { "input": "5 -3\n-5 2 -1 4 3", "expected": "0 1" },
-      { "input": "5 1\n0 4 3 2 1", "expected": "0 4" },
-      { "input": "6 10\n1 2 3 4 5 6", "expected": "3 5" },
-      { "input": "3 100\n50 50 1", "expected": "0 1" },
-      { "input": "4 -10\n-7 -3 -5 2", "expected": "0 1" }
+      {
+        "input": "2 0\n-1 1",
+        "expected": "0 1"
+      },
+      {
+        "input": "2 0\n0 0",
+        "expected": "0 1"
+      },
+      {
+        "input": "5 -3\n-5 2 -1 4 3",
+        "expected": "0 1"
+      },
+      {
+        "input": "5 1\n0 4 3 2 1",
+        "expected": "0 4"
+      },
+      {
+        "input": "6 10\n1 2 3 4 5 6",
+        "expected": "3 5"
+      },
+      {
+        "input": "3 100\n50 50 1",
+        "expected": "0 1"
+      },
+      {
+        "input": "4 -10\n-7 -3 -5 2",
+        "expected": "0 1"
+      }
     ],
     "referencePython": "import sys\ndata = sys.stdin.read().split()\nn, t = int(data[0]), int(data[1])\nnums = list(map(int, data[2:2+n]))\nseen = {}\nfor i, v in enumerate(nums):\n    comp = t - v\n    if comp in seen:\n        a, b = seen[comp], i\n        print(min(a,b), max(a,b))\n        break\n    seen[v] = i"
   },
@@ -142,15 +232,42 @@
     ],
     "constraints": "0 <= len(S) <= 10^5; S contains printable ASCII characters (codes 32–126).",
     "hiddenTests": [
-      { "input": "", "expected": "0" },
-      { "input": "a", "expected": "1" },
-      { "input": "au", "expected": "2" },
-      { "input": "pwwkew", "expected": "3" },
-      { "input": "dvdf", "expected": "3" },
-      { "input": "abcdefghijklmnop", "expected": "16" },
-      { "input": "aab", "expected": "2" },
-      { "input": " !@#$%", "expected": "6" },
-      { "input": "abba", "expected": "2" }
+      {
+        "input": "",
+        "expected": "0"
+      },
+      {
+        "input": "a",
+        "expected": "1"
+      },
+      {
+        "input": "au",
+        "expected": "2"
+      },
+      {
+        "input": "pwwkew",
+        "expected": "3"
+      },
+      {
+        "input": "dvdf",
+        "expected": "3"
+      },
+      {
+        "input": "abcdefghijklmnop",
+        "expected": "16"
+      },
+      {
+        "input": "aab",
+        "expected": "2"
+      },
+      {
+        "input": " !@#$%",
+        "expected": "6"
+      },
+      {
+        "input": "abba",
+        "expected": "2"
+      }
     ],
     "referencePython": "import sys\ns = sys.stdin.readline().rstrip('\\n')\nlast = {}\nbest = 0\nleft = 0\nfor right, c in enumerate(s):\n    if c in last and last[c] >= left:\n        left = last[c] + 1\n    last[c] = right\n    best = max(best, right - left + 1)\nprint(best)"
   },
@@ -174,13 +291,38 @@
     ],
     "constraints": "1 <= N <= 10^4; each word: 1..20 lowercase letters.",
     "hiddenTests": [
-      { "input": "1\nz", "expected": "1\n1" },
-      { "input": "3\nabc\ncba\nbca", "expected": "1\n3" },
-      { "input": "4\nab\nba\ncd\ndc", "expected": "2\n2\n2" },
-      { "input": "5\na\nb\nc\nd\ne", "expected": "5\n1\n1\n1\n1\n1" },
-      { "input": "3\nlisten\nsilent\nenlist", "expected": "1\n3" },
-      { "input": "4\ndog\ngod\ncat\ntac", "expected": "2\n2\n2" },
-      { "input": "2\nabc\ndef", "expected": "2\n1\n1" }
+      {
+        "input": "1\nz",
+        "expected": "1\n1"
+      },
+      {
+        "input": "3\nabc\ncba\nbca",
+        "expected": "1\n3"
+      },
+      {
+        "input": "4\nab\nba\ncd\ndc",
+        "expected": "2\n2\n2"
+      },
+      {
+        "input": "5\na\nb\nc\nd\ne",
+        "expected": "5\n1\n1\n1\n1\n1"
+      },
+      {
+        "input": "3\nlisten\nsilent\nenlist",
+        "expected": "1\n3"
+      },
+      {
+        "input": "4\ndog\ngod\ncat\ntac",
+        "expected": "2\n2\n2"
+      },
+      {
+        "input": "2\nabc\ndef",
+        "expected": "2\n1\n1"
+      },
+      {
+        "input": "7\nab\nba\nabc\ncab\nbca\nx\ny",
+        "expected": "4\n1\n1\n2\n3"
+      }
     ],
     "referencePython": "import sys\nfrom collections import defaultdict\nlines = sys.stdin.read().splitlines()\nn = int(lines[0])\nwords = [lines[i+1].strip() for i in range(n)]\ngroups = defaultdict(int)\nfor w in words:\n    groups[tuple(sorted(w))] += 1\nsizes = sorted(groups.values())\nprint(len(sizes))\nfor s in sizes:\n    print(s)"
   },
@@ -205,14 +347,38 @@
     ],
     "constraints": "1 <= N <= 10^5; 0 <= price <= 10^9.",
     "hiddenTests": [
-      { "input": "1\n5", "expected": "0" },
-      { "input": "2\n1 2", "expected": "1" },
-      { "input": "2\n2 1", "expected": "0" },
-      { "input": "3\n1 1 1", "expected": "0" },
-      { "input": "4\n3 1 4 2", "expected": "3" },
-      { "input": "5\n1 2 3 4 5", "expected": "4" },
-      { "input": "6\n2 4 1 7 0 3", "expected": "6" },
-      { "input": "3\n0 0 0", "expected": "0" }
+      {
+        "input": "1\n5",
+        "expected": "0"
+      },
+      {
+        "input": "2\n1 2",
+        "expected": "1"
+      },
+      {
+        "input": "2\n2 1",
+        "expected": "0"
+      },
+      {
+        "input": "3\n1 1 1",
+        "expected": "0"
+      },
+      {
+        "input": "4\n3 1 4 2",
+        "expected": "3"
+      },
+      {
+        "input": "5\n1 2 3 4 5",
+        "expected": "4"
+      },
+      {
+        "input": "6\n2 4 1 7 0 3",
+        "expected": "6"
+      },
+      {
+        "input": "3\n0 0 0",
+        "expected": "0"
+      }
     ],
     "referencePython": "import sys\nlines = sys.stdin.read().split()\nn = int(lines[0])\nprices = list(map(int, lines[1:n+1]))\nmin_price = float('inf')\nbest = 0\nfor p in prices:\n    min_price = min(min_price, p)\n    best = max(best, p - min_price)\nprint(best)"
   },
@@ -237,14 +403,38 @@
     ],
     "constraints": "1 <= N <= 10^5; -10^9 <= start <= end <= 10^9.",
     "hiddenTests": [
-      { "input": "1\n5 10", "expected": "5 10" },
-      { "input": "2\n1 2\n3 4", "expected": "1 4" },
-      { "input": "2\n1 5\n2 3", "expected": "1 5" },
-      { "input": "3\n1 1\n2 2\n3 3", "expected": "1 3" },
-      { "input": "4\n5 10\n1 3\n6 8\n15 18", "expected": "1 3\n5 10\n15 18" },
-      { "input": "3\n-5 -3\n-4 0\n1 2", "expected": "-5 2" },
-      { "input": "2\n0 0\n0 0", "expected": "0 0" },
-      { "input": "3\n1 10\n2 5\n6 9", "expected": "1 10" }
+      {
+        "input": "1\n5 10",
+        "expected": "5 10"
+      },
+      {
+        "input": "2\n1 2\n3 4",
+        "expected": "1 4"
+      },
+      {
+        "input": "2\n1 5\n2 3",
+        "expected": "1 5"
+      },
+      {
+        "input": "3\n1 1\n2 2\n3 3",
+        "expected": "1 3"
+      },
+      {
+        "input": "4\n5 10\n1 3\n6 8\n15 18",
+        "expected": "1 3\n5 10\n15 18"
+      },
+      {
+        "input": "3\n-5 -3\n-4 0\n1 2",
+        "expected": "-5 2"
+      },
+      {
+        "input": "2\n0 0\n0 0",
+        "expected": "0 0"
+      },
+      {
+        "input": "3\n1 10\n2 5\n6 9",
+        "expected": "1 10"
+      }
     ],
     "referencePython": "import sys\nlines = sys.stdin.read().splitlines()\nn = int(lines[0])\nintervals = []\nfor i in range(1, n+1):\n    a, b = map(int, lines[i].split())\n    intervals.append((a, b))\nintervals.sort()\nmerged = []\nfor start, end in intervals:\n    if merged and start <= merged[-1][1] + 1:\n        merged[-1] = (merged[-1][0], max(merged[-1][1], end))\n    else:\n        merged.append((start, end))\nfor a, b in merged:\n    print(a, b)"
   },
@@ -269,14 +459,38 @@
     ],
     "constraints": "1 <= len(word) <= 10; 0 <= N <= 5000; all words are lowercase English letters and the same length.",
     "hiddenTests": [
-      { "input": "a\nb\n1\nb", "expected": "2" },
-      { "input": "a\nb\n0\n", "expected": "0" },
-      { "input": "abc\nabc\n1\nabc", "expected": "1" },
-      { "input": "hot\ndot\n2\nhot\ndot", "expected": "2" },
-      { "input": "hit\ncog\n6\nhot\ndot\ndog\nlot\nlog\ncog", "expected": "5" },
-      { "input": "red\ntax\n6\nted\ntex\nred\ntad\nden\ntex", "expected": "0" },
-      { "input": "hot\ncog\n5\nhot\ndot\ndog\nlog\ncog", "expected": "4" },
-      { "input": "hit\nhit\n1\nhit", "expected": "1" }
+      {
+        "input": "a\nb\n1\nb",
+        "expected": "2"
+      },
+      {
+        "input": "a\nb\n0\n",
+        "expected": "0"
+      },
+      {
+        "input": "abc\nabc\n1\nabc",
+        "expected": "1"
+      },
+      {
+        "input": "hot\ndot\n2\nhot\ndot",
+        "expected": "2"
+      },
+      {
+        "input": "hit\ncog\n6\nhot\ndot\ndog\nlot\nlog\ncog",
+        "expected": "5"
+      },
+      {
+        "input": "red\ntax\n6\nted\ntex\nred\ntad\nden\ntex",
+        "expected": "0"
+      },
+      {
+        "input": "hot\ncog\n5\nhot\ndot\ndog\nlog\ncog",
+        "expected": "4"
+      },
+      {
+        "input": "hit\nhit\n1\nhit",
+        "expected": "1"
+      }
     ],
     "referencePython": "import sys\nfrom collections import deque\nlines = sys.stdin.read().splitlines()\nbegin = lines[0].strip()\nend = lines[1].strip()\nn = int(lines[2].strip())\nword_set = set()\nfor i in range(3, 3 + n):\n    if i < len(lines) and lines[i].strip():\n        word_set.add(lines[i].strip())\nif end not in word_set:\n    print(0)\nelse:\n    if begin == end:\n        print(1)\n    else:\n        queue = deque([(begin, 1)])\n        visited = {begin}\n        found = 0\n        while queue:\n            word, length = queue.popleft()\n            for i in range(len(word)):\n                for c in 'abcdefghijklmnopqrstuvwxyz':\n                    if c == word[i]:\n                        continue\n                    candidate = word[:i] + c + word[i+1:]\n                    if candidate == end:\n                        found = length + 1\n                        break\n                    if candidate in word_set and candidate not in visited:\n                        visited.add(candidate)\n                        queue.append((candidate, length + 1))\n                if found:\n                    break\n            if found:\n                break\n        print(found)"
   },
@@ -286,7 +500,7 @@
     "difficulty": "hard",
     "levels": ["staff"],
     "tags": ["design", "hashing", "linked-list", "simulation"],
-    "statement": "Implement an LRU (Least Recently Used) cache with a fixed capacity. The cache supports two operations:\n\n- `GET k` — return the value associated with key `k`, or `-1` if not present. A successful GET makes `k` the most recently used.\n- `PUT k v` — insert key `k` with value `v`. If `k` already exists, update its value and make it most recently used. If the cache is at capacity, evict the least recently used key before inserting.\n\nKeys and values are non-negative integers.\n\n**Input format:**\n- Line 1: integer C (cache capacity, C >= 1).\n- Line 2: integer Q (number of operations).\n- Next Q lines: either `GET k` or `PUT k v`.\n\n**Output format:** For each `GET` operation, print the result on its own line (the value or -1). `PUT` operations produce no output.",
+    "statement": "Implement an LRU (Least Recently Used) cache with a fixed capacity. The cache supports two operations:\n\n- `GET k` — return the value associated with key `k`, or `-1` if not present. A successful GET makes `k` the most recently used.\n- `PUT k v` — insert key `k` with value `v`. If `k` already exists, update its value and make it most recently used. If the cache is at capacity, evict the least recently used key before inserting.\n\nKeys and values are non-negative integers.\n\n**Input format:**\n- Line 1: integer C (cache capacity, C >= 1).\n- Line 2: integer Q (number of operations).\n- Next Q lines: either `GET k` or `PUT k v`.\n\n**Output format:** For each `GET` operation, print the result on its own line (the value or -1). `PUT` operations produce no output.\n\nYou may use your language's standard-library data structures.",
     "examples": [
       {
         "input": "2\n8\nPUT 1 1\nPUT 2 2\nGET 1\nPUT 3 3\nGET 2\nPUT 4 4\nGET 1\nGET 3",
@@ -296,21 +510,257 @@
     ],
     "constraints": "1 <= C <= 3000; 1 <= Q <= 10^4; 0 <= k, v <= 10^6.",
     "hiddenTests": [
-      { "input": "1\n4\nPUT 1 10\nGET 1\nPUT 2 20\nGET 1", "expected": "10\n-1" },
-      { "input": "2\n5\nPUT 1 1\nPUT 2 2\nPUT 1 10\nGET 1\nGET 2", "expected": "10\n2" },
-      { "input": "3\n6\nPUT 1 1\nPUT 2 2\nPUT 3 3\nGET 1\nPUT 4 4\nGET 2", "expected": "1\n-1" },
-      { "input": "2\n6\nPUT 1 1\nPUT 2 2\nGET 1\nPUT 3 3\nGET 2\nGET 3", "expected": "1\n-1\n3" },
-      { "input": "1\n3\nPUT 5 100\nPUT 5 200\nGET 5", "expected": "200" },
+      {
+        "input": "1\n4\nPUT 1 10\nGET 1\nPUT 2 20\nGET 1",
+        "expected": "10\n-1"
+      },
+      {
+        "input": "2\n5\nPUT 1 1\nPUT 2 2\nPUT 1 10\nGET 1\nGET 2",
+        "expected": "10\n2"
+      },
+      {
+        "input": "3\n6\nPUT 1 1\nPUT 2 2\nPUT 3 3\nGET 1\nPUT 4 4\nGET 2",
+        "expected": "1\n-1"
+      },
+      {
+        "input": "2\n6\nPUT 1 1\nPUT 2 2\nGET 1\nPUT 3 3\nGET 2\nGET 3",
+        "expected": "1\n-1\n3"
+      },
+      {
+        "input": "1\n3\nPUT 5 100\nPUT 5 200\nGET 5",
+        "expected": "200"
+      },
       {
         "input": "2\n7\nPUT 0 0\nPUT 1 1\nGET 0\nGET 1\nGET 0\nPUT 2 2\nGET 1",
         "expected": "0\n1\n0\n-1"
       },
-      { "input": "3\n3\nGET 0\nGET 1\nGET 2", "expected": "-1\n-1\n-1" },
+      {
+        "input": "3\n3\nGET 0\nGET 1\nGET 2",
+        "expected": "-1\n-1\n-1"
+      },
       {
         "input": "2\n8\nPUT 1 1\nPUT 2 2\nGET 1\nPUT 3 3\nGET 2\nPUT 4 4\nGET 1\nGET 3",
         "expected": "1\n-1\n-1\n3"
       }
     ],
     "referencePython": "import sys\nfrom collections import OrderedDict\n\ndef main():\n    data = sys.stdin.read().splitlines()\n    capacity = int(data[0])\n    q = int(data[1])\n    cache = OrderedDict()\n    out = []\n    for i in range(2, 2 + q):\n        line = data[i].split()\n        op = line[0]\n        if op == 'GET':\n            k = int(line[1])\n            if k in cache:\n                cache.move_to_end(k)\n                out.append(str(cache[k]))\n            else:\n                out.append('-1')\n        elif op == 'PUT':\n            k, v = int(line[1]), int(line[2])\n            if k in cache:\n                cache.move_to_end(k)\n                cache[k] = v\n            else:\n                if len(cache) >= capacity:\n                    cache.popitem(last=False)\n                cache[k] = v\n    print('\\n'.join(out))\n\nmain()"
+  },
+  {
+    "slug": "course-schedule",
+    "title": "Course Schedule (Can Finish?)",
+    "difficulty": "medium",
+    "levels": ["senior"],
+    "tags": ["graphs", "topological-sort", "bfs"],
+    "statement": "There are N courses labeled 0..N-1. You are given M prerequisite pairs `a b`, meaning course b must be taken before course a. Determine whether it is possible to finish all courses (i.e. the prerequisite graph has no cycle).\n\n**Input format:**\n- Line 1: two space-separated integers N and M.\n- Next M lines: two space-separated integers `a b` (b is a prerequisite of a).\n\n**Output format:** `1` if all courses can be finished, otherwise `0`.",
+    "examples": [
+      {
+        "input": "2 1\n1 0",
+        "output": "1",
+        "explanation": "Take course 0, then course 1."
+      },
+      {
+        "input": "2 2\n1 0\n0 1",
+        "output": "0",
+        "explanation": "0 requires 1 and 1 requires 0 — a cycle."
+      }
+    ],
+    "constraints": "1 <= N <= 10^5; 0 <= M <= 2*10^5; 0 <= a,b < N; pairs may repeat.",
+    "hiddenTests": [
+      {
+        "input": "1 0",
+        "expected": "1"
+      },
+      {
+        "input": "2 1\n0 1",
+        "expected": "1"
+      },
+      {
+        "input": "3 3\n0 1\n1 2\n2 0",
+        "expected": "0"
+      },
+      {
+        "input": "4 3\n1 0\n2 0\n3 0",
+        "expected": "1"
+      },
+      {
+        "input": "5 0",
+        "expected": "1"
+      },
+      {
+        "input": "3 2\n1 0\n2 1",
+        "expected": "1"
+      },
+      {
+        "input": "6 6\n1 0\n2 1\n3 2\n4 3\n5 4\n0 5",
+        "expected": "0"
+      },
+      {
+        "input": "4 4\n1 0\n2 1\n3 2\n1 3",
+        "expected": "0"
+      }
+    ],
+    "referencePython": "import sys\nfrom collections import deque\ndata=sys.stdin.read().split()\ni=0\nn=int(data[i]);i+=1\nm=int(data[i]);i+=1\nadj=[[] for _ in range(n)]\nindeg=[0]*n\nfor _ in range(m):\n    a=int(data[i]);b=int(data[i+1]);i+=2\n    adj[b].append(a)\n    indeg[a]+=1\nq=deque(x for x in range(n) if indeg[x]==0)\nseen=0\nwhile q:\n    u=q.popleft();seen+=1\n    for v in adj[u]:\n        indeg[v]-=1\n        if indeg[v]==0:\n            q.append(v)\nprint(1 if seen==n else 0)"
+  },
+  {
+    "slug": "coin-change-min",
+    "title": "Coin Change (Fewest Coins)",
+    "difficulty": "medium",
+    "levels": ["senior"],
+    "tags": ["dynamic-programming", "arrays"],
+    "statement": "Given N coin denominations and a target amount, return the fewest number of coins needed to make up the amount. You may use each denomination unlimited times. If the amount cannot be made, output -1.\n\n**Input format:**\n- Line 1: two space-separated integers N and amount.\n- Line 2: N space-separated positive integers (the denominations).\n\n**Output format:** A single integer — the minimum number of coins, or -1.",
+    "examples": [
+      {
+        "input": "3 11\n1 2 5",
+        "output": "3",
+        "explanation": "11 = 5 + 5 + 1 (3 coins)."
+      },
+      {
+        "input": "1 3\n2",
+        "output": "-1",
+        "explanation": "3 cannot be made from 2s."
+      }
+    ],
+    "constraints": "1 <= N <= 20; 0 <= amount <= 10^4; 1 <= denomination <= 10^4.",
+    "hiddenTests": [
+      {
+        "input": "1 0\n7",
+        "expected": "0"
+      },
+      {
+        "input": "1 1\n1",
+        "expected": "1"
+      },
+      {
+        "input": "2 3\n1 2",
+        "expected": "2"
+      },
+      {
+        "input": "3 6\n1 3 4",
+        "expected": "2"
+      },
+      {
+        "input": "2 100\n1 5",
+        "expected": "20"
+      },
+      {
+        "input": "1 7\n3",
+        "expected": "-1"
+      },
+      {
+        "input": "4 11\n1 2 5 10",
+        "expected": "2"
+      },
+      {
+        "input": "2 0\n3 5",
+        "expected": "0"
+      }
+    ],
+    "referencePython": "import sys\ndata=sys.stdin.read().split()\nn=int(data[0]);amount=int(data[1])\ncoins=list(map(int,data[2:2+n]))\nINF=float('inf')\ndp=[0]+[INF]*amount\nfor a in range(1,amount+1):\n    for c in coins:\n        if c<=a and dp[a-c]+1<dp[a]:\n            dp[a]=dp[a-c]+1\nprint(dp[amount] if dp[amount]!=INF else -1)"
+  },
+  {
+    "slug": "time-map",
+    "title": "Time-Based Key-Value Store",
+    "difficulty": "hard",
+    "levels": ["staff"],
+    "tags": ["design", "binary-search", "hashing"],
+    "statement": "Implement a time-based key-value store supporting:\n- `SET key value timestamp` — store `value` for `key` at the given integer timestamp.\n- `GET key timestamp` — return the value stored for `key` at the largest timestamp <= the query timestamp; if none exists, return -1.\n\nValues are integers. For any given key, the SET timestamps are strictly increasing in input order.\n\n**Input format:**\n- Line 1: integer Q (number of operations).\n- Next Q lines: either `SET key value timestamp` or `GET key timestamp`. Keys are lowercase words.\n\n**Output format:** For each `GET`, print its result on its own line (the value, or -1). `SET` produces no output.",
+    "examples": [
+      {
+        "input": "5\nSET foo 1 1\nGET foo 1\nGET foo 3\nSET foo 2 4\nGET foo 4",
+        "output": "1\n1\n2",
+        "explanation": "At ts 1 and 3 the latest set <= ts is (1@1). After setting 2@4, GET at 4 returns 2."
+      },
+      {
+        "input": "3\nSET a 5 10\nGET a 5\nGET a 100",
+        "output": "-1\n5"
+      }
+    ],
+    "constraints": "1 <= Q <= 10^4; 0 <= timestamp <= 10^9; 0 <= value <= 10^9; per-key SET timestamps strictly increasing.",
+    "hiddenTests": [
+      {
+        "input": "1\nGET x 5",
+        "expected": "-1"
+      },
+      {
+        "input": "2\nSET a 1 1\nGET a 0",
+        "expected": "-1"
+      },
+      {
+        "input": "3\nSET a 1 1\nSET a 2 2\nGET a 2",
+        "expected": "2"
+      },
+      {
+        "input": "3\nSET a 1 1\nSET a 2 2\nGET a 1",
+        "expected": "1"
+      },
+      {
+        "input": "4\nSET a 1 5\nSET a 2 10\nGET a 7\nGET a 10",
+        "expected": "1\n2"
+      },
+      {
+        "input": "5\nSET k 100 1\nSET k 200 5\nSET k 300 9\nGET k 4\nGET k 9",
+        "expected": "100\n300"
+      },
+      {
+        "input": "2\nSET a 9 1000000\nGET a 999999",
+        "expected": "-1"
+      },
+      {
+        "input": "4\nSET a 1 1\nSET b 2 1\nGET a 5\nGET b 5",
+        "expected": "1\n2"
+      }
+    ],
+    "referencePython": "import sys, bisect\nfrom collections import defaultdict\ndata=sys.stdin.read().splitlines()\nq=int(data[0])\ntimes=defaultdict(list)\nvals=defaultdict(list)\nout=[]\nfor i in range(1,1+q):\n    p=data[i].split()\n    if p[0]=='SET':\n        key=p[1];v=int(p[2]);ts=int(p[3])\n        times[key].append(ts);vals[key].append(v)\n    else:\n        key=p[1];ts=int(p[2])\n        arr=times.get(key)\n        if not arr:\n            out.append('-1')\n        else:\n            pos=bisect.bisect_right(arr,ts)-1\n            out.append(str(vals[key][pos]) if pos>=0 else '-1')\nprint('\\n'.join(out))"
+  },
+  {
+    "slug": "sliding-window-max",
+    "title": "Sliding Window Maximum",
+    "difficulty": "hard",
+    "levels": ["staff"],
+    "tags": ["arrays", "deque", "sliding-window", "monotonic-queue"],
+    "statement": "Given an array of N integers and a window size K, output the maximum of each contiguous window of size K as the window slides from left to right.\n\n**Input format:**\n- Line 1: two space-separated integers N and K (1 <= K <= N).\n- Line 2: N space-separated integers.\n\n**Output format:** N-K+1 space-separated integers — the maximum of each window in order.",
+    "examples": [
+      {
+        "input": "8 3\n1 3 -1 -3 5 3 6 7",
+        "output": "3 3 5 5 6 7",
+        "explanation": "Maxima of each size-3 window."
+      },
+      {
+        "input": "3 1\n1 2 3",
+        "output": "1 2 3"
+      }
+    ],
+    "constraints": "1 <= K <= N <= 10^5; -10^9 <= each integer <= 10^9.",
+    "hiddenTests": [
+      {
+        "input": "1 1\n5",
+        "expected": "5"
+      },
+      {
+        "input": "4 4\n4 3 2 1",
+        "expected": "4"
+      },
+      {
+        "input": "5 2\n1 2 3 4 5",
+        "expected": "2 3 4 5"
+      },
+      {
+        "input": "5 2\n5 4 3 2 1",
+        "expected": "5 4 3 2"
+      },
+      {
+        "input": "6 3\n9 1 1 9 1 1",
+        "expected": "9 9 9 9"
+      },
+      {
+        "input": "3 3\n-1 -2 -3",
+        "expected": "-1"
+      },
+      {
+        "input": "7 3\n1 3 1 2 0 5 4",
+        "expected": "3 3 2 5 5"
+      }
+    ],
+    "referencePython": "import sys\nfrom collections import deque\ndata=sys.stdin.read().split()\nn=int(data[0]);k=int(data[1]);a=list(map(int,data[2:2+n]))\ndq=deque();out=[]\nfor i in range(n):\n    while dq and a[dq[-1]]<=a[i]:\n        dq.pop()\n    dq.append(i)\n    while dq[0]<=i-k:\n        dq.popleft()\n    if i>=k-1:\n        out.append(str(a[dq[0]]))\nprint(' '.join(out))"
   }
 ]
