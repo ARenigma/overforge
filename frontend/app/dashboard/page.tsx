@@ -25,6 +25,10 @@ export default async function DashboardPage() {
     redirect('/auth');
   }
 
+  // Admin-only: the cost/usage analytics link (is_admin() checks public.admins). Non-admins never
+  // see the link, and the analytics RPC would return null for them anyway.
+  const { data: isAdmin } = await supabase.rpc('is_admin');
+
   const { data: interviews, error } = await supabase
     .from('interviews')
     .select('id, candidate_email, candidate_name, status, created_at, evaluation_score')
@@ -66,6 +70,14 @@ export default async function DashboardPage() {
 
           {/* Right: command menu + theme toggle + sign-out */}
           <div className="flex shrink-0 items-center gap-2">
+            {isAdmin ? (
+              <Link
+                href="/dashboard/analytics"
+                className="hidden text-sm text-muted-foreground transition-colors hover:text-foreground sm:inline-flex"
+              >
+                Cost &amp; usage
+              </Link>
+            ) : null}
             <CommandMenuTrigger className="hidden sm:inline-flex" />
             <ThemeToggle />
             <SignOutButton />

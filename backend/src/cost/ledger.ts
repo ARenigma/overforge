@@ -98,20 +98,37 @@ export async function rollupInterview(interviewId: string): Promise<void> {
     // that into the ledger as a single STT cost_event so cost_events is complete.
     const { data: vt } = await db
       .from('voice_turn_telemetry')
-      .select('audio_s')
+      .select('audio_s, shadow_engine')
       .eq('interview_id', interviewId);
-    const sttSeconds = (vt ?? []).reduce(
-      (s: number, r: { audio_s: number | null }) => s + (Number(r.audio_s) || 0),
-      0
-    );
+    const vtRows = (vt ?? []) as { audio_s: number | null; shadow_engine: string | null }[];
+    const sttSeconds = vtRows.reduce((s, r) => s + (Number(r.audio_s) || 0), 0);
     if (sttSeconds > 0) {
       await insertCostEvent({
         interview_id: interviewId,
         kind: 'stt',
         provider: 'assemblyai',
         audio_seconds: sttSeconds,
-        cost_usd: sttCost(sttSeconds),
+        cost_usd: sttCost(sttSeconds, 'assemblyai'),
       });
+    }
+    // Shadow STT (e.g. Soniox) runs in PARALLEL on the same audio — a real cost during the A/B AND
+    // the apples-to-apples cost comparison (same seconds, different rate) for the admin dashboard.
+    const shadowSeconds: Record<string, number> = {};
+    for (const r of vtRows) {
+      if (r.shadow_engine)
+        shadowSeconds[r.shadow_engine] =
+          (shadowSeconds[r.shadow_engine] ?? 0) + (Number(r.audio_s) || 0);
+    }
+    for (const [engine, secs] of Object.entries(shadowSeconds)) {
+      if (secs > 0) {
+        await insertCostEvent({
+          interview_id: interviewId,
+          kind: 'stt',
+          provider: engine,
+          audio_seconds: secs,
+          cost_usd: sttCost(secs, engine),
+        });
+      }
     }
 
     const { data: rows } = await db

@@ -58,9 +58,22 @@ export function ttsCost(chars: number): number {
   return (chars / 1e6) * num(process.env.TTS_USD_PER_MCHAR, 65); // ~$65/1M chars (Cartesia Sonic est.)
 }
 
-/** USD for `audioSeconds` of streaming STT (AssemblyAI bills per hour). */
-export function sttCost(audioSeconds: number): number {
-  return (audioSeconds / 3600) * num(process.env.STT_USD_PER_HOUR, 0.15); // ~$0.15/hr streaming (est.)
+// Per-provider streaming-STT rates (USD/hour). Enables the AssemblyAI-vs-Soniox cost comparison —
+// both engines bill on the SAME audio seconds, so the delta is purely the rate. Override per
+// provider via STT_USD_PER_HOUR_<PROVIDER> (e.g. STT_USD_PER_HOUR_SONIOX).
+const STT_RATES_PER_HOUR: Record<string, number> = {
+  assemblyai: 0.15,
+  soniox: 0.12,
+};
+
+/** USD for `audioSeconds` of streaming STT on a given provider (default AssemblyAI). */
+export function sttCost(audioSeconds: number, provider = 'assemblyai'): number {
+  const envKey = `STT_USD_PER_HOUR_${provider.toUpperCase()}`;
+  const perHour = num(
+    process.env[envKey] ?? (provider === 'assemblyai' ? process.env.STT_USD_PER_HOUR : undefined),
+    STT_RATES_PER_HOUR[provider] ?? 0.15
+  );
+  return (audioSeconds / 3600) * perHour;
 }
 
 /** USD for `execMs` of sandbox container time (self-hosted → default 0). */
