@@ -389,7 +389,12 @@ async function maybeResolveHintOffer(
     { kind: 'hint', strength: 2 },
     requestId
   );
-  return { utterance: hint, phase: ctx.phase, state: newCtx };
+  return {
+    utterance: hint,
+    phase: ctx.phase,
+    state: newCtx,
+    assist: { kind: 'hint', strength: 2 },
+  };
 }
 
 // ─────────────────────── Public orchestrator functions ───────────────────────
@@ -700,6 +705,11 @@ export interface AnswerResult {
   utterance: Utterance;
   phase: string;
   state: InterviewContext;
+  /** Set when this reply is an autonomous intervention (a follow-up probe/counter-question, or the
+   *  deep hint after an accepted offer) — the room styles it as the interviewer stepping in. The
+   *  same tag is persisted on the transcript turn, so a reload shows it identically; without this,
+   *  the live bubble lacked the hint styling until a refresh. */
+  assist?: { kind: InterventionKind; strength: number };
 }
 
 /** Replay the last processed answer's result without advancing (idempotent retry path). */
@@ -873,7 +883,7 @@ export async function submitAnswer(
 
   await persistTransition(interview, newCtx, effect, utterance, answer, requestId, assist);
 
-  return { utterance, phase: newCtx.phase, state: newCtx };
+  return { utterance, phase: newCtx.phase, state: newCtx, ...(assist ? { assist } : {}) };
 }
 
 /** Cap hidden tests executed per Run — bounds container spend on the shared box (bank problems

@@ -60,6 +60,9 @@ export interface AnswerResponse {
   utterance: Utterance;
   phase: InterviewPhase;
   state: Record<string, unknown>;
+  /** Set when the reply is an autonomous intervention (follow-up probe / accepted-offer hint) —
+   *  the room styles it with the assist accent live, matching what a reload restores. */
+  assist?: { kind: string; strength: number };
 }
 
 export interface RunResult {

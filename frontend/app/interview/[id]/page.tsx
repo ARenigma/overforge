@@ -940,7 +940,16 @@ export default function InterviewPage() {
       const res = await answerInterview(id, activeToken, text, requestId);
       pendingAnswerRef.current = null;
       setPhase(res.phase);
-      setMessages((prev) => [...prev, { role: 'ai', text: res.utterance.text }]);
+      // Carry the assist tag onto the live bubble (follow-up probe / accepted-offer hint) so the
+      // intervention styling shows immediately, exactly as a reload would restore it.
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          text: res.utterance.text,
+          ...(res.assist ? { assist: res.assist.kind } : {}),
+        },
+      ]);
       void speak('turn'); // speak the interviewer's reply (P1)
       if (res.phase === 'done') {
         setStage('done');
