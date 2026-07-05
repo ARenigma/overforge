@@ -38,7 +38,8 @@ export interface InterviewDetail {
   code_snapshot: string;
   code_runs: RunResult[];
   evaluation_score: Scorecard | null;
-  cost_summary: CostSummary | null;
+  // NOTE: cost ($) is ADMIN-ONLY and lives in the RLS-gated `interview_cost` table — it is
+  // deliberately NOT selected here so a regular interviewer's payload never contains it.
   metrics_summary: MetricsSummary | null;
   duration_seconds: number | null;
 }
@@ -49,4 +50,4 @@ export interface InterviewDetail {
  * Kept in a plain (non-'use client') module so the server component can import the value.
  */
 export const INTERVIEW_DETAIL_COLUMNS =
-  'id, candidate_email, candidate_name, status, created_at, transcript, code_snapshot, code_runs, evaluation_score, cost_summary, metrics_summary, duration_seconds';
+  'id, candidate_email, candidate_name, status, created_at, transcript, code_snapshot, code_runs, evaluation_score, metrics_summary, duration_seconds';

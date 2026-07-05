@@ -194,10 +194,18 @@ export async function rollupInterview(interviewId: string): Promise<void> {
       problems,
     };
 
+    // Cost ($) is ADMIN-ONLY → its own RLS-gated table, never on the interviewer-readable
+    // interviews row. metrics_summary + duration_seconds are interview-quality data (not cost) and
+    // stay on the interview.
+    await db.from('interview_cost').upsert({
+      interview_id: interviewId,
+      cost_summary,
+      total_usd: cost_summary.total_usd,
+      updated_at: new Date().toISOString(),
+    });
     await db
       .from('interviews')
       .update({
-        cost_summary,
         metrics_summary,
         ...(durationSeconds != null ? { duration_seconds: durationSeconds } : {}),
       })

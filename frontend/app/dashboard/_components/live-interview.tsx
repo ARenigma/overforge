@@ -9,7 +9,11 @@ import { StatusBadge, type BadgeIntent } from '@/components/ds/status-badge';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
 import { statusMeta } from '@/lib/interview-status';
 import { type Scorecard, regenerateInviteLink } from '@/lib/api';
-import { INTERVIEW_DETAIL_COLUMNS, type InterviewDetail } from '@/lib/interview-detail';
+import {
+  INTERVIEW_DETAIL_COLUMNS,
+  type InterviewDetail,
+  type CostSummary,
+} from '@/lib/interview-detail';
 import { Button } from '@/components/ui/button';
 import { Link } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -53,8 +57,27 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
+  // Admin-only cost. Fetched from the RLS-gated interview_cost table: a non-admin's read returns
+  // nothing (policy denies), so the cost panel never renders — and the dollars are never even in
+  // the payload. Admins (set directly in Supabase) get the row.
+  const [adminCost, setAdminCost] = useState<CostSummary | null>(null);
 
   const live = iv.status === 'in_progress' || iv.status === 'completed';
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await createClient()
+        .from('interview_cost')
+        .select('cost_summary')
+        .eq('interview_id', initial.id)
+        .maybeSingle();
+      if (!cancelled) setAdminCost((data?.cost_summary as CostSummary | undefined) ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [initial.id, iv.status]);
 
   useEffect(() => {
     if (!live) return;
@@ -337,7 +360,7 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
 
           {/* Cost & metrics — exact per-interview cost to you (raw usage is authoritative; $ is
               computed from configured rates). Only present once rolled up (at scoring). */}
-          {iv.cost_summary ? (
+          {adminCost ? (
             <section className="space-y-3">
               <h2 className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                 Cost &amp; metrics
@@ -346,11 +369,11 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
                 <div className="flex items-baseline justify-between gap-3">
                   <span className="text-sm text-muted-foreground">Cost to you</span>
                   <span className="text-2xl font-semibold tabular-nums text-foreground">
-                    ${iv.cost_summary.total_usd.toFixed(4)}
+                    ${adminCost.total_usd.toFixed(4)}
                   </span>
                 </div>
                 <ul className="space-y-1 border-t border-border pt-3 text-sm">
-                  {Object.entries(iv.cost_summary.by_kind).map(([k, v]) => (
+                  {Object.entries(adminCost.by_kind).map(([k, v]) => (
                     <li key={k} className="flex items-center justify-between">
                       <span className="capitalize text-muted-foreground">{k}</span>
                       <span className="font-mono text-xs tabular-nums text-foreground">
@@ -371,24 +394,22 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
                   <div className="flex justify-between">
                     <dt>Tokens</dt>
                     <dd className="font-mono tabular-nums text-foreground">
-                      {(
-                        iv.cost_summary.tokens.prompt + iv.cost_summary.tokens.completion
-                      ).toLocaleString()}
+                      {(adminCost.tokens.prompt + adminCost.tokens.completion).toLocaleString()}
                     </dd>
                   </div>
-                  {iv.cost_summary.stt_seconds > 0 ? (
+                  {adminCost.stt_seconds > 0 ? (
                     <div className="flex justify-between">
                       <dt>Speech</dt>
                       <dd className="font-mono tabular-nums text-foreground">
-                        {Math.round(iv.cost_summary.stt_seconds)}s
+                        {Math.round(adminCost.stt_seconds)}s
                       </dd>
                     </div>
                   ) : null}
-                  {iv.cost_summary.tts_chars > 0 ? (
+                  {adminCost.tts_chars > 0 ? (
                     <div className="flex justify-between">
                       <dt>TTS chars</dt>
                       <dd className="font-mono tabular-nums text-foreground">
-                        {iv.cost_summary.tts_chars.toLocaleString()}
+                        {adminCost.tts_chars.toLocaleString()}
                       </dd>
                     </div>
                   ) : null}
