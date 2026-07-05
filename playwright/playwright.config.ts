@@ -55,6 +55,13 @@ export default defineConfig({
       use: { ...baseUse, launchOptions: { args: chromiumArgs('silence.wav') } },
     },
     {
+      name: 'matrix',
+      testMatch: /behavior-matrix\.spec\.ts/,
+      // Text-driven like the mimic: silent mic so STT can't race the composer while the matrix
+      // drives the probing/hinting ladder + idle behaviors.
+      use: { ...baseUse, launchOptions: { args: chromiumArgs('silence.wav') } },
+    },
+    {
       name: 'stt',
       testMatch: /stt-smoke\.spec\.ts/,
       // Speech mic: a spoken clip (with a leading silence to clear the AEC warm-up) drives the

@@ -622,8 +622,14 @@ export default function InterviewPage() {
         { role: 'candidate' as const, text: cue.transcript },
         { role: 'ai' as const, text: cue.utterance.text },
       ]);
-      setPhase(cue.phase as InterviewPhase);
-      if (cue.phase === 'done') setStage('done');
+      // Adopt ONLY real FSM phases. The voice service also emits synthetic phases (the oral idle
+      // probe's 'idle_probe') — blindly adopting one clobbered the room phase: a straggler probe
+      // cue landing around the coding handoff unmounted the problem panel until the next real turn
+      // (caught by the behavior-matrix E2E). The utterance still plays either way.
+      if (PHASE_ORDER.includes(cue.phase as InterviewPhase)) {
+        setPhase(cue.phase as InterviewPhase);
+        if (cue.phase === 'done') setStage('done');
+      }
 
       // Stop mic capture and play the interviewer's TTS via the existing speak() path.
       setMicForwarding(false);
