@@ -391,10 +391,9 @@ describe('orchestrator end-to-end (offline)', () => {
     const runs = row.code_runs as Array<{ intervention?: { kind: string } }>;
     expect(runs.some((r) => r.intervention?.kind === 'probe')).toBe(true);
 
-    // Cooldown blocks the very next run; the one after OFFERS a deeper hint (never auto-injects it).
-    expect(
-      (await orch.recordRun(id, { language: 'python', source: 'x=' })).intervention
-    ).toBeUndefined();
+    // The candidate hits the IDENTICAL error every run (same source) → stagnant, so after the probe
+    // we escalate straight to the OFFER without burning the full cooldown (get help there sooner).
+    // The non-stagnant cooldown path is covered in intervention.test.ts.
     expect(
       (await orch.recordRun(id, { language: 'python', source: 'x=' })).intervention?.kind
     ).toBe('offer');

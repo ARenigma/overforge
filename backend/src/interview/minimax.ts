@@ -355,7 +355,15 @@ const INTERVENER_SYSTEM =
   'You are a balanced, senior technical interviewer stepping in mid-problem — present but not ' +
   'overbearing, like a real human interviewer. Speak in the first person, ONE short turn (1–2 ' +
   'sentences). Be specific and encouraging. NEVER write code or give away the solution; guide ' +
-  'the candidate to reach it themselves. Your turn is read ALOUD by text-to-speech: never speak ' +
+  'the candidate to reach it themselves. ' +
+  // Continuer (evidence-based, real-interviewer warmth): you MAY open with a brief, SPECIFIC
+  // acknowledgment of what the candidate actually said or built (e.g. "Nice — hashing to dedupe,
+  // that\'s clean.") before your question. It must reference their real content — NEVER generic
+  // filler like "Good answer", "That\'s a great point", or "Makes sense". Keep the whole turn to 1–2
+  // sentences even with the lead-in; if you have nothing specific to acknowledge, skip it entirely.
+  'You MAY lead with a brief, SPECIFIC acknowledgment of their actual approach or code before your ' +
+  'question, but never generic praise or filler, and never at the cost of the 1–2 sentence limit. ' +
+  'Your turn is read ALOUD by text-to-speech: never speak ' +
   'code identifiers/snake_case/camelCase/backticks — say them as natural words ("max attempts", ' +
   'not "max_attempts"). Never reveal scores or internal reasoning.';
 
@@ -384,7 +392,13 @@ function buildInterventionPrompt(req: InterventionRequest): string {
     levelGuidance(req.level),
     brief ? `Role context:\n${brief.slice(0, 2000)}` : '',
     req.problemStatement ? `The coding problem:\n${req.problemStatement.slice(0, 1500)}` : '',
-    KIND_GUIDANCE[req.kind],
+    // Path-B idle check-in: no run has failed, so OVERRIDE the failure-oriented nudge guidance with
+    // a content-free, situation-specific instruction. Never mention bugs, tests, errors, or fixes.
+    req.kind === 'nudge' && req.idleMode === 'blank'
+      ? 'The candidate has gone quiet on a BLANK editor — they may be thinking or unsure where to start. No code has run and nothing has failed. Give ONE warm, brief check-in that invites them to talk through their approach out loud, or to try a small example by hand. Do NOT mention bugs, tests, or fixes, and do NOT suggest an algorithm.'
+      : req.kind === 'nudge' && req.idleMode === 'partial'
+        ? 'The candidate wrote some code and then paused for a while without running it. No run has failed. Give ONE warm, brief check-in that invites them to walk you through what they have so far on a small input. Do NOT mention bugs, tests, or fixes, and do NOT suggest the solution.'
+        : KIND_GUIDANCE[req.kind],
     req.code ? `Candidate's current code:\n${req.code.slice(0, 1500)}` : '',
     runs ? `Recent run results (oldest→newest):\n${runs}` : '',
     req.testSummary ? `Latest run outcome: ${req.testSummary}` : '',

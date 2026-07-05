@@ -69,7 +69,10 @@ const QUIET: RunDecision = Object.freeze({
  * not an assist, so it's tracked separately and never counts toward the probe/hint accounting.
  */
 export function deriveRunAssistBudget(priorRuns: RunResult[], codeIndex: number): RunAssistBudget {
-  const scoped = priorRuns.filter((r) => r.codeIndex === codeIndex);
+  // Exclude synthetic idle markers: their 'nudge' is an idle check-in on the code-run channel, NOT
+  // a run-failure assist — counting it would set probeGiven and swallow the candidate's first real
+  // run-probe. The idle budget is tracked separately (idleNudgesGiven in signals.ts).
+  const scoped = priorRuns.filter((r) => r.codeIndex === codeIndex && r.status !== 'Idle');
   let probeGiven = false;
   let offerMade = false;
   let deepHintGiven = false;
@@ -113,6 +116,12 @@ export function decideRunIntervention(
   if (signals.lastRunPassed) return QUIET; // unblocked — stay quiet
   if (signals.consecutiveFailures < policy.minFailuresToTrigger) return QUIET; // not a single typo
 
+  // Forward progress DEFERS intervention: the candidate just improved their hidden-test pass count,
+  // so they're iterating productively (the exploratory-runner pattern) even though it isn't all
+  // green yet. Real interviewers stay quiet while a candidate is visibly moving forward. When the
+  // progress plateaus (pass count stops climbing) this clears and the ladder resumes — self-correcting.
+  if (signals.passedProgress) return QUIET;
+
   // Deep rung already resolved: the candidate declined the offer, or already got the deep hint
   // (via the answer path). Never re-hint.
   if (offerResolution === 'declined' || offerResolution === 'hinted') return QUIET;
@@ -134,9 +143,98 @@ export function decideRunIntervention(
     return { intervene: true, kind: 'probe', strength: 1, reason: 'first repeated failure' };
   }
 
-  // Probe already fired — give them room, then OFFER a deeper hint (never auto-inject the deep one).
-  if (budget.runsSinceLastAssist < policy.cooldownRuns) return QUIET;
-  return { intervene: true, kind: 'offer', strength: 2, reason: 'still stuck after the probe' };
+  // Probe already fired — normally give them room (cooldown) before OFFERing a deeper hint. But if
+  // they're STAGNANT (same failing signature run after run), they're spinning on the same wall, so
+  // escalate to the offer sooner rather than waiting out the full cooldown. Never auto-inject the deep hint.
+  if (!signals.stagnant && budget.runsSinceLastAssist < policy.cooldownRuns) return QUIET;
+  return {
+    intervene: true,
+    kind: 'offer',
+    strength: 2,
+    reason: signals.stagnant ? 'stagnant after the probe' : 'still stuck after the probe',
+  };
+}
+
+// ── Path B: STUCK-NOT-RUNNING (idle) intervention ──────────────────────────────
+// A human interviewer also steps in for a candidate frozen on a blank editor or paused mid-code
+// WITHOUT a failing run to react to. This path is fed by the frontend's compound-idle detector
+// (no keystroke AND no run AND not speaking for a protected window — thinking is never punished);
+// the server decides IF (cap + phase + resolution gates) and the oracle WORDS a gentle, CONTENT-FREE
+// check-in. Because no failing run has been observed, this path NEVER probes a bug, offers, or hints
+// — it can only nudge (rung 0). The nudge is persisted as a synthetic 'Idle' run on the code-run
+// channel (race-free), so it touches neither fsm_state nor the transcript.
+
+export interface IdleInterventionPolicy {
+  /** Max idle check-ins per coding question (balanced: 1 — a single gentle nudge, never nagging). */
+  maxIdleNudgesPerQuestion: number;
+  /** Editor length (chars) below which the candidate is treated as on a BLANK editor (still
+   *  planning / no code) vs having a PARTIAL solution they've paused on. */
+  blankCodeMaxChars: number;
+}
+
+/** Balanced default: at most one gentle idle check-in per question. */
+export const BALANCED_IDLE_POLICY: IdleInterventionPolicy = {
+  maxIdleNudgesPerQuestion: 1,
+  blankCodeMaxChars: 10,
+};
+
+export interface IdleSignals {
+  phase: string;
+  /** Length of the candidate's current editor content (reported by the client). */
+  codeLength: number;
+  /** Idle check-ins already delivered on THIS coding question (derived from prior 'Idle' runs). */
+  idleNudgesGiven: number;
+  /** How the candidate resolved a prior deep-hint offer (fsm_state, read-only): 'declined'/'hinted'
+   *  means help was already settled on this question, so an idle check-in would just nag. */
+  offerResolution: OfferResolution;
+  /** The latest REAL run passed all tests — the candidate has already solved it, so stay quiet. */
+  lastRealRunPassed: boolean;
+  /** A deep-hint OFFER is still awaiting the candidate's reply (last real run carries an
+   *  unresolved 'offer'). Barging in with a check-in on top of our own open question is bad
+   *  interviewing — and an interleaved Idle marker would hide the offer from the answer path. */
+  pendingOffer: boolean;
+}
+
+export interface IdleDecision {
+  intervene: boolean;
+  kind: InterventionKind;
+  strength: number;
+  /** Which stuck-mode the check-in addresses — shapes the wording (blank = invite an approach;
+   *  partial = invite a walk-through of their existing code). */
+  mode: 'blank' | 'partial';
+  reason: string;
+}
+
+const QUIET_IDLE: IdleDecision = Object.freeze({
+  intervene: false,
+  kind: 'nudge',
+  strength: 0,
+  mode: 'blank',
+  reason: '',
+});
+
+/**
+ * Decide whether/how to check in on an idle (stuck-not-running) candidate. Pure + deterministic —
+ * the client's compound-idle detector already enforced the protected time window; this layer owns
+ * the fairness caps and gates. It can ONLY return a rung-0 nudge (never probe/offer/hint), because
+ * no failing run has been observed to reason about.
+ */
+export function decideIdleIntervention(
+  signals: IdleSignals,
+  policy: IdleInterventionPolicy = BALANCED_IDLE_POLICY
+): IdleDecision {
+  if (signals.phase !== 'coding') return QUIET_IDLE;
+  // Help already settled on this question (declined or deep hint given) — don't nag with a check-in.
+  if (signals.offerResolution === 'declined' || signals.offerResolution === 'hinted')
+    return QUIET_IDLE;
+  // Our own hint OFFER is still on the table — wait for their reply, never talk over it.
+  if (signals.pendingOffer) return QUIET_IDLE;
+  // Already solved (last real run all-green) — silence is correct.
+  if (signals.lastRealRunPassed) return QUIET_IDLE;
+  if (signals.idleNudgesGiven >= policy.maxIdleNudgesPerQuestion) return QUIET_IDLE;
+  const mode: 'blank' | 'partial' =
+    signals.codeLength < policy.blankCodeMaxChars ? 'blank' : 'partial';
+  return { intervene: true, kind: 'nudge', strength: 1, mode, reason: `idle:${mode}` };
 }
 
 /**

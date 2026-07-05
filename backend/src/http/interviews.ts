@@ -270,6 +270,37 @@ router.post('/:id/run', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// ─────────────────────── POST /api/interviews/:id/nudge ───────────────────────
+// Path B (stuck-not-running): the room's compound-idle detector reports that the candidate has
+// gone idle during coding (no keystroke + no run + not speaking for a protected window). The
+// server decides whether a gentle check-in is warranted (feature flag + per-question cap + gates)
+// and returns the utterance, or { intervention: null } to stay quiet. Candidate-token auth,
+// bounded rate limit. `codeLength` only shapes the wording (blank vs partial) — no source is sent.
+
+router.post('/:id/nudge', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { token, codeLength } = req.body as { token?: string; codeLength?: number };
+
+    await validateCandidate(id, token ?? '');
+    // Bounded: the client throttles to one poll per idle window; the server caps at one nudge per
+    // question. This limit is a generous backstop against a misbehaving client, never the real gate.
+    await enforceRateLimit(`nudge:${hashToken(token ?? '')}`, {
+      limit: 8,
+      windowMs: 600_000,
+      message: 'Too many check-in requests; please slow down.',
+    });
+
+    const result = await orchestrator.nudgeInterview(
+      id,
+      typeof codeLength === 'number' ? codeLength : 0
+    );
+    res.json(result);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 // ─────────────────────── POST /api/interviews/:id/coding-problem ───────────────────────
 // The candidate's room fetches the CURRENT coding problem (statement/examples/constraints — NEVER
 // hidden tests or the reference solution) to render the problem panel. Candidate-token auth.

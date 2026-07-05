@@ -6,11 +6,12 @@
 import { advance, initialContext } from './machine';
 import { DeterministicOracle, Oracle, TranscriptTurn, UtteranceRequest, Utterance } from './oracle';
 import { InterviewContext, Effect, InterventionKind, CodingProblem, TestResults } from './types';
-import { deriveRunSignals } from './signals';
+import { deriveRunSignals, idleNudgesGiven } from './signals';
 import {
   decideRunIntervention,
   deriveRunAssistBudget,
   classifyOfferResponse,
+  decideIdleIntervention,
 } from './intervention';
 import { selectProblems, getProblemBySlug, toPublicProblem, PublicProblem } from './problems';
 import {
@@ -30,6 +31,7 @@ import {
   deleteInterview as dbDeleteInterview,
   appendEvent,
   appendCodeRun,
+  appendCodeRunOnly,
   claimForScoring,
   claimExpire,
   findStaleInvited,
@@ -319,7 +321,12 @@ async function maybeResolveHintOffer(
 ): Promise<AnswerResult | null> {
   if (ctx.phase !== 'coding') return null;
   if (ctx.hintOffer?.codeIndex === ctx.codeIndex) return null; // already resolved for this question
-  const runs = (interview.code_runs ?? []).filter((r) => r.codeIndex === ctx.codeIndex);
+  // REAL runs only: a synthetic Idle marker (Path B check-in) appended after the offer must not
+  // hide it — the offer lives on the last real run, and Idle rows must never reach the hint prompt
+  // or count as failures.
+  const runs = (interview.code_runs ?? []).filter(
+    (r) => r.codeIndex === ctx.codeIndex && r.status !== 'Idle'
+  );
   const latest = runs[runs.length - 1];
   if (latest?.intervention?.kind !== 'offer') return null; // no pending offer
   const resp = classifyOfferResponse(answer);
@@ -545,7 +552,17 @@ export interface CandidateState {
 /** Read-only snapshot for the candidate UI to rehydrate after a reload. */
 export async function getCandidateState(interviewId: string): Promise<CandidateState> {
   const interview = requireInterview(await getById(interviewId), interviewId);
-  const runs = interview.code_runs ?? [];
+  const allRuns = interview.code_runs ?? [];
+  // Console restore = the last REAL execution (a synthetic Idle marker has no output and would
+  // render an empty "Idle" run). But if a trailing Idle check-in exists, graft its intervention
+  // onto the restored run so the check-in bubble still survives a reload.
+  const runs = allRuns.filter((r) => r.status !== 'Idle');
+  const trailing = allRuns[allRuns.length - 1];
+  const lastReal = runs.length > 0 ? stripHiddenTests(runs[runs.length - 1]) : null;
+  const lastRunResult =
+    lastReal && trailing && trailing.status === 'Idle' && trailing.intervention
+      ? { ...lastReal, intervention: trailing.intervention }
+      : lastReal;
   return {
     status: interview.status,
     phase: interview.phase,
@@ -556,8 +573,8 @@ export async function getCandidateState(interviewId: string): Promise<CandidateS
     durationSeconds: Math.round(interviewDurationMs(interview) / 1000),
     devMode: interview.dev_mode,
     language: interview.code_language ?? null,
-    // Strip hidden-test correctness — a reload must not leak what the live /run response withholds.
-    lastRunResult: runs.length > 0 ? stripHiddenTests(runs[runs.length - 1]) : null,
+    // Hidden-test correctness already stripped — a reload must not leak what /run withholds.
+    lastRunResult,
   };
 }
 
@@ -991,6 +1008,120 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
   return result;
 }
 
+export interface NudgeResult {
+  /** The idle check-in utterance, or null when the interviewer stays quiet (disabled, capped, not
+   *  coding, already resolved, or already solved). */
+  intervention: { text: string; kind: InterventionKind } | null;
+}
+
+/** Whether Path B (stuck-not-running idle check-ins) is enabled. Default OFF — flip only after the
+ *  Playwright matrix + prod telemetry clear it. Server-authoritative: the frontend detector may
+ *  fire, but the server no-ops here when disabled, so the flag can never be bypassed from a stale client. */
+function idleNudgeEnabled(): boolean {
+  const v = (process.env.IDLE_NUDGE_ENABLED ?? '').toLowerCase();
+  return v === '1' || v === 'true' || v === 'on';
+}
+
+/**
+ * Path B — respond to a candidate who has gone idle during coding (frozen on a blank editor, or
+ * paused mid-code) WITHOUT a failing run to react to. The frontend's compound-idle detector (no
+ * keystroke + no run + not speaking for a protected window) calls this; the server owns the fairness
+ * gates and the oracle words a gentle, content-free check-in. The nudge is persisted as a synthetic
+ * 'Idle' run on the code-run channel (via appendCodeRunOnly) so it is race-free and touches neither
+ * fsm_state nor the transcript — the same invariant the run path relies on. Best-effort throughout;
+ * a failure here must never break the room. `codeLength` is the candidate's current editor length,
+ * used only to pick the check-in's wording (blank vs partial).
+ */
+export async function nudgeInterview(
+  interviewId: string,
+  codeLength: number
+): Promise<NudgeResult> {
+  // Server-authoritative gate — cheapest possible no-op when the feature is off (no DB, no oracle).
+  if (!idleNudgeEnabled()) return { intervention: null };
+
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  if (interview.status !== 'in_progress') return { intervention: null };
+  // Past the hard time limit → let the normal conclude/score path handle it; never nudge.
+  if (durationExceeded(interview)) return { intervention: null };
+
+  const ctx = interview.fsm_state as InterviewContext;
+  if (ctx.phase !== 'coding') return { intervention: null };
+
+  const runs = interview.code_runs ?? [];
+  // Real-run signals (idle markers already excluded inside deriveRunSignals) tell us if they've
+  // already solved it; the idle-nudge count + prior offer resolution bound how much we step in.
+  const signals = deriveRunSignals(runs, ctx.codeIndex);
+  const offerResolution =
+    ctx.hintOffer?.codeIndex === ctx.codeIndex ? ctx.hintOffer.status : 'none';
+  // An unresolved OFFER on the last real run means our own question is still on the table —
+  // the check-in must wait (and an interleaved Idle marker would hide the offer from the answer path).
+  const realRuns = runs.filter((r) => r.codeIndex === ctx.codeIndex && r.status !== 'Idle');
+  const pendingOffer =
+    realRuns[realRuns.length - 1]?.intervention?.kind === 'offer' && offerResolution === 'none';
+  const decision = decideIdleIntervention({
+    phase: ctx.phase,
+    codeLength: Number.isFinite(codeLength) ? Math.max(0, Math.floor(codeLength)) : 0,
+    idleNudgesGiven: idleNudgesGiven(runs, ctx.codeIndex),
+    offerResolution,
+    lastRealRunPassed: signals.lastRunPassed,
+    pendingOffer,
+  });
+  if (!decision.intervene) return { intervention: null };
+
+  const problem = assignedProblem(interview, ctx.codeIndex);
+  const interventionReq = {
+    kind: decision.kind,
+    idleMode: decision.mode,
+    ctx,
+    transcript: interview.transcript ?? [],
+    code: interview.code_snapshot,
+    level: interview.level,
+    roleBrief: interview.role_brief,
+    problemStatement: problem?.statement ?? null,
+  };
+  // Word it via the fast oracle; fall back to the deterministic check-in so an idle candidate is
+  // never left hanging by a rate-limited/ down oracle (same guarantee as run hints).
+  let utterance: Utterance;
+  try {
+    utterance = await withCostContext({ interviewId, kind: 'brain', phase: 'coding' }, () =>
+      getOracle().generateIntervention(interventionReq)
+    );
+  } catch (err) {
+    console.error(`[orchestrator] idle-nudge generation failed for ${interviewId}:`, err);
+    utterance = await new DeterministicOracle().generateIntervention(interventionReq);
+  }
+  if (!utterance.text) return { intervention: null };
+
+  // Persist as a synthetic idle marker on the code-run channel — append-only (never overwrites the
+  // real code_snapshot), race-free, invisible to the scorer + run-failure signals.
+  const idleRun: RunResult = {
+    stdout: '',
+    stderr: '',
+    compileOutput: '',
+    status: 'Idle',
+    exitCode: null,
+    timeMs: null,
+    memoryKb: null,
+    codeIndex: ctx.codeIndex,
+    intervention: { text: utterance.text, kind: decision.kind },
+  };
+  try {
+    await appendCodeRunOnly(interviewId, idleRun);
+    await appendEvent(interviewId, 'utterance', {
+      text: utterance.text,
+      intervention: true,
+      kind: decision.kind,
+      idle: true,
+    });
+  } catch (err) {
+    // If the marker didn't persist, still return the utterance (best-effort). The per-question cap
+    // is derived from persisted markers, so a failed persist just means the next idle poll may retry.
+    console.error(`[orchestrator] idle-nudge persist failed for ${interviewId} (non-fatal):`, err);
+  }
+
+  return { intervention: { text: utterance.text, kind: decision.kind } };
+}
+
 /** Decide + (maybe) word an interviewer hint for a struggling run, attaching it to `result` so it
  *  persists atomically ON the run (and shows immediately in the room). Best-effort: any failure
  *  here — including the LLM call — must never fail the candidate's run. Writes nothing itself. */
@@ -1014,8 +1145,10 @@ async function attachRunIntervention(
     if (!decision.intervene) return;
 
     const oracle = getOracle();
+    // Real runs only — a synthetic Idle marker is not an execution and must not appear in the
+    // oracle's run history (it would read as a mysterious failed run).
     const recentRuns = withCurrent
-      .filter((r) => r.codeIndex === ctx.codeIndex)
+      .filter((r) => r.codeIndex === ctx.codeIndex && r.status !== 'Idle')
       .slice(-4)
       .map((r) => ({ status: r.status, stderr: r.stderr }));
     const problem = assignedProblem(interview, ctx.codeIndex);
@@ -1084,17 +1217,21 @@ export async function finishAndScore(
 
   const minimaxClient = getScoringClient();
 
-  const codeRuns: CodeRunSummary[] = (interview.code_runs ?? []).map((r: RunResult) => ({
-    language: r.language ?? 'unknown',
-    status: r.status,
-    stderr: r.stderr,
-    ...(r.testResults
-      ? { testResults: { passed: r.testResults.passed, total: r.testResults.total } }
-      : {}),
-    ...(r.intervention
-      ? { intervention: { kind: r.intervention.kind, text: r.intervention.text } }
-      : {}),
-  }));
+  // Exclude synthetic idle-nudge markers (Path B): they are interviewer check-ins on a stalled
+  // candidate, not code runs — grading them as failed executions would unfairly tank the score.
+  const codeRuns: CodeRunSummary[] = (interview.code_runs ?? [])
+    .filter((r: RunResult) => r.status !== 'Idle')
+    .map((r: RunResult) => ({
+      language: r.language ?? 'unknown',
+      status: r.status,
+      stderr: r.stderr,
+      ...(r.testResults
+        ? { testResults: { passed: r.testResults.passed, total: r.testResults.total } }
+        : {}),
+      ...(r.intervention
+        ? { intervention: { kind: r.intervention.kind, text: r.intervention.text } }
+        : {}),
+    }));
 
   // Best-effort: a proctor-fetch failure must never block scoring.
   let proctorData: import('../db/interviews').ProctorAggregate | undefined;

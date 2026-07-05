@@ -59,6 +59,11 @@ export interface InterventionRequest {
   strength?: number;
   /** How many consecutive failing runs the candidate is on — signals HOW stuck they are. */
   consecutiveFailures?: number;
+  /** Set ONLY for a Path-B idle check-in (kind='nudge', no failing run observed): 'blank' = the
+   *  editor is empty (invite them to talk through an approach or a small example by hand); 'partial'
+   *  = they wrote some code and paused (invite a walk-through of their own code on a small input).
+   *  The wording must stay CONTENT-FREE — never reference bugs, tests, or fixes, because nothing failed. */
+  idleMode?: 'blank' | 'partial';
 }
 
 /** A candidate utterance whose intent (a clarifying QUESTION vs an ANSWER) is not yet known. */
@@ -157,6 +162,14 @@ export class DeterministicOracle implements Oracle {
   }
 
   async generateIntervention(req: InterventionRequest): Promise<Utterance> {
+    // Idle check-in (Path B): word by stuck-mode, and stay content-free (nothing failed).
+    if (req.kind === 'nudge' && req.idleMode) {
+      const idle =
+        req.idleMode === 'blank'
+          ? "No rush at all — want to talk me through how you're thinking about this, or try a small example by hand?"
+          : "Take your time — want to walk me through what you've got so far on a small input?";
+      return { text: idle, expects: 'code' };
+    }
     const canned: Record<InterventionKind, string> = {
       counter_question: 'Before we move on — what makes you confident that approach is correct?',
       probe: "Walk me through what you expected to happen versus what you're seeing.",

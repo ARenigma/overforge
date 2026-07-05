@@ -11,6 +11,14 @@
 
 const DEFAULT_MODEL = 'sonic-3.5'; // latest Sonic (docs.cartesia.ai, verified 2026-07)
 const DEFAULT_VERSION = '2026-03-01'; // Cartesia-Version required for the sonic-3.x models
+// Persona speaking pace. Real interviewers sit ~130–160 WPM; default TTS on short utterances reads
+// fast/clipped, which is a robotic tell. Sonic-3.x takes generation_config.speed in [0.6, 1.5]
+// (1.0 = default); 0.9 is a slight, natural slow-down. Kept CONSTANT per persona (varying it
+// mid-generation adds artifacts). Env-overridable so we can A/B via voice.turn telemetry without a
+// code change. This is a guided value, not a hard multiplier.
+const DEFAULT_SPEED = 0.9;
+const SPEED_MIN = 0.6;
+const SPEED_MAX = 1.5;
 const MAX_CHARS = 2000; // an interviewer turn is 1–3 sentences; cap defensively
 const SAMPLE_RATE = 22050; // 22k is ample for speech and ~halves bytes vs 44.1k (snappier transfer)
 /** Raw PCM sample rate for the streaming path (pcm_s16le mono @ 24 kHz). */
@@ -43,19 +51,56 @@ export function splitSentences(text: string, maxChunks = MAX_CHUNKS): string[] {
   return head;
 }
 
+/** Normalize a run of prose for TTS: strip backticks and spell code identifiers as words. */
+function normalizeIdentifiers(s: string): string {
+  return s
+    .replace(/`/g, '') // drop code backticks
+    .replace(/_/g, ' ') // snake_case → words: "max_attempts" → "max attempts"
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2'); // camelCase → words: "maxAttempts" → "max Attempts"
+}
+
 /** Normalize interviewer text for TEXT-TO-SPEECH. Code identifiers read aloud badly — Cartesia
  *  pronounces "max_attempts" as "max underscore attempts" and "ExternalTaskSensor" as one mashed
  *  word. This converts snake_case / camelCase identifiers and strips backticks so they're spoken as
- *  natural words. Applied ONLY to TTS input; the stored transcript (scoring + on-screen display) is
- *  untouched. Normal prose (no underscores/camelCase/backticks) passes through unchanged. Exported
- *  for unit tests. */
+ *  natural words. TAG-AWARE: any SSML span (e.g. <break time="350ms"/>, <spell>…</spell>) is left
+ *  untouched, so an inserted prosody tag is never mangled by the identifier regex. Applied ONLY to
+ *  TTS input; the stored transcript (scoring + on-screen display) is untouched. Normal prose passes
+ *  through unchanged. Exported for unit tests. */
 export function prepareTranscript(text: string): string {
   return text
-    .replace(/`/g, '') // drop code backticks
-    .replace(/_/g, ' ') // snake_case → words: "max_attempts" → "max attempts"
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2') // camelCase → words: "maxAttempts" → "max Attempts"
+    .split(/(<[^>]+>)/) // keep SSML tags as their own tokens (capturing group)
+    .map((seg) => (seg.startsWith('<') && seg.endsWith('>') ? seg : normalizeIdentifiers(seg)))
+    .join('')
     .replace(/[ \t]{2,}/g, ' ') // collapse doubled spaces introduced above
     .trim();
+}
+
+/** The guided speaking speed for Sonic-3.x, clamped to the valid range. Env: CARTESIA_SPEED. */
+export function speakingSpeed(): number {
+  const raw = Number(process.env.CARTESIA_SPEED);
+  const v = Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SPEED;
+  return Math.min(SPEED_MAX, Math.max(SPEED_MIN, v));
+}
+
+/** Insert AT MOST ONE jittered pause before the operative clause, for a natural mid-turn beat.
+ *  Sonic renders <break time="Xms"/> as silence; MULTIPLE breaks in one utterance can make the
+ *  model hallucinate, so we never stack them. The pause is JITTERED (250–449ms) because a perfectly
+ *  regular pause on every turn is itself a robotic tell. Only fires when the turn has a lead-in
+ *  sentence followed by more text (the common "acknowledgment. question?" shape); single-sentence
+ *  turns get no break. Disabled via CARTESIA_BREAKS=0. Runs on RAW text; prepareTranscript is
+ *  tag-aware so the inserted tag survives normalization. Exported for unit tests. */
+export function insertProsodyBreak(text: string): string {
+  if ((process.env.CARTESIA_BREAKS ?? '').toLowerCase() === '0') return text;
+  if (/<break/i.test(text)) return text; // never stack breaks
+  const m = text.match(/^(.*?[.!?])(\s+)(\S[\s\S]*)$/); // lead-in sentence, gap, remainder
+  if (!m) return text;
+  const ms = 250 + Math.floor(Math.random() * 200); // 250–449ms — jittered, not a fixed tell
+  return `${m[1]}<break time="${ms}ms"/> ${m[3]}`;
+}
+
+/** Full TTS input shaping: add a natural pause, normalize identifiers (tag-aware), cap length. */
+function shapeTranscript(text: string): string {
+  return prepareTranscript(insertProsodyBreak(text)).slice(0, MAX_CHARS);
 }
 
 export interface CartesiaConfig {
@@ -105,8 +150,9 @@ export async function synthesize(
     headers: authHeaders(cfg),
     body: JSON.stringify({
       model_id: cfg.model,
-      transcript: prepareTranscript(text).slice(0, MAX_CHARS),
+      transcript: shapeTranscript(text),
       voice: { mode: 'id', id: cfg.voiceId },
+      generation_config: { speed: speakingSpeed() },
       output_format: { container: 'wav', encoding: 'pcm_s16le', sample_rate: SAMPLE_RATE },
     }),
   });
@@ -183,8 +229,9 @@ export async function* synthesizeStream(
     headers: authHeaders(cfg),
     body: JSON.stringify({
       model_id: cfg.model,
-      transcript: prepareTranscript(text).slice(0, MAX_CHARS),
+      transcript: shapeTranscript(text),
       voice: { mode: 'id', id: cfg.voiceId },
+      generation_config: { speed: speakingSpeed() },
       output_format: {
         container: 'raw',
         encoding: 'pcm_s16le',

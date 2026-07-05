@@ -8,11 +8,13 @@
 // offerResolution and short-circuits the run path.
 
 import { RunResult } from '../execution/types';
-import { deriveRunSignals, runPassed } from './signals';
+import { TestResults } from './types';
+import { deriveRunSignals, runPassed, idleNudgesGiven } from './signals';
 import {
   decideRunIntervention,
   deriveRunAssistBudget,
   classifyOfferResponse,
+  decideIdleIntervention,
   RunAssistBudget,
 } from './intervention';
 
@@ -30,6 +32,20 @@ function run(status: string, opts: Partial<RunResult> = {}): RunResult {
 }
 
 const fail = (codeIndex: number) => run('Runtime Error', { codeIndex });
+/** A wrong-but-clean run that passed `passed`/`total` hidden tests (a "failure" until all green). */
+const tested = (codeIndex: number, passed: number, total: number, cases?: TestResults['cases']) =>
+  run(passed === total ? 'Accepted' : 'Runtime Error', {
+    codeIndex,
+    testResults: { passed, total, ...(cases ? { cases } : {}) },
+  });
+/** A synthetic idle-nudge marker on the code-run channel (Path B). */
+const idle = (codeIndex: number) =>
+  run('Idle', {
+    codeIndex,
+    exitCode: null,
+    stderr: '',
+    intervention: { text: 'take your time', kind: 'nudge' },
+  });
 const probeRun = (codeIndex: number) =>
   run('Runtime Error', { codeIndex, intervention: { text: 'why is it failing?', kind: 'probe' } });
 const offerRun = (codeIndex: number) =>
@@ -83,6 +99,114 @@ describe('deriveRunSignals', () => {
       deriveRunSignals([run('Runtime Error'), run('Runtime Error')], 0).consecutiveFailures
     ).toBe(2);
   });
+
+  test('passedProgress is true when the latest failing run improves the pass count', () => {
+    const s = deriveRunSignals([tested(0, 1, 5), tested(0, 3, 5)], 0);
+    expect(s.passedProgress).toBe(true);
+    expect(s.consecutiveFailures).toBe(2);
+  });
+
+  test('passedProgress is false when the pass count does not improve (plateau)', () => {
+    expect(deriveRunSignals([tested(0, 3, 5), tested(0, 3, 5)], 0).passedProgress).toBe(false);
+  });
+
+  test('stagnant is true when the two latest failing runs share a signature', () => {
+    const c = [
+      { index: 0, passed: true },
+      { index: 1, passed: false },
+    ];
+    expect(deriveRunSignals([tested(0, 1, 2, c), tested(0, 1, 2, c)], 0).stagnant).toBe(true);
+  });
+
+  test('stagnant is false when the failing signature changes (still iterating)', () => {
+    const c1 = [
+      { index: 0, passed: false },
+      { index: 1, passed: true },
+    ];
+    const c2 = [
+      { index: 0, passed: true },
+      { index: 1, passed: false },
+    ];
+    expect(deriveRunSignals([tested(0, 1, 2, c1), tested(0, 1, 2, c2)], 0).stagnant).toBe(false);
+  });
+
+  test('idle markers are EXCLUDED from real-run signals (no phantom failure)', () => {
+    // A passing run then an idle marker: the streak stays 0 and the last real run still "passed".
+    const s = deriveRunSignals([run('Accepted', { codeIndex: 0 }), idle(0)], 0);
+    expect(s.consecutiveFailures).toBe(0);
+    expect(s.lastRunPassed).toBe(true);
+    expect(s.runsThisQuestion).toBe(1); // idle not counted as a run
+  });
+
+  test('idle markers do not break a real failure streak', () => {
+    expect(deriveRunSignals([fail(0), idle(0), fail(0)], 0).consecutiveFailures).toBe(2);
+  });
+});
+
+describe('idleNudgesGiven', () => {
+  test('counts only idle markers scoped to the question', () => {
+    expect(idleNudgesGiven([idle(0), fail(0), idle(0), idle(1)], 0)).toBe(2);
+    expect(idleNudgesGiven([idle(0), idle(1)], 1)).toBe(1);
+    expect(idleNudgesGiven([fail(0), fail(0)], 0)).toBe(0);
+  });
+});
+
+describe('decideIdleIntervention (Path B — stuck-not-running)', () => {
+  const idleSig = (o: Partial<Parameters<typeof decideIdleIntervention>[0]> = {}) => ({
+    phase: 'coding',
+    codeLength: 0,
+    idleNudgesGiven: 0,
+    offerResolution: 'none' as const,
+    lastRealRunPassed: false,
+    pendingOffer: false,
+    ...o,
+  });
+
+  test('blank editor → a gentle nudge in blank mode', () => {
+    expect(decideIdleIntervention(idleSig({ codeLength: 0 }))).toMatchObject({
+      intervene: true,
+      kind: 'nudge',
+      strength: 1,
+      mode: 'blank',
+    });
+  });
+
+  test('partial code → a gentle nudge in partial mode', () => {
+    expect(decideIdleIntervention(idleSig({ codeLength: 120 }))).toMatchObject({
+      intervene: true,
+      mode: 'partial',
+    });
+  });
+
+  test('never fires outside the coding phase', () => {
+    expect(decideIdleIntervention(idleSig({ phase: 'oral' })).intervene).toBe(false);
+  });
+
+  test('caps at one idle nudge per question', () => {
+    expect(decideIdleIntervention(idleSig({ idleNudgesGiven: 1 })).intervene).toBe(false);
+  });
+
+  test('stays quiet if the candidate already declined a hint offer', () => {
+    expect(decideIdleIntervention(idleSig({ offerResolution: 'declined' })).intervene).toBe(false);
+  });
+
+  test('stays quiet while our own hint OFFER is awaiting a reply (never talks over it)', () => {
+    expect(decideIdleIntervention(idleSig({ pendingOffer: true })).intervene).toBe(false);
+  });
+
+  test('stays quiet once the deep hint was already given', () => {
+    expect(decideIdleIntervention(idleSig({ offerResolution: 'hinted' })).intervene).toBe(false);
+  });
+
+  test('stays quiet if the candidate already solved it (last real run passed)', () => {
+    expect(decideIdleIntervention(idleSig({ lastRealRunPassed: true })).intervene).toBe(false);
+  });
+
+  test('NEVER escalates beyond a nudge — no probe/offer/hint from idle', () => {
+    const d = decideIdleIntervention(idleSig({ codeLength: 500, idleNudgesGiven: 0 }));
+    expect(d.kind).toBe('nudge');
+    expect(d.strength).toBeLessThanOrEqual(1);
+  });
 });
 
 describe('deriveRunAssistBudget', () => {
@@ -134,12 +258,18 @@ describe('deriveRunAssistBudget', () => {
 });
 
 describe('decideRunIntervention (balanced ladder)', () => {
-  const sig = (consecutiveFailures: number, lastRunPassed = false) => ({
+  const sig = (
+    consecutiveFailures: number,
+    lastRunPassed = false,
+    extra: { passedProgress?: boolean; stagnant?: boolean } = {}
+  ) => ({
     runsThisQuestion: consecutiveFailures,
     consecutiveFailures,
     lastStatus: lastRunPassed ? 'Accepted' : 'Runtime Error',
     lastRunPassed,
     hasErrorOutput: !lastRunPassed,
+    passedProgress: extra.passedProgress ?? false,
+    stagnant: extra.stagnant ?? false,
   });
   const budget = (o: Partial<RunAssistBudget> = {}): RunAssistBudget => ({
     probeGiven: false,
@@ -219,6 +349,24 @@ describe('decideRunIntervention (balanced ladder)', () => {
         'none'
       ).intervene
     ).toBe(false);
+  });
+
+  test('forward progress DEFERS the probe (exploratory runner improving pass count)', () => {
+    // 2 failures would normally probe, but the latest run improved the passing-test count.
+    expect(
+      decideRunIntervention(sig(2, false, { passedProgress: true }), 'coding', budget()).intervene
+    ).toBe(false);
+  });
+
+  test('stagnation ESCALATES to the offer even inside the cooldown window', () => {
+    // Same failing signature run after run → skip the cooldown wait and offer the deeper hint.
+    expect(
+      decideRunIntervention(
+        sig(3, false, { stagnant: true }),
+        'coding',
+        budget({ probeGiven: true, runsSinceLastAssist: 1 })
+      )
+    ).toMatchObject({ intervene: true, kind: 'offer' });
   });
 });
 

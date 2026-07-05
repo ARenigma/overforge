@@ -27,15 +27,18 @@ Wan-Streamer study (see `wan-streamer-eval` memory).
 | Hosted talking-head avatar API | Simli (~$0.40–0.50/interview) or Anam ($299/mo) bolted onto `cartesia.ts` synthesize(). Only positive value/feasibility path to *real* video. | When video phase opens — preferred path vs self-hosting. |
 | Full Wan-Streamer end-to-end A/V model | Unified streaming Transformer (arXiv 2606.25041). | **Blocked**: needs released weights (none yet) + GPU infra (we're CPU-only) + 480p+ + bias audit. Watch for weight release. |
 
-## 2. V1.1 proactive idle nudges (held)
+## 2. ~~V1.1 proactive idle nudges (held)~~ **✅ BUILT 2026-07-05 — behind `IDLE_NUDGE_ENABLED` (default OFF)**
 
-The interviewer proactively nudges when a candidate stalls (e.g. ~90 s of no typing/speech).
-The reactive V1 autonomous interviewer is deployed; the **proactive** layer is **held pending explicit
-authorization**. Trigger logic exists conceptually in `backend/src/interview/intervention.ts`; the
-background idle-watcher is what's held. See `overforge-usp` memory.
+Authorized by Amit 2026-07-05 ("full human vision"). Research-grounded design (real coding-round
+corpus): compound-idle detection in the room (no keystroke + no run + no chat + not speaking;
+protected planning windows — 90 s idle / 150 s blank-editor floor in real interviews, compressed in
+dev interviews), server-authoritative gates (`decideIdleIntervention`: coding-phase only, 1
+nudge/question, quiet on a pending/declined offer or a solved problem), content-free rung-0 wording
+only (never a probe/offer/hint — nothing failed), persisted as a synthetic `status:'Idle'` run on
+the code-run channel (race-free; excluded from run signals, the assist budget, and the scorer).
 
-- **Revisit trigger:** explicit go from Amit. The Wan-Streamer "proactive speaking on visual events"
-  concept validates the UX framing (a long pause is a reactable event) but does not lift the gate.
+- **Remaining decision:** flipping `IDLE_NUDGE_ENABLED=1` in prod — after the Playwright matrix +
+  telemetry review. The flag stays OFF until Amit says go.
 
 ## 3. Mid-speech active-listening backchannels (held — V1.1-adjacent)
 

@@ -35,6 +35,7 @@ import {
   beginInterview,
   answerInterview,
   runCode as apiRunCode,
+  nudgeCandidate,
   speakChunk,
   speakStream,
   fetchCodingProblem,
@@ -81,6 +82,21 @@ const PROBLEM_SOFT_BUDGET_S = 15 * 60;
 // actually cancels echo. Keep the mic gated this long after voice engages — the greeting plays
 // during it, so AEC trains on the real speaker+mic path before the first candidate turn is captured.
 const AEC_WARMUP_MS = 3000;
+
+// ── Path B: stuck-not-running idle detector ──────────────────────────────────────────────────
+// During coding a candidate can be stuck WITHOUT a failing run — frozen on a blank editor, or
+// paused mid-code. We watch for COMPOUND idle (no keystroke AND no run AND no chat AND not
+// speaking) and ask the server (feature-flagged + capped per question there) whether a gentle
+// check-in is warranted. Thinking is never punished: any keystroke/run/message resets the clock and
+// the windows are deliberately conservative — we'd rather miss a stall than misfire on someone who
+// is thinking. Telemetry-tuned. Dev interviews (2-min cap) use compressed windows so the behavior
+// is exercisable in E2E; real interviews always get the protective production windows.
+const IDLE_POLL_MS = 5_000; // how often the idle condition is evaluated
+const IDLE_WINDOW_MS = 90_000; // no keystroke/run/chat for this long ⇒ the candidate has stalled
+const IDLE_BLANK_MIN_PROBLEM_MS = 150_000; // on a BLANK editor, protect this much planning time first
+const IDLE_BLANK_MAX_CHARS = 10; // editor length below this counts as "blank / still planning"
+const DEV_IDLE_WINDOW_MS = 20_000; // dev-interview equivalents (server-authoritative devMode only)
+const DEV_IDLE_BLANK_MIN_PROBLEM_MS = 30_000;
 
 // ── Streaming TTS (P1-B) ──────────────────────────────────────────────────────
 // The interviewer's utterance is streamed as raw PCM16 from /speak-stream and scheduled onto a
@@ -532,6 +548,37 @@ export default function InterviewPage() {
   useEffect(() => {
     elapsedRef.current = elapsed;
   }, [elapsed]);
+
+  // ── Path B idle detector — live refs (setInterval captures once; read live values, never stale). ──
+  // Init timestamps to mount time so a fresh load / resume never fires a spurious nudge at t=0.
+  const lastKeystrokeRef = useRef<number>(Date.now());
+  const lastRunAtRef = useRef<number>(Date.now());
+  const nudgeInFlightRef = useRef(false);
+  // After ANY /nudge response (check-in delivered, or a server "stay quiet"), don't ask again for a
+  // while — a still-idle candidate must not generate a poll-rate stream of nudge POSTs.
+  const nudgeCooldownUntilRef = useRef(0);
+  const phaseRef = useRef(phase);
+  const runningRef = useRef(running);
+  const codeRef = useRef(code);
+  const devModeRef = useRef(devMode);
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+  useEffect(() => {
+    runningRef.current = running;
+  }, [running]);
+  useEffect(() => {
+    codeRef.current = code;
+  }, [code]);
+  useEffect(() => {
+    devModeRef.current = devMode;
+  }, [devMode]);
+  // Conversation is activity too: a candidate asking a clarifying question (or reading the
+  // interviewer's reply) is engaged, not stalled — any new message resets the idle clock so the
+  // detector can never nudge into the middle of an exchange.
+  useEffect(() => {
+    if (messages.length > 0) lastKeystrokeRef.current = Date.now();
+  }, [messages.length]);
   const refetchProblem = useCallback(async () => {
     const tok = activeTokenRef.current;
     if (!tok) return;
@@ -1036,6 +1083,14 @@ export default function InterviewPage() {
     speakRef.current = speak;
   }, [speak]);
 
+  // Track candidate liveness for the idle detector: every keystroke resets the idle clock so a
+  // candidate who is actively typing (or thinking between keystrokes) is never nudged. Stable
+  // (deps []) so the CodeMirror instance's captured callback never goes stale.
+  const handleCodeChange = useCallback((value: string) => {
+    lastKeystrokeRef.current = Date.now();
+    setCode(value);
+  }, []);
+
   const handleRunCode = useCallback(async () => {
     if (!activeToken || running) return;
     setRunning(true);
@@ -1057,8 +1112,71 @@ export default function InterviewPage() {
       setRunError(err instanceof Error ? err.message : 'Code execution failed.');
     } finally {
       setRunning(false);
+      lastRunAtRef.current = Date.now(); // a run is activity — resets the idle clock
     }
   }, [id, activeToken, language, code, running, speak]);
+
+  // ── Path B: compound-idle detector (stuck-not-running) ───────────────────────────────────────
+  // Poll while in the room. When coding AND the candidate has been idle (no keystroke, no run) past
+  // the protected window AND the interviewer isn't speaking, ask the server whether to check in.
+  // The server owns the real decision (feature flag + per-question cap + gates); this only reports
+  // idleness and voices whatever comes back. All refs are read live to avoid a stale-closure capture.
+  const maybeIdleNudge = useCallback(async () => {
+    const tok = activeTokenRef.current;
+    if (!tok) return;
+    if (phaseRef.current !== 'coding') return;
+    if (concludeCalledRef.current) return; // interview is concluding
+    if (runningRef.current) return; // a run is in flight
+    if (voiceSpeakingRef.current) return; // interviewer is speaking
+    if (nudgeInFlightRef.current) return; // one poll at a time
+    if (Date.now() < nudgeCooldownUntilRef.current) return; // asked recently — don't spam the server
+
+    // Dev interviews are 2 minutes long — compress the windows so the (server-flagged) behavior is
+    // exercisable end-to-end. devMode is server-authoritative, never candidate-controlled.
+    const idleWindowMs = devModeRef.current ? DEV_IDLE_WINDOW_MS : IDLE_WINDOW_MS;
+    const blankFloorMs = devModeRef.current
+      ? DEV_IDLE_BLANK_MIN_PROBLEM_MS
+      : IDLE_BLANK_MIN_PROBLEM_MS;
+
+    const now = Date.now();
+    const idleFor = now - Math.max(lastKeystrokeRef.current, lastRunAtRef.current);
+    if (idleFor < idleWindowMs) return; // still active / thinking — protected
+
+    const codeLen = codeRef.current.trim().length;
+    // A blank editor early in a problem is planning, not a stall — give extra up-front think time.
+    if (codeLen < IDLE_BLANK_MAX_CHARS) {
+      const problemElapsedMs = (elapsedRef.current - problemStartElapsedRef.current) * 1000;
+      if (problemElapsedMs < blankFloorMs) return;
+    }
+
+    nudgeInFlightRef.current = true;
+    try {
+      const res = await nudgeCandidate(id, tok, codeLen);
+      if (res.intervention?.text) {
+        // Reset the idle clock so we don't immediately re-evaluate right after checking in.
+        lastKeystrokeRef.current = Date.now();
+        setMessages((prev) => [
+          ...prev,
+          { role: 'ai', text: res.intervention!.text, assist: res.intervention!.kind },
+        ]);
+        // Voice the exact utterance we just rendered (idle markers ride the code-run channel).
+        void speak('run', undefined, res.intervention.text);
+      }
+    } catch {
+      // Best-effort — a failed idle poll is silent.
+    } finally {
+      // Whatever happened (delivered, server said quiet, or error), don't ask again for a full idle
+      // window — a still-idle candidate must never turn the poll into a request stream.
+      nudgeCooldownUntilRef.current = Date.now() + idleWindowMs;
+      nudgeInFlightRef.current = false;
+    }
+  }, [id, speak]);
+
+  useEffect(() => {
+    if (stage !== 'interview') return;
+    const timer = setInterval(() => void maybeIdleNudge(), IDLE_POLL_MS);
+    return () => clearInterval(timer);
+  }, [stage, maybeIdleNudge]);
 
   function handleAnswerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     // Mirror Supabase's composer: Enter sends, Shift+Enter inserts a newline. Guard IME
@@ -1313,7 +1431,7 @@ export default function InterviewPage() {
               <div className="flex-1 overflow-hidden">
                 <EnhancedCodeMirrorEditor
                   value={code}
-                  onCodeChangeAction={setCode}
+                  onCodeChangeAction={handleCodeChange}
                   onCursorPositionChangeAction={(line, col) => setCursor({ line, col })}
                   language={language}
                   onExecuteAction={handleRunCode}
@@ -1670,6 +1788,7 @@ export default function InterviewPage() {
                     value={answer}
                     onChange={(e) => {
                       setAnswer(e.target.value);
+                      lastKeystrokeRef.current = Date.now(); // composing a message = engaged, not stalled
                       e.target.style.height = 'auto';
                       e.target.style.height = `${Math.min(e.target.scrollHeight, 256)}px`;
                     }}

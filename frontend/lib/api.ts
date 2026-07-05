@@ -270,6 +270,28 @@ export async function runCode(
   });
 }
 
+/** The interviewer's response to an idle (stuck-not-running) candidate, or null to stay quiet. */
+export interface NudgeResponse {
+  intervention: { text: string; kind: string } | null;
+}
+
+/**
+ * POST /api/interviews/:id/nudge (Path B — stuck-not-running)
+ * Reports that the candidate has gone idle during coding (no keystroke + no run + not speaking for
+ * a protected window). The server decides whether a gentle check-in is warranted (feature-flagged,
+ * capped per question) and returns the utterance, or { intervention: null } to stay quiet.
+ * `codeLength` only shapes the wording (blank vs partial) — no source is sent.
+ */
+export async function nudgeCandidate(
+  id: string,
+  token: string,
+  codeLength: number
+): Promise<NudgeResponse> {
+  return apiFetch<NudgeResponse>(`/api/interviews/${id}/nudge`, {
+    body: { token, codeLength },
+  });
+}
+
 /**
  * POST /api/interviews/:id/finish
  * Marks the interview as complete. Idempotent.

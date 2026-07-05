@@ -232,6 +232,18 @@ export async function appendCodeRun(
   if (error) throw new Error(`appendCodeRun: ${error.message}`);
 }
 
+/** Atomically append a synthetic run to code_runs WITHOUT touching code_snapshot / code_language.
+ *  Used for Path-B idle check-ins (status:'Idle'), which carry no candidate source and must never
+ *  overwrite the last real editor snapshot the scorer reads. Same row-level lock as appendCodeRun. */
+export async function appendCodeRunOnly(id: string, run: RunResult): Promise<void> {
+  const db = createServiceClient();
+  const { error } = await db.rpc('append_code_run_only', {
+    p_id: id,
+    p_run: run as unknown as Record<string, unknown>,
+  });
+  if (error) throw new Error(`appendCodeRunOnly: ${error.message}`);
+}
+
 /** Atomically claim an in-progress interview for scoring (single-flight). Returns true only
  *  for the caller that flipped status in_progress -> completed; concurrent callers get false. */
 export async function claimForScoring(id: string): Promise<boolean> {

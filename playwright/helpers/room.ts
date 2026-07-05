@@ -195,6 +195,36 @@ export class CandidateRoom {
     return (await this.page.locator('[data-testid="ai-message"][data-assist]').count()) > 0;
   }
 
+  /** The ordered kinds of every autonomous intervention shown so far (probe/offer/hint/nudge…). */
+  async assistKinds(): Promise<string[]> {
+    const els = this.page.locator('[data-testid="ai-message"][data-assist]');
+    const n = await els.count();
+    const kinds: string[] = [];
+    for (let i = 0; i < n; i++) kinds.push((await els.nth(i).getAttribute('data-assist')) ?? '');
+    return kinds;
+  }
+
+  /** Count of interventions of one kind. */
+  async assistCount(kind: string): Promise<number> {
+    return this.page.locator(`[data-testid="ai-message"][data-assist="${kind}"]`).count();
+  }
+
+  /** Wait until an intervention of `kind` appears (e.g. the idle check-in), or time out. */
+  async waitForAssist(kind: string, timeout: number): Promise<void> {
+    await this.page
+      .locator(`[data-testid="ai-message"][data-assist="${kind}"]`)
+      .first()
+      .waitFor({ state: 'visible', timeout });
+  }
+
+  /** Text of the most recent intervention of `kind`. */
+  async lastAssistText(kind: string): Promise<string> {
+    const els = this.page.locator(`[data-testid="ai-message"][data-assist="${kind}"]`);
+    const n = await els.count();
+    if (n === 0) return '';
+    return (await els.nth(n - 1).innerText()).trim();
+  }
+
   async isDone(): Promise<boolean> {
     return (await this.page.getByTestId('interview-done').count()) > 0;
   }

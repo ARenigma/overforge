@@ -1,4 +1,11 @@
-import { Pcm16Aligner, SseEventParser, prepareTranscript, splitSentences } from './cartesia';
+import {
+  Pcm16Aligner,
+  SseEventParser,
+  prepareTranscript,
+  splitSentences,
+  insertProsodyBreak,
+  speakingSpeed,
+} from './cartesia';
 
 describe('prepareTranscript (TTS spoken-text normalization)', () => {
   test('expands snake_case identifiers to spoken words', () => {
@@ -28,6 +35,73 @@ describe('prepareTranscript (TTS spoken-text normalization)', () => {
     expect(prepareTranscript('a state-of-the-art DAG on AWS')).toBe(
       'a state-of-the-art DAG on AWS'
     );
+  });
+
+  test('is TAG-AWARE: an SSML break tag survives while surrounding prose is normalized', () => {
+    // The break tag (attribute has a "quote/=/ms") must pass through untouched; only the prose
+    // around it gets the identifier treatment.
+    expect(prepareTranscript('nice work.<break time="350ms"/> what about maxAttempts')).toBe(
+      'nice work.<break time="350ms"/> what about max Attempts'
+    );
+  });
+});
+
+describe('insertProsodyBreak', () => {
+  test('inserts exactly one jittered break between a lead-in and the operative question', () => {
+    const out = insertProsodyBreak("Nice, that's clean. How does it hold at scale?");
+    expect(out).toMatch(
+      /^Nice, that's clean\.<break time="\d{3}ms"\/> How does it hold at scale\?$/
+    );
+    expect(out.match(/<break/g)?.length).toBe(1);
+  });
+
+  test('never stacks breaks when one is already present', () => {
+    const already = 'One.<break time="300ms"/> Two.';
+    expect(insertProsodyBreak(already)).toBe(already);
+  });
+
+  test('leaves a single-sentence turn unchanged (no lead-in to pause after)', () => {
+    expect(insertProsodyBreak('What happens on an empty input?')).toBe(
+      'What happens on an empty input?'
+    );
+  });
+
+  test('disabled via CARTESIA_BREAKS=0', () => {
+    const prev = process.env.CARTESIA_BREAKS;
+    process.env.CARTESIA_BREAKS = '0';
+    try {
+      expect(insertProsodyBreak('Lead in. Question?')).toBe('Lead in. Question?');
+    } finally {
+      if (prev === undefined) delete process.env.CARTESIA_BREAKS;
+      else process.env.CARTESIA_BREAKS = prev;
+    }
+  });
+});
+
+describe('speakingSpeed', () => {
+  test('defaults to a slightly-slow persona pace in the valid range', () => {
+    const prev = process.env.CARTESIA_SPEED;
+    delete process.env.CARTESIA_SPEED;
+    try {
+      const s = speakingSpeed();
+      expect(s).toBeGreaterThanOrEqual(0.6);
+      expect(s).toBeLessThanOrEqual(1.5);
+      expect(s).toBeLessThan(1.0); // slower than default, like a real interviewer
+    } finally {
+      if (prev === undefined) delete process.env.CARTESIA_SPEED;
+      else process.env.CARTESIA_SPEED = prev;
+    }
+  });
+
+  test('clamps an out-of-range override into [0.6, 1.5]', () => {
+    const prev = process.env.CARTESIA_SPEED;
+    process.env.CARTESIA_SPEED = '5';
+    try {
+      expect(speakingSpeed()).toBe(1.5);
+    } finally {
+      if (prev === undefined) delete process.env.CARTESIA_SPEED;
+      else process.env.CARTESIA_SPEED = prev;
+    }
   });
 });
 
