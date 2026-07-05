@@ -334,6 +334,80 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
               </p>
             )}
           </section>
+
+          {/* Cost & metrics — exact per-interview cost to you (raw usage is authoritative; $ is
+              computed from configured rates). Only present once rolled up (at scoring). */}
+          {iv.cost_summary ? (
+            <section className="space-y-3">
+              <h2 className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                Cost &amp; metrics
+              </h2>
+              <div className="space-y-4 rounded-xl border border-border bg-card p-4">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-sm text-muted-foreground">Cost to you</span>
+                  <span className="text-2xl font-semibold tabular-nums text-foreground">
+                    ${iv.cost_summary.total_usd.toFixed(4)}
+                  </span>
+                </div>
+                <ul className="space-y-1 border-t border-border pt-3 text-sm">
+                  {Object.entries(iv.cost_summary.by_kind).map(([k, v]) => (
+                    <li key={k} className="flex items-center justify-between">
+                      <span className="capitalize text-muted-foreground">{k}</span>
+                      <span className="font-mono text-xs tabular-nums text-foreground">
+                        ${v.toFixed(4)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-border pt-3 text-xs text-muted-foreground">
+                  {iv.duration_seconds != null ? (
+                    <div className="flex justify-between">
+                      <dt>Duration</dt>
+                      <dd className="font-mono tabular-nums text-foreground">
+                        {Math.floor(iv.duration_seconds / 60)}m {iv.duration_seconds % 60}s
+                      </dd>
+                    </div>
+                  ) : null}
+                  <div className="flex justify-between">
+                    <dt>Tokens</dt>
+                    <dd className="font-mono tabular-nums text-foreground">
+                      {(
+                        iv.cost_summary.tokens.prompt + iv.cost_summary.tokens.completion
+                      ).toLocaleString()}
+                    </dd>
+                  </div>
+                  {iv.cost_summary.stt_seconds > 0 ? (
+                    <div className="flex justify-between">
+                      <dt>Speech</dt>
+                      <dd className="font-mono tabular-nums text-foreground">
+                        {Math.round(iv.cost_summary.stt_seconds)}s
+                      </dd>
+                    </div>
+                  ) : null}
+                  {iv.cost_summary.tts_chars > 0 ? (
+                    <div className="flex justify-between">
+                      <dt>TTS chars</dt>
+                      <dd className="font-mono tabular-nums text-foreground">
+                        {iv.cost_summary.tts_chars.toLocaleString()}
+                      </dd>
+                    </div>
+                  ) : null}
+                </dl>
+                {iv.metrics_summary?.problems?.length ? (
+                  <ul className="space-y-1 border-t border-border pt-3 text-xs">
+                    {iv.metrics_summary.problems.map((p, i) => (
+                      <li key={i} className="flex items-center justify-between">
+                        <span className="truncate text-muted-foreground">{p.slug}</span>
+                        <span className="font-mono tabular-nums text-foreground">
+                          {p.passed}/{p.total} tests
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
         </div>
       </div>
     </>

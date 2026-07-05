@@ -15,10 +15,15 @@ interface LlmRate {
 }
 
 const DEFAULT_LLM_RATES: Record<string, LlmRate> = {
+  // Groq (published list prices). Override any via LLM_PRICING_JSON if your account differs.
   'openai/gpt-oss-120b': { inPerMTok: 0.15, outPerMTok: 0.75 },
   'openai/gpt-oss-20b': { inPerMTok: 0.1, outPerMTok: 0.5 },
   'qwen/qwen3-32b': { inPerMTok: 0.29, outPerMTok: 0.59 },
+  'qwen/qwen3.6-27b': { inPerMTok: 0.29, outPerMTok: 0.59 },
   'llama-3.3-70b-versatile': { inPerMTok: 0.59, outPerMTok: 0.79 },
+  'meta-llama/llama-4-scout-17b-16e-instruct': { inPerMTok: 0.11, outPerMTok: 0.34 },
+  // Cerebras (same model id 'gpt-oss-120b', different provider/rate).
+  'gpt-oss-120b': { inPerMTok: 0.25, outPerMTok: 0.69 },
 };
 
 // Fallback for an unlisted model (e.g. MiniMax variants) — conservative-ish.

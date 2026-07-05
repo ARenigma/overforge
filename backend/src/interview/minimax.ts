@@ -65,6 +65,22 @@ export function minimaxConfigFromEnv(opts: { fast?: boolean } = {}): MinimaxConf
 }
 
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const CEREBRAS_BASE_URL = 'https://api.cerebras.ai/v1/chat/completions';
+
+/**
+ * Cerebras-backed gpt-oss-120b config (OpenAI-compatible → reuses createMinimaxClient). A DIFFERENT
+ * provider from Groq (separate rate limits) serving the SAME top-tier model, and architecturally
+ * ~2x faster — a strong first fallback. Env-gated: only enters the chain when CEREBRAS_API_KEY is
+ * set. reasoning_effort defaults to 'low' (matches Groq gpt-oss; re-verify when billing is enabled).
+ */
+export function cerebrasConfig(): MinimaxConfig {
+  return {
+    apiKey: process.env.CEREBRAS_API_KEY ?? '',
+    model: process.env.CEREBRAS_MODEL || 'gpt-oss-120b',
+    baseUrl: CEREBRAS_BASE_URL,
+    reasoningEffort: process.env.CEREBRAS_REASONING_EFFORT || 'low',
+  };
+}
 
 /**
  * Groq-backed FAST-oracle config (OpenAI-compatible → reuses createMinimaxClient). Groq's LPU serves
@@ -215,9 +231,11 @@ export function createMinimaxClient(config: MinimaxConfig): MinimaxClient {
           const url = config.baseUrl ?? '';
           const provider = url.includes('groq.com')
             ? 'groq'
-            : url.includes('minimax')
-              ? 'minimax'
-              : 'llm';
+            : url.includes('cerebras.ai')
+              ? 'cerebras'
+              : url.includes('minimax')
+                ? 'minimax'
+                : 'llm';
           recordLlmUsage({
             provider,
             model: config.model,

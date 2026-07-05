@@ -15,6 +15,7 @@ import {
   MinimaxOracle,
   minimaxConfigFromEnv,
   groqChainConfigs,
+  cerebrasConfig,
   createFailoverClient,
 } from './minimax';
 import { generateToken, hashToken } from './token';
@@ -55,13 +56,20 @@ export function getOracle(): Oracle {
   // catch. So a per-model 429 under load degrades to another real model, not to canned lines — the
   // autonomous-interviewer USP (clarify / hint / counter-question) stays crisp.
   if (process.env.GROQ_API_KEY) {
-    // Ordered chain: gpt-oss-120b → qwen3-32b → qwen3.6-27b → llama-3.3-70b → llama-4-scout, each a
-    // separate Groq rate-limit bucket, then MiniMax (different provider), then the caller's
-    // DeterministicOracle catch. GROQ_FALLBACK_CHAIN_JSON overrides the model list.
-    const chain = groqChainConfigs().map((cfg, i) => ({
+    // Ordered chain: gpt-oss-120b (Groq primary) → [Cerebras gpt-oss-120b, if CEREBRAS_API_KEY] →
+    // qwen3-32b → qwen3.6-27b → llama-3.3-70b → llama-4-scout (each a separate Groq bucket) →
+    // MiniMax (different provider) → the caller's DeterministicOracle catch. Cerebras sits FIRST in
+    // the fallbacks: same top-tier model, different provider, ~2x faster — so a Groq 429 degrades to
+    // the best available model, not a lesser one. GROQ_FALLBACK_CHAIN_JSON overrides the Groq list.
+    const groq = groqChainConfigs().map((cfg, i) => ({
       name: i === 0 ? 'groq:primary' : `groq:${cfg.model}`,
       client: createMinimaxClient(cfg),
     }));
+    const chain = [groq[0]];
+    if (process.env.CEREBRAS_API_KEY) {
+      chain.push({ name: 'cerebras:gpt-oss-120b', client: createMinimaxClient(cerebrasConfig()) });
+    }
+    chain.push(...groq.slice(1));
     if (process.env.MINIMAX_API_KEY) {
       chain.push({
         name: 'minimax',
