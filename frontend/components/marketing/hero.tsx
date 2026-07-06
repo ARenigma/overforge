@@ -23,9 +23,9 @@ export function Hero() {
         </h1>
 
         <p className="mx-auto mt-6 max-w-xl text-pretty text-base text-muted-foreground sm:text-lg">
-          Overforge runs the first-round technical screen end to end — a spoken interview that
-          adapts its follow-ups, hints when a candidate is genuinely stuck, and scores everyone
-          against the same rubric. No scheduling. No panel.
+          Finite runs the first-round technical screen end to end — a spoken interview that adapts
+          its follow-ups, hints when a candidate is genuinely stuck, and scores everyone against the
+          same rubric. No scheduling. No panel.
         </p>
 
         <div className="mt-9 flex items-center justify-center gap-3">

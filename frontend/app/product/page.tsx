@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { PillNav } from '@/components/marketing/pill-nav';
+import { SiteNav } from '@/components/marketing/nav';
 import { Footer } from '@/components/marketing/footer';
 import { Bento } from '@/components/marketing/bento';
 import { LanguageMatrix } from '@/components/marketing/language-matrix';
@@ -8,7 +8,7 @@ import { CTA } from '@/components/marketing/cta';
 import { SectionDivider } from '@/components/marketing/section';
 
 export const metadata: Metadata = {
-  title: 'Product — Overforge',
+  title: 'Product — Finite',
   description:
     'AI-run technical interviews: a spoken oral round, sandboxed live coding, and deterministic scorecards.',
 };
@@ -16,7 +16,7 @@ export const metadata: Metadata = {
 export default function ProductPage() {
   return (
     <main className="relative">
-      <PillNav />
+      <SiteNav />
 
       <section className="mx-auto max-w-3xl px-6 pb-4 pt-36 text-center sm:pt-40">
         <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-5xl">

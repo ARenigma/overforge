@@ -1,12 +1,12 @@
 import type { Metadata } from 'next';
-import { PillNav } from '@/components/marketing/pill-nav';
+import { SiteNav } from '@/components/marketing/nav';
 import { Footer } from '@/components/marketing/footer';
 import { SectionDivider } from '@/components/marketing/section';
 import { PricingTiers } from '@/components/marketing/pricing';
 import { PricingComparison } from '@/components/marketing/pricing-comparison';
 
 export const metadata: Metadata = {
-  title: 'Pricing — Overforge',
+  title: 'Pricing — Finite',
   description:
     'Predictable pricing for AI-run technical interviews. Start free, scale as you hire.',
 };
@@ -14,7 +14,7 @@ export const metadata: Metadata = {
 export default function PricingPage() {
   return (
     <main className="relative">
-      <PillNav />
+      <SiteNav />
 
       {/* Header */}
       <section className="mx-auto max-w-3xl px-6 pb-10 pt-36 text-center sm:pt-40">

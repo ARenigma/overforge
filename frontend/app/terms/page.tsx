@@ -3,13 +3,13 @@
 // Replace all [PLACEHOLDER] values with your actual information.
 
 import type { Metadata } from 'next';
-import { PillNav } from '@/components/marketing/pill-nav';
+import { SiteNav } from '@/components/marketing/nav';
 import { Footer } from '@/components/marketing/footer';
 import { SectionDivider } from '@/components/marketing/section';
 
 export const metadata: Metadata = {
-  title: 'Terms of Service — Overforge',
-  description: 'The terms governing your use of the Overforge AI interview platform.',
+  title: 'Terms of Service — Finite',
+  description: 'The terms governing your use of the Finite AI interview platform.',
 };
 
 const LAST_UPDATED = 'June 2025';
@@ -17,7 +17,7 @@ const LAST_UPDATED = 'June 2025';
 export default function TermsPage() {
   return (
     <main className="relative">
-      <PillNav />
+      <SiteNav />
 
       <section className="mx-auto max-w-3xl px-6 pb-4 pt-36 text-center sm:pt-40">
         <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
@@ -35,16 +35,16 @@ export default function TermsPage() {
       <div className="mx-auto max-w-3xl px-6 py-16">
         <ProseSection heading="1. Acceptance of Terms">
           <p>
-            By accessing or using the Overforge platform (&ldquo;Service&rdquo;), you agree to be
-            bound by these Terms of Service. If you are using the Service on behalf of an
-            organisation, you represent that you have authority to bind that organisation.
+            By accessing or using the Finite platform (&ldquo;Service&rdquo;), you agree to be bound
+            by these Terms of Service. If you are using the Service on behalf of an organisation,
+            you represent that you have authority to bind that organisation.
           </p>
           <p className="mt-3">If you do not agree to these terms, do not use the Service.</p>
         </ProseSection>
 
         <ProseSection heading="2. Description of Service">
           <p>
-            Overforge provides an AI-powered technical interview platform that enables organisations
+            Finite provides an AI-powered technical interview platform that enables organisations
             (&ldquo;Customers&rdquo;) to conduct asynchronous or live technical interviews with
             candidates. The Service includes a spoken AI interviewer, a sandboxed code execution
             environment, and deterministic scoring against rubrics defined by the Customer.
@@ -84,7 +84,7 @@ export default function TermsPage() {
           <p>
             Customers are solely responsible for obtaining any required consents from candidates
             prior to initiating an interview session, including consent to audio recording where
-            required by law. Overforge provides the technical infrastructure; the legal relationship
+            required by law. Finite provides the technical infrastructure; the legal relationship
             with the candidate is between the Customer and the candidate.
           </p>
           <p className="mt-3">
@@ -96,12 +96,12 @@ export default function TermsPage() {
 
         <ProseSection heading="6. Intellectual Property">
           <p>
-            Overforge retains all rights in the Service, including the AI models, scoring
-            algorithms, platform infrastructure, and UI. Customers retain all rights in their
-            question sets, rubrics, and candidate data.
+            Finite retains all rights in the Service, including the AI models, scoring algorithms,
+            platform infrastructure, and UI. Customers retain all rights in their question sets,
+            rubrics, and candidate data.
           </p>
           <p className="mt-3">
-            By submitting content to the Service (e.g. interview questions), you grant Overforge a
+            By submitting content to the Service (e.g. interview questions), you grant Finite a
             limited licence to use that content solely to operate and improve the Service.
           </p>
         </ProseSection>
@@ -117,7 +117,7 @@ export default function TermsPage() {
 
         <ProseSection heading="8. Limitation of Liability">
           <p>
-            To the maximum extent permitted by applicable law, Overforge shall not be liable for any
+            To the maximum extent permitted by applicable law, Finite shall not be liable for any
             indirect, incidental, special, consequential, or punitive damages arising from your use
             of the Service, including but not limited to loss of revenue, loss of data, or hiring
             decisions made on the basis of AI-generated scores.
@@ -152,7 +152,7 @@ export default function TermsPage() {
         <ProseSection heading="11. Governing Law">
           <p>
             {/* TODO: specify jurisdiction — e.g. "These Terms are governed by the laws of [State/Country]." */}
-            These Terms are governed by the laws of the jurisdiction in which Overforge is
+            These Terms are governed by the laws of the jurisdiction in which Finite is
             incorporated. Any disputes shall be resolved in the courts of that jurisdiction.
           </p>
         </ProseSection>

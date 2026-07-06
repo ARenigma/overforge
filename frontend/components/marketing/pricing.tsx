@@ -21,7 +21,7 @@ export const PRICING_TIERS: Tier[] = [
     name: 'Free',
     price: '$0',
     period: '/forever',
-    desc: 'For trying Overforge on a few candidates.',
+    desc: 'For trying Finite on a few candidates.',
     features: ['5 interviews / month', 'All languages', 'Email scorecards', 'Community support'],
     cta: 'Start free',
     href: '/auth',

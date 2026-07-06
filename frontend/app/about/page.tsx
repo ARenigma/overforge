@@ -2,21 +2,21 @@
 // The mission copy is accurate; founding story, team, and traction numbers need real values.
 
 import type { Metadata } from 'next';
-import { PillNav } from '@/components/marketing/pill-nav';
+import { SiteNav } from '@/components/marketing/nav';
 import { Footer } from '@/components/marketing/footer';
 import { Section, SectionHeading, SectionDivider } from '@/components/marketing/section';
 import { CTA } from '@/components/marketing/cta';
 
 export const metadata: Metadata = {
-  title: 'About — Overforge',
+  title: 'About — Finite',
   description:
-    'Overforge builds autonomous AI technical interviews that eliminate scheduling overhead and evaluate every candidate against the same deterministic rubric.',
+    'Finite builds autonomous AI technical interviews that eliminate scheduling overhead and evaluate every candidate against the same deterministic rubric.',
 };
 
 export default function AboutPage() {
   return (
     <main className="relative">
-      <PillNav />
+      <SiteNav />
 
       {/* Header */}
       <section className="mx-auto max-w-3xl px-6 pb-4 pt-36 text-center sm:pt-40">
@@ -25,7 +25,7 @@ export default function AboutPage() {
           <span className="text-muted-foreground">hiring fairer and faster.</span>
         </h1>
         <p className="mx-auto mt-4 max-w-xl text-pretty text-muted-foreground">
-          Overforge is an AI technical interview platform that runs the first-round screen for
+          Finite is an AI technical interview platform that runs the first-round screen for
           engineering roles — so your team only meets candidates who have already demonstrated they
           can do the work.
         </p>
@@ -36,7 +36,7 @@ export default function AboutPage() {
         <SectionHeading
           lead="The problem we're solving."
           align="left"
-          sub="First-round technical screens are expensive to run well and easy to run badly. A 60-minute engineer interview costs real money. Inconsistent questions mean inconsistent signals. Scheduling friction means good candidates drop out. Overforge fixes all three."
+          sub="First-round technical screens are expensive to run well and easy to run badly. A 60-minute engineer interview costs real money. Inconsistent questions mean inconsistent signals. Scheduling friction means good candidates drop out. Finite fixes all three."
         />
 
         <div className="mt-12 grid gap-8 sm:grid-cols-3">
@@ -70,7 +70,7 @@ export default function AboutPage() {
         <SectionHeading
           lead="How the AI interviewer works."
           align="left"
-          sub="Overforge uses a large language model to conduct a spoken technical interview. It asks questions, listens, follows up based on the candidate's answers, and scores responses against a rubric you control."
+          sub="Finite uses a large language model to conduct a spoken technical interview. It asks questions, listens, follows up based on the candidate's answers, and scores responses against a rubric you control."
         />
 
         <div className="mt-10 space-y-6 text-sm leading-relaxed text-muted-foreground">
@@ -98,11 +98,11 @@ export default function AboutPage() {
         <div className="mt-8 space-y-4 text-sm leading-relaxed text-muted-foreground">
           {/* TODO: Replace the paragraph below with your real founding story */}
           <p className="rounded-md border border-dashed border-border px-4 py-3 text-xs text-foreground-subtle">
-            [TODO — founding story: who started Overforge, when, and why. Keep it factual.]
+            [TODO — founding story: who started Finite, when, and why. Keep it factual.]
           </p>
 
           <p>
-            Overforge is a privately held company.{' '}
+            Finite is a privately held company.{' '}
             {/* TODO: Add incorporation jurisdiction, e.g. "incorporated in Delaware" */}
           </p>
 

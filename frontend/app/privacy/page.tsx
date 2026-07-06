@@ -3,14 +3,14 @@
 // Replace all [PLACEHOLDER] values with your actual information.
 
 import type { Metadata } from 'next';
-import { PillNav } from '@/components/marketing/pill-nav';
+import { SiteNav } from '@/components/marketing/nav';
 import { Footer } from '@/components/marketing/footer';
 import { SectionDivider } from '@/components/marketing/section';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy — Overforge',
+  title: 'Privacy Policy — Finite',
   description:
-    'How Overforge collects, uses, and protects your data as a recruiter or interview candidate.',
+    'How Finite collects, uses, and protects your data as a recruiter or interview candidate.',
 };
 
 const LAST_UPDATED = 'June 2025';
@@ -18,7 +18,7 @@ const LAST_UPDATED = 'June 2025';
 export default function PrivacyPage() {
   return (
     <main className="relative">
-      <PillNav />
+      <SiteNav />
 
       <section className="mx-auto max-w-3xl px-6 pb-4 pt-36 text-center sm:pt-40">
         <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
@@ -36,9 +36,9 @@ export default function PrivacyPage() {
       <div className="mx-auto max-w-3xl px-6 py-16">
         <ProseSection heading="1. Who We Are">
           <p>
-            Overforge (&ldquo;we&rdquo;, &ldquo;us&rdquo;, or &ldquo;our&rdquo;) operates the
-            Overforge platform at overforge.ai, which provides AI-powered technical interview
-            infrastructure for recruiters and engineering hiring teams.
+            Finite (&ldquo;we&rdquo;, &ldquo;us&rdquo;, or &ldquo;our&rdquo;) operates the Finite
+            platform at overforge.ai, which provides AI-powered technical interview infrastructure
+            for recruiters and engineering hiring teams.
           </p>
           <p className="mt-3">
             Contact:{' '}

@@ -1,4 +1,4 @@
-import { PillNav } from '@/components/marketing/pill-nav';
+import { SiteNav } from '@/components/marketing/nav';
 import { Hero } from '@/components/marketing/hero';
 import { UspPillars } from '@/components/marketing/usp-pillars';
 import { HowItWorks } from '@/components/marketing/how-it-works';
@@ -14,7 +14,7 @@ import { SectionDivider } from '@/components/marketing/section';
 export default function LandingPage() {
   return (
     <main className="relative">
-      <PillNav />
+      <SiteNav />
       <Hero />
       <UspPillars />
       <HowItWorks />

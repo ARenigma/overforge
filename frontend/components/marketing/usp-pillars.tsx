@@ -4,7 +4,7 @@ import { MessagesSquare, AudioLines, Scale, TerminalSquare, type LucideIcon } fr
 import { Section, SectionHeading } from './section';
 import { Reveal } from '@/components/marketing/reveal';
 
-/* The four things that make Overforge an actual interview, not a coding quiz — shown up front so a
+/* The four things that make Finite an actual interview, not a coding quiz — shown up front so a
    first-time visitor grasps the differentiator before anything else. Lead pillar = the moat: the
    interviewer adapts (counter-questions + hints), which static graders (LeetCode/HackerRank) can't do. */
 const PILLARS: { icon: LucideIcon; title: string; body: string }[] = [

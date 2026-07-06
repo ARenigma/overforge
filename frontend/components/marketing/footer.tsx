@@ -41,10 +41,9 @@ const COLUMNS: { title: string; links: FooterLink[] }[] = [
   },
 ];
 
-// Note: SOC 2 Type II certification is aspirational — confirm formal audit completion before
-// displaying this claim to customers.
+// Only defensible claims — SOC 2 Type II was aspirational and has been removed until certified.
 const COMPLIANCE = [
-  { icon: ShieldCheck, label: 'SOC 2 Type II' },
+  { icon: ShieldCheck, label: 'gVisor-isolated execution' },
   { icon: Lock, label: 'Encrypted in transit & at rest' },
   { icon: Globe, label: 'GDPR-ready' },
   { icon: Database, label: 'Sandboxed, no network access' },
@@ -54,13 +53,17 @@ export function Footer() {
   return (
     <footer className="bg-surface-deep">
       {/* Section 1 — brand, navigation, and the compliance strip */}
-      <div className="mx-auto max-w-5xl px-6 py-14">
+      <div className="mx-auto max-w-[1280px] px-6 py-14">
         <div className="grid grid-cols-2 gap-x-8 gap-y-10 md:grid-cols-6">
           {/* Brand column — spans 2 cols */}
           <div className="col-span-2">
             <Wordmark />
             <p className="mt-3 max-w-xs text-sm text-muted-foreground">
-              Live technical interviews, run by an AI that listens.
+              The autonomous technical interviewer. Deterministic, sandboxed, auditable.
+            </p>
+            <p className="mt-4 font-mono text-[11px] text-foreground-subtle">
+              state: end
+              <span className="ml-0.5 inline-block h-3 w-1.5 translate-y-0.5 bg-primary/70 align-baseline motion-safe:animate-pulse" />
             </p>
           </div>
 
@@ -110,9 +113,9 @@ export function Footer() {
       <SectionDivider />
 
       {/* Section 2 — copyright and legal */}
-      <div className="mx-auto flex max-w-5xl flex-col items-center justify-between gap-3 px-6 py-5 sm:flex-row">
+      <div className="mx-auto flex max-w-[1280px] flex-col items-center justify-between gap-3 px-6 py-5 sm:flex-row">
         <p className="text-xs text-muted-foreground">
-          &copy; {new Date().getFullYear()} Overforge. All rights reserved.
+          &copy; {new Date().getFullYear()} Finite. All rights reserved.
         </p>
         <div className="flex items-center gap-4">
           <Link
