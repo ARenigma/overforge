@@ -1,53 +1,149 @@
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { Reveal } from '@/components/marketing/reveal';
+import { FsmLedger } from '@/components/marketing/fsm-ledger';
+import { CountUp } from '@/components/marketing/count-up';
+
+// A faint state-machine field — nodes and directed edges as texture (not decoration: the pattern is
+// the product's own topology). Static <pre>, ~0 bytes, masked to a whisper. The WebGL upgrade (P5)
+// is the same aesthetic animated; this is the finished fallback.
+const ASCII_FIELD = `   ○───→○        ·      ○╌╌→◉         ·        ·
+   │     ╲      ·        ╲        ·        ·      ○
+   ↓      ○───→○───→○     ○            ·      ╱
+   ○          ·    ╲       │       ·       ○───→◉
+        ·          ○───→○──┘   ·        ╱      ·
+   ·        ○           ·       ○───→○      ·    ·
+      ·       ╲     ·        ·        ╲        ·
+   ○───→◉      ○────────→○       ·      ○╌╌→○───→◉`;
 
 export function Hero() {
   return (
-    <section className="relative isolate overflow-hidden px-6 pt-20 pb-20 sm:pt-28">
-      {/* Intentional ember glow from the top — replaces the generic three.js dotted field. */}
+    <section className="relative isolate overflow-hidden">
+      {/* Ambient trace glow from the top (token-driven ultramarine). */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 -z-10"
         style={{
           background:
-            'radial-gradient(58% 44% at 50% -4%, hsl(var(--primary) / 0.13), transparent 70%)',
+            'radial-gradient(60% 40% at 50% -6%, hsl(var(--primary) / 0.10), transparent 68%)',
         }}
       />
+      {/* Faint FSM ASCII field. */}
+      <pre
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-24 -z-10 mx-auto hidden max-w-[1280px] select-none whitespace-pre px-6 font-mono text-[13px] leading-[1.9] text-primary/[0.07] sm:block"
+        style={{
+          WebkitMaskImage: 'radial-gradient(70% 60% at 50% 30%, black, transparent 80%)',
+          maskImage: 'radial-gradient(70% 60% at 50% 30%, black, transparent 80%)',
+        }}
+      >
+        {ASCII_FIELD + '\n' + ASCII_FIELD}
+      </pre>
 
-      <Reveal className="relative z-10 mx-auto max-w-3xl text-center">
-        <h1 className="text-balance text-5xl font-semibold leading-[1.05] tracking-tight sm:text-7xl">
-          <span className="text-foreground">An AI interviewer</span>
-          <br />
-          <span className="text-primary">that thinks on its feet.</span>
-        </h1>
+      <div className="mx-auto max-w-[1280px] px-6 pb-20 pt-32 sm:px-8 sm:pt-36">
+        {/* Headline (left) + subcopy & CTAs (right, bottom-aligned). */}
+        <div className="grid items-end gap-x-10 gap-y-8 lg:grid-cols-12">
+          <Reveal className="lg:col-span-7">
+            <p className="mb-5 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
+              <span className="text-primary">01</span> — autonomous technical interviewer
+            </p>
+            <h1 className="text-balance text-[2.75rem] font-medium leading-[0.98] tracking-[-0.02em] sm:text-6xl lg:text-[4.25rem]">
+              <span className="text-foreground-subtle">Infinite candidates.</span>
+              <br />
+              <span className="text-foreground">
+                Finite answers<span className="text-primary">.</span>
+              </span>
+            </h1>
+          </Reveal>
 
-        <p className="mx-auto mt-6 max-w-xl text-pretty text-base text-muted-foreground sm:text-lg">
-          Finite runs the first-round technical screen end to end — a spoken interview that adapts
-          its follow-ups, hints when a candidate is genuinely stuck, and scores everyone against the
-          same rubric. No scheduling. No panel.
-        </p>
-
-        <div className="mt-9 flex items-center justify-center gap-3">
-          <Link
-            href="/auth"
-            className="group inline-flex h-11 items-center gap-1.5 rounded-md bg-primary px-8 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98]"
-          >
-            Start free
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-          </Link>
-          <Link
-            href="/how-it-works"
-            className="inline-flex h-11 items-center rounded-md border border-border bg-card/50 px-8 text-sm font-medium text-foreground backdrop-blur transition-colors hover:bg-accent"
-          >
-            See how it works
-          </Link>
+          <Reveal delay={80} className="lg:col-span-5 lg:pb-3">
+            <p className="max-w-md text-pretty text-base leading-relaxed text-muted-foreground">
+              A first-round technical screen run end to end by a finite-state machine — it adapts
+              its follow-ups, probes when a candidate stalls, runs code in a sandbox, and scores
+              everyone against the same rubric. Deterministic. Auditable.
+            </p>
+            <div className="mt-7 flex flex-wrap items-center gap-3">
+              <Link
+                href="/auth"
+                className="group inline-flex h-11 items-center gap-1.5 rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground transition-opacity duration-fast ease-out-cubic hover:opacity-90"
+              >
+                Run an interview
+                <ArrowRight className="h-4 w-4 transition-transform duration-fast ease-out-cubic group-hover:translate-x-0.5" />
+              </Link>
+              <Link
+                href="/how-it-works"
+                className="inline-flex h-11 items-center rounded-md border border-border px-6 text-sm font-medium text-foreground transition-colors duration-fast ease-out-cubic hover:bg-accent"
+              >
+                See how it works
+              </Link>
+            </div>
+          </Reveal>
         </div>
 
-        <p className="mt-6 font-mono text-xs text-foreground-subtle">
-          Python · JavaScript · Go · Java · C++ · Ruby — run sandboxed, scored deterministically.
-        </p>
-      </Reveal>
+        {/* The FSM ledger, in a product frame. */}
+        <Reveal delay={160} className="mt-14">
+          <ProductFrame>
+            <FsmLedger />
+          </ProductFrame>
+        </Reveal>
+
+        {/* 3-stat proof strip. */}
+        <Reveal delay={220}>
+          <dl className="mt-12 grid grid-cols-1 divide-y divide-border border-y border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+            <Stat
+              value={
+                <>
+                  <span className="text-foreground-subtle">~</span>
+                  <CountUp value={1} suffix="s" />
+                </>
+              }
+              label="median response latency"
+            />
+            <Stat
+              value={
+                <>
+                  <CountUp value={97} />
+                  /97
+                </>
+              }
+              label="hidden tests graded per run"
+            />
+            <Stat
+              value={
+                <>
+                  <CountUp value={100} suffix="%" />
+                </>
+              }
+              label="score reproducibility"
+            />
+          </dl>
+        </Reveal>
+      </div>
     </section>
+  );
+}
+
+/** Supabase-style product frame: monochrome dot chrome, inner card, deep stacked shadow + ring. */
+function ProductFrame({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg bg-surface-inset p-2 shadow-[0_1px_1px_rgba(0,0,0,0.04),0_8px_16px_-8px_rgba(0,0,0,0.12),0_40px_80px_-24px_rgba(0,0,0,0.18)] ring-1 ring-border">
+      <div className="flex items-center gap-1.5 px-2 py-2">
+        <span className="h-2 w-2 rounded-full bg-border" />
+        <span className="h-2 w-2 rounded-full bg-border" />
+        <span className="h-2 w-2 rounded-full bg-border" />
+      </div>
+      <div className="overflow-hidden rounded-md border border-border bg-card">{children}</div>
+    </div>
+  );
+}
+
+function Stat({ value, label }: { value: React.ReactNode; label: string }) {
+  return (
+    <div className="px-2 py-5 text-center sm:py-6">
+      <div className="font-mono text-3xl font-medium tabular-nums text-foreground sm:text-4xl">
+        {value}
+      </div>
+      <div className="mt-1.5 text-xs text-foreground-subtle">{label}</div>
+    </div>
   );
 }
