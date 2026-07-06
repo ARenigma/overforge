@@ -20,14 +20,14 @@ export function EditorShowcase() {
         <Reveal className="mt-10">
           <BrowserFrame url="overforge.app/i/x7f2k9">
             {/* Editor tab strip (the app's own tabs, inside the browser chrome) */}
-            <div className="flex items-center gap-2 border-b border-border bg-background/40 px-4 py-2">
-              <span className="rounded-md border border-border bg-background/60 px-3 py-0.5 font-mono text-xs text-foreground">
+            <div className="flex items-center gap-2 border-b border-border bg-surface-inset px-4 py-2">
+              <span className="rounded-md border border-border bg-surface-inset px-3 py-0.5 font-mono text-xs text-foreground">
                 main.py
               </span>
-              <span className="hidden rounded-md border border-border bg-background/40 px-3 py-0.5 font-mono text-xs text-foreground-subtle sm:inline">
+              <span className="hidden rounded-md border border-border bg-surface-inset px-3 py-0.5 font-mono text-xs text-foreground-subtle sm:inline">
                 solution.go
               </span>
-              <span className="hidden rounded-md border border-border bg-background/40 px-3 py-0.5 font-mono text-xs text-foreground-subtle sm:inline">
+              <span className="hidden rounded-md border border-border bg-surface-inset px-3 py-0.5 font-mono text-xs text-foreground-subtle sm:inline">
                 test_main.py
               </span>
             </div>
@@ -35,7 +35,7 @@ export function EditorShowcase() {
             {/* Body: sidebar + editor (VS Code-style; console sits below) */}
             <div className="grid min-h-[340px] md:min-h-[470px] md:grid-cols-[210px_1fr]">
               {/* File tree */}
-              <div className="hidden border-r border-border bg-background/40 py-4 md:block">
+              <div className="hidden border-r border-border bg-surface-inset py-4 md:block">
                 <p className="mb-2 px-4 font-mono text-[10px] uppercase tracking-wider text-foreground-subtle">
                   Explorer
                 </p>
@@ -69,7 +69,7 @@ export function EditorShowcase() {
             </div>
 
             {/* Console / output strip */}
-            <div className="border-t border-border bg-background/40 px-4 py-3 font-mono text-[12px] leading-relaxed">
+            <div className="border-t border-border bg-surface-inset px-4 py-3 font-mono text-[12px] leading-relaxed">
               <div className="flex items-center gap-2">
                 <span className="text-primary">{'▸'}</span>
                 <span className="text-muted-foreground">python main.py</span>

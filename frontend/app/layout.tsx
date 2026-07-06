@@ -10,8 +10,9 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { CommandMenuProvider } from '@/components/providers/command-menu-provider';
 
 export const metadata: Metadata = {
-  title: 'Overforge — Live technical interviews',
-  description: 'AI-led oral and coding interviews in a sandboxed IDE, with deterministic scoring.',
+  title: 'Finite — Infinite candidates. Finite answers.',
+  description:
+    'An autonomous technical interviewer built as a finite-state machine. Deterministic control flow, sandboxed execution, auditable scoring.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

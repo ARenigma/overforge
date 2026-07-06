@@ -3,136 +3,149 @@
 @tailwind utilities;
 
 /*
-  Overforge design system — "void + ember".
-  SINGLE SOURCE OF TRUTH for the brand: the ember accent lives in `--primary` (per mode).
-  Every accent-derived token (ring, success, chart-1, sidebar) references var(--primary),
-  and JS/canvas/WebGL read it via lib/brand.ts — so the brand changes in ONE place,
-  site-wide, with no hardcoded hex orphans. Tokens map onto shadcn vars (hsl(var(--x))).
+  Finite design system — "Blueline".
+  A blueline is print's final pre-press proof — the last deterministic check before ship. The
+  palette is engineering paper + drafting ink + one ultramarine trace pen. LIGHT IS NATIVE
+  (blueprints live on paper); dark is the same drawing photographed at night.
+
+  SINGLE SOURCE OF TRUTH: the ultramarine accent lives in `--primary` and is CONTRAST-BRIGHTENED
+  per mode (deep on paper, lifted on night) — never one flat value. All neutrals derive from ONE
+  hue family (~228/233) so light mode reads as one coherent paper, not four mixed grays. Elevation
+  is positive (higher = lighter). Borders/washes derive from the ink. JS/canvas/WebGL read tokens
+  via lib/brand.ts. Tokens map onto shadcn vars (hsl(var(--x))).
 */
 
 @layer base {
   :root {
-    /* ── Central font config — swap the main / mono family here (+ the <link>s in layout.tsx) ── */
+    /* ── Central font config — Satoshi (display/body) + Source Code Pro (machine voice). ── */
     --font-sans:
       'Satoshi', var(--font-geist-sans), system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica,
       Arial, sans-serif;
     --font-mono:
       'Source Code Pro', var(--font-geist-mono), ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-    /* ── Brand accent — ember/lava (THE one place to change it). Same value in BOTH modes so the
-       brand reads as ONE color everywhere; dark foreground sits on the bright fill for contrast. ── */
-    --primary: 15 90% 53%;
-    --primary-foreground: 24 40% 10%;
+    /* ── Motion tokens (mode-independent). "settle, don't float": fast attack, decisive settle. ── */
+    --ease-out: cubic-bezier(0.215, 0.61, 0.355, 1); /* the one house curve for micro-transitions */
+    --dur-1: 120ms; /* micro / hover */
+    --dur-2: 200ms; /* UI state */
+    --dur-3: 350ms; /* panel / crossfade */
+    --dur-4: 600ms; /* section reveal */
+    --dur-5: 900ms; /* hero / logo draw — the ceiling */
 
-    /* Light mode surfaces + text — off-white page so white cards/borders read */
-    --background: 210 20% 98%;
-    --foreground: 224 14% 6%;
+    /* ── Brand accent — ultramarine trace pen. Deep on paper (readable as text/CTA on white). ── */
+    --primary: 232 80% 48%;
+    --primary-foreground: 0 0% 100%;
+    --primary-wash: 232 80% 48%; /* use with an alpha: hsl(var(--primary-wash) / 0.08) */
+
+    /* ── Light (native) — engineering paper. ONE hue (228). Positive elevation: sunken < canvas < card. ── */
+    --background: 228 24% 98%;
+    --foreground: 230 24% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 224 14% 6%;
+    --card-foreground: 230 24% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 224 14% 6%;
-    --secondary: 240 5% 96%;
-    --secondary-foreground: 224 14% 12%;
-    --muted: 240 5% 96%;
-    --muted-foreground: 240 4% 46%;
-    --accent: 240 5% 96%;
-    --accent-foreground: 224 14% 12%;
-    --destructive: 358 70% 52%;
+    --popover-foreground: 230 24% 11%;
+    --secondary: 228 18% 95%;
+    --secondary-foreground: 230 20% 16%;
+    --muted: 228 18% 95%;
+    --muted-foreground: 230 9% 40%;
+    --accent: 228 20% 93%;
+    --accent-foreground: 230 20% 16%;
+    --destructive: 8 74% 46%;
     --destructive-foreground: 0 0% 100%;
-    --warning: 36 92% 45%;
-    --border: 220 13% 87%;
-    --input: 220 13% 87%;
-    /* Deep surface — the bottom/footer band, intentionally darker than the page */
-    --surface-deep: 220 16% 94%;
-    /* Section band ramp (multi-band charcoal layering): recessed < base < raised.
-       base = --background; ~2% steps so adjacent bands read as depth, not stripes. */
-    --surface-75: 220 14% 95.5%;
-    --surface-100: 210 20% 98%;
-    --surface-200: 0 0% 100%;
-    /* Text hierarchy below muted-foreground (46%): subtle = de-emphasized labels/hints;
-       ghost = decorative dots, gutter, placeholder icons. Replaces /30–/70 opacity hacks. */
-    --foreground-subtle: 240 4% 55%;
-    --foreground-ghost: 240 4% 68%;
-    /* Modal scrim — was bg-black/80 hardcoded; lighter in light mode. */
-    --overlay-scrim: 0 0% 0% / 0.55;
-    /* Readable amber on a warning/10 tint. */
-    --warning-foreground: 26 80% 30%;
-    /* Sharp structure is the brand: 0 radius on surfaces, cards, buttons. The only softness is
-       on text-entry fields (--radius-input); circles stay via rounded-full. */
+    --warning: 36 88% 42%;
+    --warning-foreground: 30 80% 26%; /* readable amber on a warning/10 tint */
+    --border: 228 16% 88%;
+    --input: 228 16% 85%;
+    /* Elevation ramp (positive: higher = lighter). Sections are separated by hairline border-t
+       seams, NOT by background color — these bands are used sparingly (proof band, footer). */
+    --surface-deep: 228 20% 95%; /* footer / deep recess */
+    --surface-75: 228 18% 96.5%; /* subtle recess */
+    --surface-100: 228 24% 98%; /* base (= background) */
+    --surface-200: 0 0% 100%; /* raised (= card) */
+    /* Opaque nested chrome — replaces every bg-background/40|60 hack (those composite to pure
+       white in light mode and erase nested structure). Never translucent. */
+    --surface-inset: 228 18% 94%;
+    /* Text hierarchy below muted-foreground (40%): subtle = de-emphasized labels; ghost = dots. */
+    --foreground-subtle: 230 8% 50%;
+    --foreground-ghost: 230 10% 68%;
+    /* Modal scrim — tinted ink, lighter in light mode. */
+    --overlay-scrim: 230 30% 8% / 0.45;
+    /* Sharp structure is the brand: 0 radius on surfaces, cards, buttons. Only text-entry fields
+       (+ circles via rounded-full) soften. */
     --radius: 0rem;
     --radius-input: 0.375rem;
 
-    /* Brand-derived (ember). --success is the deliberate exception: it stays a real green so
-       "good" states never read as orange/warning now that the brand accent is ember. */
+    /* Accent-derived. --success stays a real green (good != trace). Status colors darkened for
+       light mode (a light amber/green on white disappears). */
     --ring: var(--primary);
-    --success: 145 63% 37%;
+    --success: 152 58% 35%;
     --chart-1: var(--primary);
     --sidebar-primary: var(--primary);
     --sidebar-ring: var(--primary);
 
-    --chart-2: 199 89% 48%;
-    --chart-3: 47 95% 50%;
-    --chart-4: 280 60% 58%;
-    --chart-5: 12 76% 55%;
-    --sidebar-background: 0 0% 99%;
-    --sidebar-foreground: 224 10% 30%;
+    /* Chart palette — equal-ish L/C, hues only (trace 232 · cyan 205 · violet 288 · amber 40 · green 152). */
+    --chart-2: 205 78% 46%;
+    --chart-3: 288 52% 52%;
+    --chart-4: 40 88% 44%;
+    --chart-5: 152 55% 40%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 230 12% 32%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 5% 96%;
-    --sidebar-accent-foreground: 224 14% 12%;
-    --sidebar-border: 240 6% 90%;
+    --sidebar-accent: 228 18% 95%;
+    --sidebar-accent-foreground: 230 20% 16%;
+    --sidebar-border: 228 16% 90%;
   }
 
   .dark {
-    /* ── Brand accent — ember/lava (same value as light; see :root note above) ── */
-    --primary: 15 90% 53%;
-    --primary-foreground: 24 40% 10%;
+    /* ── Ultramarine, LIFTED for night (glows on the dark drawing; ink text sits on the bright fill). ── */
+    --primary: 230 92% 70%;
+    --primary-foreground: 230 45% 9%;
+    --primary-wash: 230 92% 70%;
 
-    /* Dark mode surfaces + text — neutral charcoal (Supabase pattern) */
-    --background: 0 0% 6%;
-    --foreground: 0 0% 92%;
-    --card: 0 0% 9%;
-    --card-foreground: 0 0% 92%;
-    --popover: 0 0% 9%;
-    --popover-foreground: 0 0% 92%;
-    --secondary: 0 0% 13%;
-    --secondary-foreground: 0 0% 92%;
-    --muted: 0 0% 13%;
-    --muted-foreground: 0 0% 60%;
-    --accent: 0 0% 15%;
-    --accent-foreground: 0 0% 92%;
-    --destructive: 358 75% 59%;
-    --destructive-foreground: 0 0% 98%;
-    --warning: 36 96% 56%;
-    --border: 0 0% 18%;
-    --input: 0 0% 20%;
-    /* Deep surface — the bottom/footer band, darker than the 6% page */
-    --surface-deep: 0 0% 3.5%;
-    --surface-75: 0 0% 4.5%;
-    --surface-100: 0 0% 6%;
-    --surface-200: 0 0% 8%;
-    --foreground-subtle: 0 0% 48%;
-    --foreground-ghost: 0 0% 32%;
-    --overlay-scrim: 0 0% 0% / 0.8;
-    /* On a dark warning/10 surface the foreground IS the bright amber. */
-    --warning-foreground: 36 96% 56%;
+    /* ── Dark — the drawing photographed at night. Navy-tinted charcoal, ONE hue (233). ── */
+    --background: 233 26% 8%;
+    --foreground: 228 16% 92%;
+    --card: 233 22% 11%;
+    --card-foreground: 228 16% 92%;
+    --popover: 233 22% 13%;
+    --popover-foreground: 228 16% 92%;
+    --secondary: 233 18% 16%;
+    --secondary-foreground: 228 16% 92%;
+    --muted: 233 18% 16%;
+    --muted-foreground: 228 9% 62%;
+    --accent: 233 18% 18%;
+    --accent-foreground: 228 16% 92%;
+    --destructive: 8 78% 62%;
+    --destructive-foreground: 0 0% 100%;
+    --warning: 42 92% 62%;
+    --warning-foreground: 42 92% 62%; /* on a dark warning/10 surface the foreground IS the amber */
+    --border: 230 14% 18%;
+    --input: 230 14% 22%;
+    --surface-deep: 233 30% 5%;
+    --surface-75: 233 26% 6.5%;
+    --surface-100: 233 26% 8%;
+    --surface-200: 233 22% 11%;
+    --surface-inset: 233 26% 6%;
+    --foreground-subtle: 228 9% 50%;
+    --foreground-ghost: 228 10% 34%;
+    --overlay-scrim: 233 40% 3% / 0.75;
 
-    /* Brand-derived (ember); --success stays a real green (good != orange). */
     --ring: var(--primary);
-    --success: 145 58% 50%;
+    --success: 152 55% 56%;
     --chart-1: var(--primary);
     --sidebar-primary: var(--primary);
     --sidebar-ring: var(--primary);
 
-    --chart-2: 199 89% 60%;
-    --chart-3: 47 95% 58%;
-    --chart-4: 280 65% 68%;
-    --chart-5: 12 80% 62%;
-    --sidebar-background: 225 12% 7%;
-    --sidebar-foreground: 0 0% 80%;
-    --sidebar-primary-foreground: 155 45% 8%;
-    --sidebar-accent: 228 9% 14%;
-    --sidebar-accent-foreground: 0 0% 92%;
-    --sidebar-border: 225 7% 15%;
+    --chart-2: 205 82% 66%;
+    --chart-3: 288 60% 72%;
+    --chart-4: 42 88% 64%;
+    --chart-5: 152 55% 58%;
+    --sidebar-background: 233 24% 9%;
+    --sidebar-foreground: 228 10% 80%;
+    --sidebar-primary-foreground: 230 45% 9%;
+    --sidebar-accent: 233 18% 16%;
+    --sidebar-accent-foreground: 228 16% 92%;
+    --sidebar-border: 230 14% 16%;
   }
 }
 

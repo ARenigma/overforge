@@ -28,7 +28,7 @@ export default function PrivacyPage() {
         <p className="mx-auto mt-4 max-w-xl text-pretty text-muted-foreground">
           Last updated: {LAST_UPDATED}
         </p>
-        <p className="mx-auto mt-2 max-w-xl rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-600 dark:text-amber-400">
+        <p className="mx-auto mt-2 max-w-xl rounded-md border border-warning/30 bg-warning/10 px-4 py-2 text-sm text-warning-foreground">
           Template — pending legal review. Not yet a legally effective document.
         </p>
       </section>

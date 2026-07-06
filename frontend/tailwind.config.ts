@@ -33,6 +33,7 @@ const config: Config = {
         primary: {
           DEFAULT: 'hsl(var(--primary))',
           foreground: 'hsl(var(--primary-foreground))',
+          wash: 'hsl(var(--primary-wash))',
         },
         secondary: {
           DEFAULT: 'hsl(var(--secondary))',
@@ -59,6 +60,7 @@ const config: Config = {
         'surface-75': 'hsl(var(--surface-75))',
         'surface-100': 'hsl(var(--surface-100))',
         'surface-200': 'hsl(var(--surface-200))',
+        'surface-inset': 'hsl(var(--surface-inset))',
         'overlay-scrim': 'hsl(var(--overlay-scrim))',
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
@@ -88,6 +90,8 @@ const config: Config = {
       },
       transitionTimingFunction: {
         smooth: 'cubic-bezier(0.16, 1, 0.3, 1)',
+        // Finite house curve — the ONE easing for micro-transitions (hover/color/border/transform).
+        'out-cubic': 'var(--ease-out)',
       },
       borderRadius: {
         lg: 'var(--radius)',

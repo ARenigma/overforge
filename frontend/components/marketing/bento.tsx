@@ -26,7 +26,7 @@ function Scorecard() {
     ['Communication', 92],
   ];
   return (
-    <div className="rounded-lg border border-border bg-background/60 p-3">
+    <div className="rounded-lg border border-border bg-surface-inset p-3">
       <div className="flex items-center justify-between">
         <span className="font-mono text-xs text-muted-foreground">candidate@acme.com</span>
         <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
@@ -49,7 +49,7 @@ function Scorecard() {
 
 function CodeMini() {
   return (
-    <div className="rounded-lg border border-border bg-background/60 p-3 font-mono text-[11px] leading-relaxed">
+    <div className="rounded-lg border border-border bg-surface-inset p-3 font-mono text-[11px] leading-relaxed">
       <div className="text-muted-foreground">
         <span className="text-primary">def</span> two_sum(nums, target):
       </div>
@@ -63,7 +63,7 @@ function CodeMini() {
 
 function TerminalMini() {
   return (
-    <div className="rounded-lg border border-border bg-background/60 p-3 font-mono text-[11px] leading-relaxed">
+    <div className="rounded-lg border border-border bg-surface-inset p-3 font-mono text-[11px] leading-relaxed">
       <div className="text-muted-foreground">
         <span className="text-primary">▸</span> python main.py
       </div>
@@ -82,7 +82,7 @@ function LangChips() {
       {langs.map((l) => (
         <span
           key={l}
-          className="rounded-md border border-border bg-background/60 px-2 py-1 font-mono text-[11px] text-muted-foreground"
+          className="rounded-md border border-border bg-surface-inset px-2 py-1 font-mono text-[11px] text-muted-foreground"
         >
           {l}
         </span>
@@ -93,7 +93,7 @@ function LangChips() {
 
 function InviteMini() {
   return (
-    <div className="rounded-lg border border-border bg-background/60 p-3">
+    <div className="rounded-lg border border-border bg-surface-inset p-3">
       <div className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
         <Link2 className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
         overforge.app/i/x7f2k9

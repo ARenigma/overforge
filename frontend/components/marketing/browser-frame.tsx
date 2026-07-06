@@ -25,7 +25,7 @@ export function BrowserFrame({
           <span className="h-3 w-3 rounded-full bg-muted" />
         </div>
         {url && (
-          <div className="mx-auto flex min-w-0 max-w-sm items-center gap-2 rounded-md border border-border bg-background/60 px-3 py-0.5 font-mono text-xs text-foreground-subtle">
+          <div className="mx-auto flex min-w-0 max-w-sm items-center gap-2 rounded-md border border-border bg-surface-inset px-3 py-0.5 font-mono text-xs text-foreground-subtle">
             <Lock className="h-3 w-3 shrink-0 text-success" aria-hidden="true" />
             <span className="truncate">{url}</span>
           </div>
