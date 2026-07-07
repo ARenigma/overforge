@@ -80,9 +80,9 @@ export function TranscriptStats() {
         sub="It adapts, it probes, it scores fairly — every number comes with its receipt from the transcript."
       />
 
-      <div className="mt-10 grid gap-4 lg:grid-cols-3">
+      <div className="mt-10 space-y-4">
         {/* Hero card — the transcript itself, the proof the numbers point to. */}
-        <Reveal className="lg:col-span-2">
+        <Reveal>
           <SeamCard innerClassName="flex h-full flex-col p-0">
             <div className="flex items-center justify-between border-b border-border px-5 py-3">
               <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-foreground-subtle">
@@ -107,8 +107,8 @@ export function TranscriptStats() {
           </SeamCard>
         </Reveal>
 
-        {/* Three compact stat cards. */}
-        <Reveal delay={80} className="grid gap-4">
+        {/* Three compact stat cards — a row beneath the transcript. */}
+        <Reveal delay={80} className="grid gap-4 sm:grid-cols-3">
           <StatCard
             label="response latency"
             numeral={

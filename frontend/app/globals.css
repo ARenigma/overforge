@@ -169,39 +169,15 @@
     radial-gradient(90% 120% at 50% -20%, hsl(var(--primary-wash) / 0.1), transparent 60%),
     linear-gradient(hsl(var(--surface-75)), hsl(var(--surface-100)));
 }
+/* `contrast` is a same-theme DEEP feature band with a faint trace wash — NEVER an inverse flip
+   (no light band in dark mode, no dark band in light mode). It stays dark in dark, light in light. */
 [data-tone='contrast'] {
-  --background: 233 42% 8.5%;
-  --foreground: 228 18% 95%;
-  --card: 233 28% 12%;
-  --card-foreground: 228 18% 95%;
-  --popover: 233 28% 14%;
-  --secondary: 233 20% 16%;
-  --muted: 233 20% 16%;
-  --muted-foreground: 228 12% 72%;
-  --accent: 233 20% 18%;
-  --accent-foreground: 228 18% 95%;
-  --border: 230 16% 22%;
-  --input: 230 16% 24%;
-  --foreground-subtle: 228 11% 62%;
-  --foreground-ghost: 228 10% 42%;
-  background-color: hsl(var(--background));
-  color: hsl(var(--foreground));
-}
-.dark [data-tone='contrast'] {
-  --background: 228 32% 96%;
-  --foreground: 230 24% 11%;
-  --card: 0 0% 100%;
-  --card-foreground: 230 24% 11%;
-  --popover: 0 0% 100%;
-  --secondary: 228 18% 93%;
-  --muted: 228 18% 93%;
-  --muted-foreground: 230 12% 32%;
-  --accent: 228 20% 90%;
-  --accent-foreground: 230 20% 16%;
-  --border: 228 16% 86%;
-  --input: 228 16% 84%;
-  --foreground-subtle: 230 9% 42%;
-  --foreground-ghost: 230 9% 58%;
+  background-color: hsl(var(--surface-deep));
+  background-image: radial-gradient(
+    100% 130% at 50% -10%,
+    hsl(var(--primary-wash) / 0.06),
+    transparent 58%
+  );
 }
 
 /* ── Finite mark load animation — the stroke draws itself, the terminal dot lands, everything
@@ -257,11 +233,11 @@
 .wordmark-sheen {
   background-image: linear-gradient(
     100deg,
-    hsl(var(--foreground) / 0.14) 0%,
-    hsl(var(--foreground) / 0.14) 38%,
-    hsl(var(--primary) / 0.55) 50%,
-    hsl(var(--foreground) / 0.14) 62%,
-    hsl(var(--foreground) / 0.14) 100%
+    hsl(var(--foreground) / 0.28) 0%,
+    hsl(var(--foreground) / 0.28) 38%,
+    hsl(var(--primary) / 0.75) 50%,
+    hsl(var(--foreground) / 0.28) 62%,
+    hsl(var(--foreground) / 0.28) 100%
   );
   background-size: 220% 100%;
   -webkit-background-clip: text;

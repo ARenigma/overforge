@@ -143,7 +143,7 @@ export function Anatomy() {
               tabs + panel) stays within one viewport. */}
           <div className="mt-6">
             <ProductFrame>
-              <div className="relative mx-auto aspect-[16/9] max-h-[56vh] w-full">
+              <div className="relative mx-auto aspect-[16/10] max-h-[66vh] w-full">
                 {STATES.map((s, i) => (
                   <div
                     key={s.key}
@@ -158,7 +158,7 @@ export function Anatomy() {
                       alt={s.alt}
                       fill
                       sizes="(max-width: 1280px) 100vw, 1216px"
-                      className="hidden object-cover object-top dark:block"
+                      className="hidden object-contain object-top dark:block"
                       priority={i === 0}
                     />
                     <Image
@@ -166,7 +166,7 @@ export function Anatomy() {
                       alt={s.alt}
                       fill
                       sizes="(max-width: 1280px) 100vw, 1216px"
-                      className="object-cover object-top dark:hidden"
+                      className="object-contain object-top dark:hidden"
                       priority={i === 0}
                     />
                   </div>
