@@ -102,7 +102,7 @@ export function Benchmark() {
                     <div className="relative h-5 min-w-0 flex-1">
                       <div
                         className={cn(
-                          'h-full origin-left rounded-sm transition-transform duration-[700ms] ease-out-cubic',
+                          'h-full origin-left rounded-sm transition-transform duration-700 ease-out-cubic',
                           b.finite ? 'bg-primary' : 'bg-foreground-ghost/25',
                           inView ? 'scale-x-100' : 'scale-x-0'
                         )}
@@ -113,7 +113,13 @@ export function Benchmark() {
                           'absolute top-1/2 -translate-y-1/2 whitespace-nowrap font-mono text-[11px] tabular-nums',
                           b.finite ? 'text-primary' : 'text-foreground-subtle'
                         )}
-                        style={{ left: `calc(${Math.max(b.frac * 100, 1.25)}% + 10px)` }}
+                        // A full-length bar's label sits INSIDE its right edge — hung outside it
+                        // widens the page on phones.
+                        style={
+                          b.frac > 0.9
+                            ? { right: '8px' }
+                            : { left: `calc(${Math.max(b.frac * 100, 1.25)}% + 10px)` }
+                        }
                       >
                         {b.value}
                       </span>

@@ -18,6 +18,7 @@ export interface CreateOpts {
   language?: string;
   level?: string;
   candidateEmail?: string;
+  candidateName?: string;
   roleBrief?: string;
 }
 
@@ -28,6 +29,7 @@ export async function createInterview(opts: CreateOpts = {}): Promise<CreatedInt
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       candidateEmail: opts.candidateEmail ?? 'mimic@overforge.local',
+      ...(opts.candidateName ? { candidateName: opts.candidateName } : {}),
       language: opts.language ?? 'python',
       level: opts.level ?? 'mid',
       ...(opts.roleBrief ? { roleBrief: opts.roleBrief } : {}),

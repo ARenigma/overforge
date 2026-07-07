@@ -82,7 +82,12 @@ export function FsmLedger() {
   }, [inView, prefersReduced, atStart]);
 
   return (
-    <div ref={ref} className="w-full">
+    <div
+      ref={ref}
+      className="w-full"
+      role="img"
+      aria-label="A self-playing demo of one interview's transition ledger: oral questions, a failing run, an adaptive probe, a hint offer, a passing run, and the final score."
+    >
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
         <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-foreground-subtle">
           interview · transition ledger

@@ -1,9 +1,8 @@
 // Placeholder pricing — confirm tiers + prices before launch.
 
-import Link from 'next/link';
+import { Link } from 'next-view-transitions';
 import { Check } from 'lucide-react';
 import { Reveal } from '@/components/marketing/reveal';
-import { SeamCard } from '@/components/marketing/seam-card';
 import { cn } from '@/lib/utils';
 
 interface Tier {
@@ -60,14 +59,22 @@ export const PRICING_TIERS: Tier[] = [
   },
 ];
 
-function PricingCard({ tier }: { tier: Tier }) {
+function PricingColumn({ tier }: { tier: Tier }) {
   return (
-    <SeamCard
-      className={cn(tier.highlighted && 'ring-1 ring-primary/40')}
-      innerClassName="flex h-full flex-col p-6"
-    >
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-foreground">{tier.name}</span>
+    <div className="relative flex flex-col p-6 lg:p-8">
+      {/* The recommended tier speaks in the site's one accent device: a 2px primary bar riding the
+          top hairline (the anatomy-tab signature) — never a box, never a ring. */}
+      {tier.highlighted && (
+        <span aria-hidden="true" className="absolute inset-x-0 -top-px h-[2px] bg-primary" />
+      )}
+
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-foreground-subtle">
+          tier:{' '}
+          <span className={tier.highlighted ? 'text-primary' : 'text-foreground'}>
+            {tier.name.toLowerCase()}
+          </span>
+        </span>
         {tier.highlighted && (
           <span className="font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-primary">
             recommended
@@ -75,17 +82,17 @@ function PricingCard({ tier }: { tier: Tier }) {
         )}
       </div>
 
-      <div className="mt-4 flex items-baseline gap-1">
-        <span className="text-4xl font-semibold tracking-tight text-foreground">{tier.price}</span>
+      <div className="mt-5 flex items-baseline gap-1.5">
+        <span className="font-mono text-4xl tracking-tight text-foreground">{tier.price}</span>
         {tier.period && <span className="text-sm text-muted-foreground">{tier.period}</span>}
       </div>
 
-      <p className="mt-1.5 text-sm text-muted-foreground">{tier.desc}</p>
+      <p className="mt-2 text-sm text-muted-foreground">{tier.desc}</p>
 
       <ul className="mt-6 flex flex-col gap-2.5">
         {tier.features.map((feature) => (
           <li key={feature} className="flex items-center gap-2.5 text-sm">
-            <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
             <span className="text-muted-foreground">{feature}</span>
           </li>
         ))}
@@ -104,18 +111,20 @@ function PricingCard({ tier }: { tier: Tier }) {
           {tier.cta}
         </Link>
       </div>
-    </SeamCard>
+    </div>
   );
 }
 
-/** The four pricing tier cards — composed by the dedicated /pricing page. */
+/** The four pricing tiers as flat columns on hairlines — no boxes (together.ai register). */
 export function PricingTiers() {
   return (
     <div className="mx-auto max-w-6xl px-6">
-      <Reveal className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        {PRICING_TIERS.map((tier) => (
-          <PricingCard key={tier.name} tier={tier} />
-        ))}
+      <Reveal>
+        <div className="grid divide-y divide-border border-y border-border lg:grid-cols-4 lg:divide-x lg:divide-y-0">
+          {PRICING_TIERS.map((tier) => (
+            <PricingColumn key={tier.name} tier={tier} />
+          ))}
+        </div>
       </Reveal>
     </div>
   );

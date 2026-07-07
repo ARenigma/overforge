@@ -81,7 +81,9 @@ export function AuditArtifact() {
                 <div key={i}>{i + 1}</div>
               ))}
             </div>
-            <pre className="overflow-x-auto px-4 py-4">
+            {/* min-w-0: without it this flex item's auto min-width adopts the longest line and
+                widens the page on phones instead of scrolling. */}
+            <pre className="min-w-0 overflow-x-auto px-4 py-4">
               {LINES.map((l, i) => (
                 <div key={i}>{l}</div>
               ))}

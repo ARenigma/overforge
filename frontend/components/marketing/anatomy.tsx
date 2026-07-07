@@ -19,6 +19,7 @@ const STATES = [
     title: 'One link, no scheduling',
     desc: 'Create the interview, send the link. The machine handles the rest — any hour, any timezone.',
     shot: 'invite',
+    hasActive: true, // hover reveals the create dialog open over the dashboard
     alt: 'The Finite dashboard with interviews and their statuses',
   },
   {
@@ -35,6 +36,7 @@ const STATES = [
     title: 'Real code, really run',
     desc: 'A sandboxed IDE graded against hidden tests. When a run fails twice, the interviewer probes — it never hands over the fix.',
     shot: 'coding',
+    hasActive: true, // hover advances the story: probe → hint offer
     alt: 'The interview room in the coding phase with a probe from the interviewer',
   },
   {
@@ -100,7 +102,7 @@ export function Anatomy() {
                 type="button"
                 onClick={() => select(i)}
                 aria-pressed={i === active}
-                className="group relative pt-3.5 text-left"
+                className="group relative pt-3.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 {/* Track + linear bar (ease:none is the brand statement). */}
                 <span className="absolute inset-x-0 top-0 h-[2px] overflow-hidden rounded-full bg-border">
@@ -139,10 +141,12 @@ export function Anatomy() {
             ))}
           </div>
 
-          {/* Panel — theme-paired real screenshots. */}
+          {/* Panel — theme-paired real screenshots. States with an `-active` capture carry a second
+              pair stacked on top that crossfades in on hover, advancing the story one beat
+              (dashboard → create dialog; probe → hint offer). Static images, zero JS. */}
           <div className="mt-6">
             <ProductFrame>
-              <div className="relative aspect-[16/10] w-full">
+              <div className="group relative aspect-[16/10] w-full">
                 {STATES.map((s, i) => (
                   <div
                     key={s.key}
@@ -168,6 +172,27 @@ export function Anatomy() {
                       className="object-cover object-top dark:hidden"
                       priority={i === 0}
                     />
+                    {'hasActive' in s && s.hasActive && (
+                      <div
+                        aria-hidden="true"
+                        className="absolute inset-0 opacity-0 transition-opacity duration-slow ease-out-cubic group-hover:opacity-100"
+                      >
+                        <Image
+                          src={`/shots/${s.shot}-active-dark.png`}
+                          alt=""
+                          fill
+                          sizes="(max-width: 1280px) 100vw, 1216px"
+                          className="hidden object-cover object-top dark:block"
+                        />
+                        <Image
+                          src={`/shots/${s.shot}-active-light.png`}
+                          alt=""
+                          fill
+                          sizes="(max-width: 1280px) 100vw, 1216px"
+                          className="object-cover object-top dark:hidden"
+                        />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

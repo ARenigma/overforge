@@ -17,13 +17,16 @@ export default function PricingPage() {
     <main className="relative">
       <SiteNav />
 
-      {/* Header */}
-      <section className="mx-auto max-w-3xl px-6 pb-10 pt-36 text-center sm:pt-40">
-        <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
+      {/* Editorial page hero — same register as /product: left-aligned, mono eyebrow, two-tone. */}
+      <section className="mx-auto max-w-6xl px-6 pb-10 pt-36 sm:pt-40">
+        <p className="mb-5 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
+          <span className="text-primary">pricing</span> — per interview, not per seat
+        </p>
+        <h1 className="max-w-3xl text-balance text-4xl font-medium tracking-[-0.02em] sm:text-5xl">
           <span className="text-foreground">Predictable pricing,</span>{' '}
-          <span className="text-muted-foreground">designed to scale.</span>
+          <span className="text-foreground-subtle">designed to scale.</span>
         </h1>
-        <p className="mx-auto mt-4 max-w-xl text-pretty text-muted-foreground">
+        <p className="mt-4 max-w-xl text-pretty text-muted-foreground">
           Start free, screen your first candidates, and upgrade as your hiring volume grows — no
           surprises.
         </p>

@@ -64,7 +64,7 @@ function WalkRow({
   return (
     <Reveal>
       <div className="grid items-center gap-8 py-14 lg:grid-cols-2 lg:gap-14">
-        <div className={cn(flip && 'lg:order-2')}>
+        <div className={cn('min-w-0', flip && 'lg:order-2')}>
           <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
             <span className="text-primary">{index}</span> — {state}
           </p>
@@ -74,7 +74,7 @@ function WalkRow({
           <p className="mt-3 max-w-lg text-pretty leading-relaxed text-muted-foreground">{body}</p>
           {metrics && <div className="mt-6 space-y-2 border-t border-border pt-5">{metrics}</div>}
         </div>
-        <div className={cn(flip && 'lg:order-1')}>{device}</div>
+        <div className={cn('min-w-0', flip && 'lg:order-1')}>{device}</div>
       </div>
     </Reveal>
   );

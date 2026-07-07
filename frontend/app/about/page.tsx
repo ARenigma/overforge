@@ -2,7 +2,6 @@ import type { Metadata } from 'next';
 import { SiteNav } from '@/components/marketing/nav';
 import { Footer } from '@/components/marketing/footer';
 import { Section, EditorialHeader, SectionDivider } from '@/components/marketing/section';
-import { SeamCard } from '@/components/marketing/seam-card';
 import { Reveal } from '@/components/marketing/reveal';
 import { CTA } from '@/components/marketing/cta';
 
@@ -64,30 +63,31 @@ export default function AboutPage() {
           lead="Not a chatbot with a checklist."
           sub="A finite-state machine owns the interview; a language model words the questions and judges the substance of answers."
         />
-        <Reveal className="mt-8 grid gap-4 lg:grid-cols-3">
-          <SeamCard innerClassName="p-6">
+        {/* Boxless: the story-tab-at-rest device — hairline top rule + mono key, no cards. */}
+        <Reveal className="mt-10 grid gap-x-8 gap-y-8 lg:grid-cols-3">
+          <div className="border-t border-border pt-4">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">listen</p>
             <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
               The interviewer evaluates substance — reasoning quality, edge-case awareness, accuracy
               — and generates each follow-up from the answer just given. A clarifying question gets
               an answer, not a state transition.
             </p>
-          </SeamCard>
-          <SeamCard innerClassName="p-6">
+          </div>
+          <div className="border-t border-border pt-4">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">run</p>
             <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
               The coding round executes for real in an isolated sandbox, graded against hidden
               tests. The scorer sees the code and its output — nobody talks around a bug they never
               fixed.
             </p>
-          </SeamCard>
-          <SeamCard innerClassName="p-6">
+          </div>
+          <div className="border-t border-border pt-4">
             <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">decide</p>
             <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
               Scores are decision-support, not decisions. The scorecard shows what was said and how
               it mapped to your rubric — your team makes the hiring call.
             </p>
-          </SeamCard>
+          </div>
         </Reveal>
       </Section>
 
@@ -101,15 +101,15 @@ export default function AboutPage() {
           lead="Four principles,"
           tail="engineered in."
         />
-        <Reveal className="mt-8 grid gap-4 sm:grid-cols-2">
+        <Reveal className="mt-10 grid gap-x-8 gap-y-8 sm:grid-cols-2">
           {BELIEFS.map((b) => (
-            <SeamCard key={b.k} innerClassName="p-6">
+            <div key={b.k} className="border-t border-border pt-4">
               <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">
                 {b.k}
               </p>
               <p className="mt-2 text-sm font-medium text-foreground">{b.title}</p>
               <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{b.body}</p>
-            </SeamCard>
+            </div>
           ))}
         </Reveal>
       </Section>

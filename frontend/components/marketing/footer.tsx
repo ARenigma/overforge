@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { Link } from 'next-view-transitions';
 import { ShieldCheck, Lock, Globe, Database } from 'lucide-react';
 import { Wordmark } from './wordmark';
 import { SectionDivider } from './section';

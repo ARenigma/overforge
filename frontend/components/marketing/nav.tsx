@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import Link from 'next/link';
+import { Link } from 'next-view-transitions';
 import { Menu, X } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Wordmark } from '@/components/marketing/wordmark';
@@ -14,6 +14,109 @@ const LINKS = [
   { label: 'How it works', href: '/how-it-works', desc: 'A run, state by state' },
   { label: 'Pricing', href: '/pricing', desc: 'Per-interview, no seats' },
 ] as const;
+
+// The Product dropdown panel — mono spec-keys + one-line descriptors (the together.ai register:
+// every nav item earns a descriptor). Hover-intent open, Escape/blur close, full keyboard support.
+const PRODUCT_MENU = [
+  {
+    k: 'system',
+    label: 'Product overview',
+    href: '/product',
+    desc: 'Six modules, one deterministic interviewer',
+  },
+  { k: 'states', label: 'How it works', href: '/how-it-works', desc: 'A real run, state by state' },
+  {
+    k: 'sandbox',
+    label: 'Isolation spec',
+    href: '/#security',
+    desc: 'gVisor, no network, destroyed on exit',
+  },
+  {
+    k: 'receipt',
+    label: 'The audit ledger',
+    href: '/how-it-works#artifact',
+    desc: 'Every session leaves a machine-readable receipt',
+  },
+] as const;
+
+function ProductDropdown() {
+  const [open, setOpen] = React.useState(false);
+  const closeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const openNow = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    setOpen(true);
+  };
+  const closeSoon = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setOpen(false), 140);
+  };
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={openNow}
+      onMouseLeave={closeSoon}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') setOpen(false);
+      }}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false);
+      }}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-haspopup="true"
+        // Open-only: hover already opened it for mouse users, so a toggle would close the panel
+        // on the very click that follows the hover. Escape / mouseleave / blur close it.
+        onClick={openNow}
+        className={cn(
+          'flex items-center gap-1 px-3 py-2 text-sm transition-colors duration-fast ease-out-cubic focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+          open ? 'text-primary' : 'text-foreground-subtle hover:text-primary'
+        )}
+      >
+        Product
+        <svg
+          viewBox="0 0 10 6"
+          className={cn(
+            'h-1.5 w-2.5 transition-transform duration-fast ease-out-cubic',
+            open && 'rotate-180'
+          )}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        >
+          <path d="M1 1l4 4 4-4" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute left-1/2 top-full w-[440px] -translate-x-1/2 pt-2 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-1 motion-safe:duration-fast">
+          <div className="overflow-hidden rounded-lg border border-border bg-popover p-1.5 shadow-[0_8px_16px_-8px_rgba(0,0,0,0.2),0_24px_48px_-16px_rgba(0,0,0,0.25)]">
+            {PRODUCT_MENU.map((item) => (
+              <Link
+                key={item.k}
+                href={item.href}
+                onClick={() => setOpen(false)}
+                className="group/item flex items-baseline gap-4 rounded-md px-3.5 py-2.5 transition-colors duration-fast ease-out-cubic hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+              >
+                <span className="w-16 shrink-0 font-mono text-[10px] uppercase tracking-[0.12em] text-primary">
+                  {item.k}
+                </span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-sm text-foreground">{item.label}</span>
+                  <span className="mt-0.5 text-xs text-foreground-subtle">{item.desc}</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Site nav — transparent over the hero, frosting to a hairline-bordered bar on scroll (Supabase's
  *  one-canvas rule: the nav never introduces a second background color at rest). Full-width, h-16. */
@@ -65,15 +168,19 @@ export function SiteNav() {
 
           {/* TRULY centered — absolutely positioned so uneven side clusters can never tilt it. */}
           <div className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-1 md:flex">
-            {LINKS.map((l) => (
-              <Link
-                key={l.href}
-                href={l.href}
-                className="px-3 py-2 text-sm text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-primary"
-              >
-                {l.label}
-              </Link>
-            ))}
+            <ProductDropdown />
+            <Link
+              href="/how-it-works"
+              className="px-3 py-2 text-sm text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-primary"
+            >
+              How it works
+            </Link>
+            <Link
+              href="/pricing"
+              className="px-3 py-2 text-sm text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-primary"
+            >
+              Pricing
+            </Link>
           </div>
 
           <div className="flex items-center gap-3">

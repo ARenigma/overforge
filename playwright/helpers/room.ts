@@ -99,16 +99,18 @@ export class CandidateRoom {
   }
 
   /** Answer until the FSM leaves the oral rounds (reaches coding / wrap-up / done) or we run out of
-   *  turns. The interviewer may probe/counter each answer, so allow generous headroom. Answers with
-   *  a substantive canned reply (quality doesn't gate FSM progression). */
-  async advanceThroughOral(cannedAnswer: string, maxTurns = 10): Promise<number> {
+   *  turns. The interviewer may probe/counter each answer, so allow generous headroom. Accepts one
+   *  canned reply or a rotation of distinct replies (an array reads as a real candidate to the
+   *  scorer; a single sentence repeated verbatim scores as canned). */
+  async advanceThroughOral(cannedAnswer: string | string[], maxTurns = 10): Promise<number> {
+    const answers = Array.isArray(cannedAnswer) ? cannedAnswer : [cannedAnswer];
     const oralPhases = new Set(['greeting', 'oral', 'handoff', '']);
     let turns = 0;
     for (let i = 0; i < maxTurns; i++) {
       const p = await this.phase();
       if (!oralPhases.has(p)) break; // reached coding / wrap_up / done
       if (await this.isDone()) break;
-      await this.answer(cannedAnswer);
+      await this.answer(answers[Math.min(turns, answers.length - 1)]);
       turns++;
     }
     return turns;

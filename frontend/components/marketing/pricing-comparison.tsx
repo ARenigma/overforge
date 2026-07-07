@@ -76,7 +76,7 @@ function renderCell(c: Cell) {
 export function PricingComparison() {
   return (
     <Section>
-      <SectionHeading lead="Compare plans." tail="Every feature, side by side." align="center" />
+      <SectionHeading lead="Compare plans." tail="Every feature, side by side." align="left" />
       <Reveal className="mt-12 overflow-x-auto">
         <table className="w-full min-w-[680px] border-collapse">
           <thead className="bg-background">
