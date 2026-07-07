@@ -50,7 +50,7 @@ const COMPLIANCE = [
 
 export function Footer() {
   return (
-    <footer className="relative flex min-h-[100svh] flex-col justify-between overflow-hidden bg-surface-deep">
+    <footer className="relative flex min-h-[100svh] flex-col overflow-hidden bg-surface-deep">
       {/* Colour wash bleeding from the top — together.ai's footer glow, our trace. */}
       <div
         aria-hidden="true"
@@ -61,9 +61,22 @@ export function Footer() {
         }}
       />
 
-      {/* Top — tagline + navigation + compliance. No redundant small logo; the giant wordmark below
-          signs the page. */}
-      <div className="relative mx-auto w-full max-w-7xl px-6 pt-20">
+      {/* The brand, at architectural scale — signs the page from the TOP, with a forever-idling
+          trace sheen. */}
+      <div className="relative mx-auto w-full max-w-7xl px-6 pt-24">
+        <p
+          aria-hidden="true"
+          className="wordmark-sheen select-none whitespace-nowrap text-[clamp(84px,15vw,220px)] font-medium leading-[0.82] tracking-[-0.05em]"
+        >
+          finite
+          <span className="text-primary" style={{ WebkitTextFillColor: 'currentColor' }}>
+            .
+          </span>
+        </p>
+      </div>
+
+      {/* Navigation + compliance. No redundant small logo — the wordmark above signs the page. */}
+      <div className="relative mx-auto w-full max-w-7xl px-6 pt-14">
         <div className="grid grid-cols-2 gap-x-8 gap-y-10 md:grid-cols-6">
           <div className="col-span-2">
             <p className="max-w-xs text-sm text-muted-foreground">
@@ -115,21 +128,7 @@ export function Footer() {
         </div>
       </div>
 
-      {/* The brand, at architectural scale — the page signs its name (together.ai register), anchored
-          to the bottom of the full-height footer with a forever-idling trace sheen. */}
-      <div className="relative mx-auto w-full max-w-7xl px-6">
-        <p
-          aria-hidden="true"
-          className="wordmark-sheen select-none whitespace-nowrap text-[clamp(84px,15vw,220px)] font-medium leading-[0.82] tracking-[-0.05em]"
-        >
-          finite
-          <span className="text-primary" style={{ WebkitTextFillColor: 'currentColor' }}>
-            .
-          </span>
-        </p>
-      </div>
-
-      <div className="relative">
+      <div className="relative mt-auto">
         <SectionDivider />
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-6 py-5 sm:flex-row">
           <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-foreground-subtle">

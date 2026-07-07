@@ -142,8 +142,10 @@ export function Anatomy() {
           {/* Panel — theme-paired real screenshots. Height is capped so the whole console (header +
               tabs + panel) stays within one viewport. */}
           <div className="mt-6">
-            <ProductFrame>
-              <div className="relative mx-auto aspect-[16/10] max-h-[66vh] w-full">
+            {/* Frame width is capped to the shots' native 16/10 so the browser shell hugs the image
+                (no pillarbox); height stays within the viewport via the vh-based max-width. */}
+            <ProductFrame className="mx-auto w-full max-w-[100vh]">
+              <div className="relative aspect-[16/10] w-full">
                 {STATES.map((s, i) => (
                   <div
                     key={s.key}
@@ -158,7 +160,7 @@ export function Anatomy() {
                       alt={s.alt}
                       fill
                       sizes="(max-width: 1280px) 100vw, 1216px"
-                      className="hidden object-contain object-top dark:block"
+                      className="hidden object-cover object-top dark:block"
                       priority={i === 0}
                     />
                     <Image
@@ -166,7 +168,7 @@ export function Anatomy() {
                       alt={s.alt}
                       fill
                       sizes="(max-width: 1280px) 100vw, 1216px"
-                      className="object-contain object-top dark:hidden"
+                      className="object-cover object-top dark:hidden"
                       priority={i === 0}
                     />
                   </div>
