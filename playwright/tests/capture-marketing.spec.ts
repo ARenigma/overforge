@@ -35,10 +35,18 @@ for (const theme of ['dark', 'light'] as const) {
     test.setTimeout(400_000);
     mkdirSync(OUT, { recursive: true });
 
-    const ctx = await browser.newContext({ viewport: VIEW, deviceScaleFactor: 2 });
+    const ctx = await browser.newContext({
+      viewport: VIEW,
+      deviceScaleFactor: 2,
+      // browser.newContext() does NOT inherit the project's `use` — re-grant device permissions.
+      permissions: ['camera', 'microphone'],
+    });
     // Theme must be set before any page script runs (next-themes reads localStorage at boot).
     await ctx.addInitScript((t) => localStorage.setItem('overforge-theme', t), theme);
     const page = await ctx.newPage();
+    page.on('requestfailed', (r) =>
+      console.log(`[requestfailed] ${r.method()} ${r.url()} — ${r.failure()?.errorText}`)
+    );
 
     const interview = await createInterview({ language: 'python', level: 'mid' });
     createdId = interview.id;
@@ -63,19 +71,32 @@ for (const theme of ['dark', 'light'] as const) {
     await page.screenshot({ path: `${OUT}/coding-${theme}.png` });
 
     // Conclude so scoring kicks off while we capture the dashboard.
-    await page.getByRole('button', { name: 'End' }).click();
+    await page.getByRole('button', { name: 'End', exact: true }).click();
     await page.getByRole('button', { name: 'End interview' }).click();
     await page.waitForTimeout(1500);
 
     // ── invite (dashboard) + score (detail) — as the signed-in interviewer ──
     const dash = await ctx.newPage();
     await dash.goto(`${config.frontendUrl ?? 'http://localhost:3000'}/auth`, {
-      waitUntil: 'domcontentloaded',
+      waitUntil: 'networkidle', // React must hydrate before the form handlers exist
     });
+    await dash.waitForTimeout(800);
     await dash.locator('#email').fill(config.testEmail);
     await dash.locator('#password').fill(config.testPassword());
     await dash.locator('button[type="submit"]').click();
-    await dash.waitForURL(/\/dashboard/, { timeout: 30_000 });
+    try {
+      await dash.waitForURL(/\/dashboard/, { timeout: 20_000 });
+    } catch {
+      // Hydration/auth race — log what the auth page actually shows, then retry the submit once.
+      const err = await dash
+        .locator('#auth-error, [role="alert"]')
+        .allInnerTexts()
+        .catch(() => []);
+      console.log(`[auth-retry] still on ${dash.url()} — inline: ${JSON.stringify(err)}`);
+      await dash.screenshot({ path: `${OUT}/_debug-auth-${theme}.png` });
+      await dash.locator('button[type="submit"]').click();
+      await dash.waitForURL(/\/dashboard/, { timeout: 30_000 });
+    }
     await dash.waitForTimeout(2500);
     await dash.screenshot({ path: `${OUT}/invite-${theme}.png` });
 
