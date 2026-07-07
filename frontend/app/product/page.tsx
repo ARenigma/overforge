@@ -1,16 +1,15 @@
 import type { Metadata } from 'next';
 import { SiteNav } from '@/components/marketing/nav';
 import { Footer } from '@/components/marketing/footer';
-import { Bento } from '@/components/marketing/bento';
+import { Modules } from '@/components/marketing/modules';
 import { LanguageMatrix } from '@/components/marketing/language-matrix';
-import { Security } from '@/components/marketing/security';
 import { CTA } from '@/components/marketing/cta';
 import { SectionDivider } from '@/components/marketing/section';
 
 export const metadata: Metadata = {
   title: 'Product — Finite',
   description:
-    'AI-run technical interviews: a spoken oral round, sandboxed live coding, and deterministic scorecards.',
+    'The system, module by module: FSM core, voice pipeline, gVisor sandbox, scorer, proctor, telemetry — with the real numbers.',
 };
 
 export default function ProductPage() {
@@ -18,23 +17,29 @@ export default function ProductPage() {
     <main className="relative">
       <SiteNav />
 
-      <section className="mx-auto max-w-3xl px-6 pb-4 pt-36 text-center sm:pt-40">
-        <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
-          <span className="text-foreground">One platform</span>{' '}
-          <span className="text-muted-foreground">to screen every engineer.</span>
+      {/* Editorial page hero — the system map. */}
+      <section className="mx-auto max-w-5xl px-6 pb-10 pt-36 sm:pt-40">
+        <p className="mb-5 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
+          <span className="text-primary">product</span> — the system, module by module
+        </p>
+        <h1 className="max-w-3xl text-balance text-4xl font-medium tracking-[-0.02em] sm:text-5xl">
+          <span className="text-foreground">Six modules.</span>{' '}
+          <span className="text-foreground-subtle">One deterministic interviewer.</span>
         </h1>
-        <p className="mx-auto mt-4 max-w-xl text-pretty text-muted-foreground">
-          A spoken oral round, live coding in a sandboxed IDE, and a deterministic scorecard —
-          without scheduling a single call.
+        <p className="mt-4 max-w-xl text-pretty text-muted-foreground">
+          Everything below is the shipped system — spec values are measured in production, not
+          projected.
         </p>
       </section>
 
-      <Bento />
-      <LanguageMatrix />
-      <Security />
+      <Modules />
 
-      <CTA />
+      <div className="pt-10">
+        <SectionDivider />
+      </div>
+      <LanguageMatrix />
       <SectionDivider />
+      <CTA />
       <Footer />
     </main>
   );

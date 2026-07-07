@@ -1335,6 +1335,17 @@ export default function InterviewPage() {
             <Clock className="h-3.5 w-3.5" aria-hidden="true" />
             {formatTime(elapsed)}
           </span>
+          {/* Live FSM state — the product being honest about where the machine is. */}
+          <span
+            className="hidden items-center gap-1.5 font-mono text-[11px] text-foreground-subtle sm:flex"
+            title="Current interview state"
+          >
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full bg-primary/70"
+              aria-hidden="true"
+            />
+            state: <span className="text-foreground">{phase}</span>
+          </span>
         </div>
 
         {/* Right: room controls — passive device status (camera/mic/audio are REQUIRED, no disable),

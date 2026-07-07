@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { SiteNav } from '@/components/marketing/nav';
 import { Footer } from '@/components/marketing/footer';
 import { Walkthrough } from '@/components/marketing/walkthrough';
+import { AuditArtifact } from '@/components/marketing/audit-artifact';
 import { CTA } from '@/components/marketing/cta';
 import { SectionDivider } from '@/components/marketing/section';
 
@@ -33,6 +34,8 @@ export default function HowItWorksPage() {
 
       <Walkthrough />
 
+      <SectionDivider />
+      <AuditArtifact />
       <SectionDivider />
       <CTA />
       <Footer />

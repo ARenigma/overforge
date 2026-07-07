@@ -3,6 +3,7 @@ import { FsmLedger } from '@/components/marketing/fsm-ledger';
 import { CountUp } from '@/components/marketing/count-up';
 import { Cta } from '@/components/marketing/controls';
 import { ProductFrame } from '@/components/marketing/frame';
+import { FsmField } from '@/components/marketing/fsm-field';
 
 // A faint state-machine field — nodes and directed edges as texture (not decoration: the pattern is
 // the product's own topology). Static <pre>, ~0 bytes, masked to a whisper. The WebGL upgrade (P5)
@@ -28,17 +29,24 @@ export function Hero() {
             'radial-gradient(60% 40% at 50% -6%, hsl(var(--primary) / 0.10), transparent 68%)',
         }}
       />
-      {/* Faint FSM ASCII field. */}
-      <pre
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-24 -z-10 mx-auto hidden max-w-[1280px] select-none whitespace-pre px-6 font-mono text-[13px] leading-[1.9] text-primary/[0.07] sm:block"
-        style={{
-          WebkitMaskImage: 'radial-gradient(70% 60% at 50% 30%, black, transparent 80%)',
-          maskImage: 'radial-gradient(70% 60% at 50% 30%, black, transparent 80%)',
-        }}
-      >
-        {ASCII_FIELD + '\n' + ASCII_FIELD}
-      </pre>
+      {/* The FSM field — a living 2D-canvas state graph on capable desktops (pulses travel edges
+          and SETTLE into nodes); the static ASCII rendition below is the SSR + reduced-motion +
+          touch fallback, and they share the same masked, whisper-quiet register. */}
+      <FsmField
+        className="pointer-events-none absolute inset-x-0 top-16 -z-10 mx-auto h-[560px] w-full max-w-[1280px]"
+        fallback={
+          <pre
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-0 top-24 -z-10 mx-auto hidden max-w-[1280px] select-none whitespace-pre px-6 font-mono text-[13px] leading-[1.9] text-primary/[0.07] sm:block"
+            style={{
+              WebkitMaskImage: 'radial-gradient(70% 60% at 50% 30%, black, transparent 80%)',
+              maskImage: 'radial-gradient(70% 60% at 50% 30%, black, transparent 80%)',
+            }}
+          >
+            {ASCII_FIELD + '\n' + ASCII_FIELD}
+          </pre>
+        }
+      />
 
       <div className="mx-auto max-w-[1280px] px-6 pb-20 pt-32 sm:px-8 sm:pt-36">
         {/* Headline (left) + subcopy & CTAs (right, bottom-aligned). */}

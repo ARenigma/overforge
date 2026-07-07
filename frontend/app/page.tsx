@@ -4,6 +4,7 @@ import { TranscriptStats } from '@/components/marketing/transcript-stats';
 import { Anatomy } from '@/components/marketing/anatomy';
 import { Bento } from '@/components/marketing/bento';
 import { LanguageMatrix } from '@/components/marketing/language-matrix';
+import { Benchmark } from '@/components/marketing/benchmark';
 import { Security } from '@/components/marketing/security';
 import { CTA } from '@/components/marketing/cta';
 import { Footer } from '@/components/marketing/footer';
@@ -26,6 +27,8 @@ export default function LandingPage() {
       <Bento />
       <SectionDivider />
       <LanguageMatrix />
+      <SectionDivider />
+      <Benchmark />
       <SectionDivider />
       <Security />
       <SectionDivider />

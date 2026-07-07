@@ -41,7 +41,7 @@ export function Security() {
   return (
     <Section id="security">
       <EditorialHeader
-        index="05"
+        index="06"
         eyebrow="isolation spec"
         lead="Candidate code never touches"
         tail="your infrastructure."

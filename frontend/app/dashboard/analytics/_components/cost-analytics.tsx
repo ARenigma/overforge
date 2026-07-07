@@ -116,27 +116,35 @@ export function CostAnalytics({ data }: { data: CostAnalyticsData }) {
 
   return (
     <div className="space-y-8">
-      {/* Totals */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      {/* Totals — the big-number row: whole cents at summary tier (dp=4 survives only in the
+          per-model table below); readable from across the room. */}
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <MetricCard
+          size="lg"
           label="Total spend"
           value={money(data.totals.total_usd, 2)}
           hint={`${data.totals.interviews} interviews`}
           icon={<DollarSign className="h-4 w-4" />}
         />
         <MetricCard
+          size="lg"
           label="Avg / interview"
-          value={money(data.per_interview.avg_usd)}
+          value={money(data.per_interview.avg_usd, 2)}
+          hint="all services included"
           icon={<Users className="h-4 w-4" />}
         />
         <MetricCard
+          size="lg"
           label="Most expensive"
-          value={money(data.per_interview.max_usd)}
+          value={money(data.per_interview.max_usd, 2)}
+          hint="single interview"
           icon={<Gauge className="h-4 w-4" />}
         />
         <MetricCard
+          size="lg"
           label="Avg duration"
           value={`${Math.floor(dur / 60)}m ${dur % 60}s`}
+          hint="per session"
           icon={<Clock className="h-4 w-4" />}
         />
       </div>

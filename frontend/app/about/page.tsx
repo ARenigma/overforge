@@ -1,157 +1,141 @@
-// TODO (owner): Fill in company-specific details marked [TODO] before publishing.
-// The mission copy is accurate; founding story, team, and traction numbers need real values.
-
 import type { Metadata } from 'next';
 import { SiteNav } from '@/components/marketing/nav';
 import { Footer } from '@/components/marketing/footer';
-import { Section, SectionHeading, SectionDivider } from '@/components/marketing/section';
+import { Section, EditorialHeader, SectionDivider } from '@/components/marketing/section';
+import { SeamCard } from '@/components/marketing/seam-card';
+import { Reveal } from '@/components/marketing/reveal';
 import { CTA } from '@/components/marketing/cta';
 
 export const metadata: Metadata = {
   title: 'About — Finite',
   description:
-    'Finite builds autonomous AI technical interviews that eliminate scheduling overhead and evaluate every candidate against the same deterministic rubric.',
+    'Finite builds an autonomous technical interviewer: deterministic, sandboxed, auditable. Why we think the first-round screen should be a machine.',
 };
+
+const BELIEFS = [
+  {
+    k: 'determinism',
+    title: 'Consistency beats intuition',
+    body: 'The same question, the same rubric, every candidate. No mood-of-the-day variation — a scorecard you can defend to a candidate, or a court.',
+  },
+  {
+    k: 'respect',
+    title: 'Candidates deserve a real interview',
+    body: 'A good screen challenges fairly, answers clarifying questions, offers help before hints, and never nags. That is what we build — and measure.',
+  },
+  {
+    k: 'evidence',
+    title: 'Scores must be explainable',
+    body: 'Every session leaves a transition ledger — each question, run, probe and score, timestamped. The rubric maps to explicit criteria, not vibes.',
+  },
+  {
+    k: 'custody',
+    title: 'Data stays with you',
+    body: 'Candidate sessions belong to your organisation, isolated per interview. We do not train general-purpose models on them without explicit consent.',
+  },
+];
 
 export default function AboutPage() {
   return (
     <main className="relative">
       <SiteNav />
 
-      {/* Header */}
-      <section className="mx-auto max-w-3xl px-6 pb-4 pt-36 text-center sm:pt-40">
-        <h1 className="text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
-          <span className="text-foreground">Built to make</span>{' '}
-          <span className="text-muted-foreground">hiring fairer and faster.</span>
+      {/* Editorial hero. */}
+      <section className="mx-auto max-w-5xl px-6 pb-6 pt-36 sm:pt-40">
+        <p className="mb-5 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
+          <span className="text-primary">about</span> — why a machine
+        </p>
+        <h1 className="max-w-3xl text-balance text-4xl font-medium tracking-[-0.02em] sm:text-5xl">
+          <span className="text-foreground">The first-round screen</span>{' '}
+          <span className="text-foreground-subtle">should be deterministic.</span>
         </h1>
-        <p className="mx-auto mt-4 max-w-xl text-pretty text-muted-foreground">
-          Finite is an AI technical interview platform that runs the first-round screen for
-          engineering roles — so your team only meets candidates who have already demonstrated they
-          can do the work.
+        <p className="mt-4 max-w-xl text-pretty text-muted-foreground">
+          First-round technical screens are expensive to run well and easy to run badly. An hour of
+          engineer time per candidate, inconsistent questions, scheduling friction that loses good
+          people. We built a machine that fixes all three — and shows its work.
         </p>
       </section>
 
-      {/* Mission */}
-      <Section tone="base">
-        <SectionHeading
-          lead="The problem we're solving."
-          align="left"
-          sub="First-round technical screens are expensive to run well and easy to run badly. A 60-minute engineer interview costs real money. Inconsistent questions mean inconsistent signals. Scheduling friction means good candidates drop out. Finite fixes all three."
+      {/* The honest AI section — prose, no hype. */}
+      <Section>
+        <EditorialHeader
+          index="01"
+          eyebrow="how it actually works"
+          lead="Not a chatbot with a checklist."
+          sub="A finite-state machine owns the interview; a language model words the questions and judges the substance of answers."
         />
-
-        <div className="mt-12 grid gap-8 sm:grid-cols-3">
-          {[
-            {
-              stat: 'No scheduling',
-              description:
-                'Candidates complete their interview on their schedule — no back-and-forth, no dropped Zooms.',
-            },
-            {
-              stat: 'Same rubric, every time',
-              description:
-                'Every candidate is evaluated against the same question set and scoring rubric defined by your team.',
-            },
-            {
-              stat: 'Real code, real output',
-              description:
-                'A sandboxed IDE executes candidate code in the language of your choice. No whiteboard syntax.',
-            },
-          ].map(({ stat, description }) => (
-            <div key={stat} className="rounded-xl border border-border bg-card p-6">
-              <p className="text-lg font-semibold text-foreground">{stat}</p>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{description}</p>
-            </div>
-          ))}
-        </div>
+        <Reveal className="mt-8 grid gap-4 lg:grid-cols-3">
+          <SeamCard innerClassName="p-6">
+            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">listen</p>
+            <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
+              The interviewer evaluates substance — reasoning quality, edge-case awareness, accuracy
+              — and generates each follow-up from the answer just given. A clarifying question gets
+              an answer, not a state transition.
+            </p>
+          </SeamCard>
+          <SeamCard innerClassName="p-6">
+            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">run</p>
+            <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
+              The coding round executes for real in an isolated sandbox, graded against hidden
+              tests. The scorer sees the code and its output — nobody talks around a bug they never
+              fixed.
+            </p>
+          </SeamCard>
+          <SeamCard innerClassName="p-6">
+            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">decide</p>
+            <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
+              Scores are decision-support, not decisions. The scorecard shows what was said and how
+              it mapped to your rubric — your team makes the hiring call.
+            </p>
+          </SeamCard>
+        </Reveal>
       </Section>
 
-      {/* How the AI works — honest, no hype */}
-      <Section tone="recessed">
-        <SectionHeading
-          lead="How the AI interviewer works."
-          align="left"
-          sub="Finite uses a large language model to conduct a spoken technical interview. It asks questions, listens, follows up based on the candidate's answers, and scores responses against a rubric you control."
-        />
-
-        <div className="mt-10 space-y-6 text-sm leading-relaxed text-muted-foreground">
-          <p>
-            The interviewer is not a chatbot that checks keywords. It evaluates substance: reasoning
-            quality, edge-case awareness, and the accuracy of the explanation. Scoring is
-            deterministic — the rubric maps to explicit criteria, not vibes.
-          </p>
-          <p>
-            The coding round runs in a real sandboxed environment. Code is executed. Output is
-            captured. The AI sees both the code and the output when scoring, so a candidate cannot
-            talk around a bug they did not fix.
-          </p>
-          <p>
-            AI scores are decision-support, not decisions. The scorecard tells you what a candidate
-            said and how it mapped to your rubric. Your team makes the hiring call.
-          </p>
-        </div>
-      </Section>
-
-      {/* Company — honest placeholders */}
-      <Section tone="base">
-        <SectionHeading lead="The company." align="left" />
-
-        <div className="mt-8 space-y-4 text-sm leading-relaxed text-muted-foreground">
-          {/* TODO: Replace the paragraph below with your real founding story */}
-          <p className="rounded-md border border-dashed border-border px-4 py-3 text-xs text-foreground-subtle">
-            [TODO — founding story: who started Finite, when, and why. Keep it factual.]
-          </p>
-
-          <p>
-            Finite is a privately held company.{' '}
-            {/* TODO: Add incorporation jurisdiction, e.g. "incorporated in Delaware" */}
-          </p>
-
-          <p>
-            We are focused on a narrow problem: making first-round technical screening rigorous,
-            consistent, and fast for engineering hiring teams. We are not trying to replace human
-            interviewers for senior or culture-fit rounds — we are trying to make the repetitive
-            first screen worth everyone&apos;s time.
-          </p>
-
-          {/* TODO: Add team section when you are ready to name founders/key hires */}
-          <p className="rounded-md border border-dashed border-border px-4 py-3 text-xs text-foreground-subtle">
-            [TODO — team: names and roles of founders/key team members.]
-          </p>
-        </div>
-      </Section>
-
-      {/* Values — factual, no fluff */}
-      <Section tone="recessed">
-        <SectionHeading lead="What we believe." align="left" />
-        <div className="mt-10 grid gap-6 sm:grid-cols-2">
-          {[
-            {
-              title: 'Consistency beats intuition',
-              body: 'The same question, the same rubric, every candidate. No mood-of-the-day variation.',
-            },
-            {
-              title: 'Candidates deserve respect',
-              body: "A good technical screen challenges a candidate fairly and gives them a clear signal. That's what we build.",
-            },
-            {
-              title: 'Scores must be explainable',
-              body: 'Every scorecard maps to explicit rubric criteria. You can always show a candidate — or a lawyer — exactly why they scored what they scored.',
-            },
-            {
-              title: 'Data stays with you',
-              body: 'Candidate session data belongs to your organisation. We do not use it to train general-purpose models without your explicit consent.',
-            },
-          ].map(({ title, body }) => (
-            <div key={title} className="rounded-xl border border-border bg-card p-6">
-              <p className="font-medium text-foreground">{title}</p>
-              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{body}</p>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      <CTA />
       <SectionDivider />
+
+      {/* Beliefs — the spec-key register. */}
+      <Section>
+        <EditorialHeader
+          index="02"
+          eyebrow="what we believe"
+          lead="Four principles,"
+          tail="engineered in."
+        />
+        <Reveal className="mt-8 grid gap-4 sm:grid-cols-2">
+          {BELIEFS.map((b) => (
+            <SeamCard key={b.k} innerClassName="p-6">
+              <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">
+                {b.k}
+              </p>
+              <p className="mt-2 text-sm font-medium text-foreground">{b.title}</p>
+              <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{b.body}</p>
+            </SeamCard>
+          ))}
+        </Reveal>
+      </Section>
+
+      <SectionDivider />
+
+      {/* Company — factual, no placeholders. */}
+      <Section>
+        <EditorialHeader
+          index="03"
+          eyebrow="the company"
+          lead="Narrow problem,"
+          tail="on purpose."
+        />
+        <Reveal>
+          <p className="mt-6 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-[15px]">
+            Finite is a privately held company focused on one thing: making the first-round
+            technical screen rigorous, consistent, and fast. We are not replacing your senior
+            engineers&apos; judgment or the culture conversation — we are making the repetitive
+            first screen worth everyone&apos;s time, including the candidate&apos;s.
+          </p>
+        </Reveal>
+      </Section>
+
+      <SectionDivider />
+      <CTA />
       <Footer />
     </main>
   );
