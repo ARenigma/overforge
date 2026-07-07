@@ -18,7 +18,7 @@ export default function PricingPage() {
       <SiteNav />
 
       {/* Editorial page hero — same register as /product: left-aligned, mono eyebrow, two-tone. */}
-      <section className="mx-auto max-w-6xl px-6 pb-10 pt-36 sm:pt-40">
+      <section className="mx-auto max-w-7xl px-6 pb-10 pt-36 sm:pt-40">
         <p className="mb-5 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
           <span className="text-primary">pricing</span> — per interview, not per seat
         </p>

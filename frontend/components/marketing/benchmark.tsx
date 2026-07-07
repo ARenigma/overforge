@@ -88,7 +88,7 @@ export function Benchmark() {
                 </span>
               </div>
               <div className="mt-3 space-y-2">
-                {g.bars.map((b) => (
+                {g.bars.map((b, bi) => (
                   <div key={b.label} className="flex items-center gap-4">
                     <span
                       className={cn(
@@ -106,7 +106,11 @@ export function Benchmark() {
                           b.finite ? 'bg-primary' : 'bg-foreground-ghost/25',
                           inView ? 'scale-x-100' : 'scale-x-0'
                         )}
-                        style={{ width: `${Math.max(b.frac * 100, 1.25)}%` }}
+                        // Stagger each bar so the group visibly grows as it scrolls into view.
+                        style={{
+                          width: `${Math.max(b.frac * 100, 1.25)}%`,
+                          transitionDelay: inView ? `${bi * 110}ms` : '0ms',
+                        }}
                       />
                       <span
                         className={cn(

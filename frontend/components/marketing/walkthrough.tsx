@@ -106,7 +106,7 @@ function VoicePipeline() {
 
 export function Walkthrough() {
   return (
-    <div className="mx-auto max-w-6xl px-6">
+    <div className="mx-auto max-w-7xl px-6">
       <WalkRow
         index="01"
         state="state: invite"

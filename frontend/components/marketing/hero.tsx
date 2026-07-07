@@ -3,123 +3,88 @@ import { FsmLedger } from '@/components/marketing/fsm-ledger';
 import { CountUp } from '@/components/marketing/count-up';
 import { Cta } from '@/components/marketing/controls';
 import { ProductFrame } from '@/components/marketing/frame';
-import { FsmField } from '@/components/marketing/fsm-field';
-
-// A faint state-machine field — nodes and directed edges as texture (not decoration: the pattern is
-// the product's own topology). Static <pre>, ~0 bytes, masked to a whisper. The WebGL upgrade (P5)
-// is the same aesthetic animated; this is the finished fallback.
-const ASCII_FIELD = `   ○───→○        ·      ○╌╌→◉         ·        ·
-   │     ╲      ·        ╲        ·        ·      ○
-   ↓      ○───→○───→○     ○            ·      ╱
-   ○          ·    ╲       │       ·       ○───→◉
-        ·          ○───→○──┘   ·        ╱      ·
-   ·        ○           ·       ○───→○      ·    ·
-      ·       ╲     ·        ·        ╲        ·
-   ○───→◉      ○────────→○       ·      ○╌╌→○───→◉`;
+import { HeroVisual } from '@/components/marketing/hero-visual';
 
 export function Hero() {
   return (
-    <section id="hero" className="relative isolate overflow-hidden">
-      {/* Ambient trace glow from the top (token-driven ultramarine). */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10"
-        style={{
-          background:
-            'radial-gradient(60% 40% at 50% -6%, hsl(var(--primary) / 0.10), transparent 68%)',
-        }}
-      />
-      {/* The FSM field — a living 2D-canvas state graph on capable desktops (pulses travel edges
-          and SETTLE into nodes); the static ASCII rendition below is the SSR + reduced-motion +
-          touch fallback, and they share the same masked, whisper-quiet register. */}
-      <FsmField
-        className="pointer-events-none absolute inset-x-0 top-16 -z-10 mx-auto h-[560px] w-full max-w-6xl"
-        fallback={
-          <pre
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-24 -z-10 mx-auto hidden max-w-6xl select-none whitespace-pre px-6 font-mono text-[13px] leading-[1.9] text-primary/[0.07] sm:block"
-            style={{
-              WebkitMaskImage: 'radial-gradient(70% 60% at 50% 30%, black, transparent 80%)',
-              maskImage: 'radial-gradient(70% 60% at 50% 30%, black, transparent 80%)',
-            }}
-          >
-            {ASCII_FIELD + '\n' + ASCII_FIELD}
-          </pre>
-        }
-      />
+    <section id="hero" data-tone="wash" className="relative isolate overflow-hidden">
+      <div className="mx-auto max-w-7xl px-6 sm:px-8">
+        {/* FIRST VIEWPORT — together.ai structure: brand headline + one-liner + CTAs on the left,
+            the live 3D state-machine system on the right. The ledger + proof strip live below the
+            fold and arrive on scroll. */}
+        <div className="grid min-h-[calc(100svh-4rem)] items-center gap-x-12 gap-y-10 pt-16 lg:grid-cols-[1.05fr_1fr]">
+          <div className="order-2 lg:order-1">
+            <Reveal>
+              <p className="mb-5 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
+                <span className="text-primary">01</span> — autonomous technical interviewer
+              </p>
+              <h1 className="text-balance text-[2.9rem] font-medium leading-[0.98] tracking-[-0.02em] sm:text-6xl lg:text-[4.25rem]">
+                <span className="text-foreground-subtle">Infinite candidates.</span>
+                <br />
+                <span className="text-foreground">
+                  Finite answers<span className="text-primary">.</span>
+                </span>
+              </h1>
+              <p className="mt-6 max-w-md text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
+                A first-round technical screen, run end to end by a finite-state machine.
+                Deterministic, sandboxed, auditable.
+              </p>
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                <Cta href="/auth" arrow>
+                  Run an interview
+                </Cta>
+                <Cta href="/how-it-works" variant="outline">
+                  How it works
+                </Cta>
+              </div>
+            </Reveal>
+          </div>
 
-      <div className="mx-auto max-w-6xl px-6 pb-20 sm:px-8">
-        {/* FIRST VIEWPORT = brand only: headline, tagline, CTAs over the living field. The ledger
-            and proof strip live below the fold and arrive on scroll. */}
-        <div className="grid min-h-[calc(100svh-4rem)] content-center items-end gap-x-10 gap-y-8 pt-16 lg:grid-cols-12">
-          <Reveal className="lg:col-span-7">
-            <p className="mb-5 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
-              <span className="text-primary">01</span> — autonomous technical interviewer
-            </p>
-            <h1 className="text-balance text-[2.75rem] font-medium leading-[0.98] tracking-[-0.02em] sm:text-6xl lg:text-[4.25rem]">
-              <span className="text-foreground-subtle">Infinite candidates.</span>
-              <br />
-              <span className="text-foreground">
-                Finite answers<span className="text-primary">.</span>
-              </span>
-            </h1>
-          </Reveal>
-
-          <Reveal delay={80} className="lg:col-span-5 lg:pb-3">
-            <p className="max-w-md text-pretty text-base leading-relaxed text-muted-foreground">
-              A first-round technical screen run end to end by a finite-state machine — it adapts
-              its follow-ups, probes when a candidate stalls, runs code in a sandbox, and scores
-              everyone against the same rubric. Deterministic. Auditable.
-            </p>
-            <div className="mt-7 flex flex-wrap items-center gap-3">
-              <Cta href="/auth" arrow>
-                Run an interview
-              </Cta>
-              <Cta href="/how-it-works" variant="outline">
-                How it works
-              </Cta>
-            </div>
+          {/* The 3D system — WebGL on capable desktops, static SVG otherwise. */}
+          <Reveal delay={120} className="order-1 lg:order-2">
+            <HeroVisual className="mx-auto aspect-square w-full max-w-[420px] lg:max-w-[540px]" />
           </Reveal>
         </div>
 
-        {/* The FSM ledger, in a product frame. */}
-        <Reveal delay={160} className="mt-14">
-          <ProductFrame>
-            <FsmLedger />
-          </ProductFrame>
-        </Reveal>
+        {/* Below the fold — the FSM ledger in a product frame, then the proof strip. */}
+        <div className="pb-24">
+          <Reveal className="mt-4">
+            <ProductFrame>
+              <FsmLedger />
+            </ProductFrame>
+          </Reveal>
 
-        {/* 3-stat proof strip. */}
-        <Reveal delay={220}>
-          <dl className="mt-12 grid grid-cols-1 divide-y divide-border border-y border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-            <Stat
-              value={
-                <>
-                  <span className="text-foreground-subtle">~</span>
-                  <CountUp value={1} suffix="s" />
-                </>
-              }
-              label="median response latency"
-            />
-            <Stat
-              value={
-                <>
-                  <CountUp value={97} />
-                  /97
-                </>
-              }
-              label="hidden tests graded per run"
-            />
-            <Stat
-              value={
-                <>
-                  <CountUp value={100} suffix="%" />
-                </>
-              }
-              label="score reproducibility"
-            />
-          </dl>
-        </Reveal>
+          <Reveal delay={80}>
+            <dl className="mt-12 grid grid-cols-1 divide-y divide-border border-y border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+              <Stat
+                value={
+                  <>
+                    <span className="text-foreground-subtle">~</span>
+                    <CountUp value={1} suffix="s" />
+                  </>
+                }
+                label="median response latency"
+              />
+              <Stat
+                value={
+                  <>
+                    <CountUp value={97} />
+                    /97
+                  </>
+                }
+                label="hidden tests graded per run"
+              />
+              <Stat
+                value={
+                  <>
+                    <CountUp value={100} suffix="%" />
+                  </>
+                }
+                label="score reproducibility"
+              />
+            </dl>
+          </Reveal>
+        </div>
       </div>
     </section>
   );

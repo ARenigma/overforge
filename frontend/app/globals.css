@@ -152,6 +152,58 @@
   }
 }
 
+/* ── Section tone bands ──────────────────────────────────────────────────────────────────────
+   together.ai and supabase ship each section as its own background band — the page is NOT one flat
+   canvas. Each [data-tone] re-scopes the surface + text tokens so children read correctly with zero
+   special-casing (the same trick .dark uses). Used with rhythm: base is the page; raised/sunken are
+   subtle steps; wash is a primary-tinted gradient; contrast is the ONE inverse feature band (dark on
+   a light site, paper on a dark site) — together.ai's research band, supabase's framework band. */
+[data-tone='raised'] {
+  background-color: hsl(var(--surface-200));
+}
+[data-tone='sunken'] {
+  background-color: hsl(var(--surface-deep));
+}
+[data-tone='wash'] {
+  background-image:
+    radial-gradient(90% 120% at 50% -20%, hsl(var(--primary-wash) / 0.1), transparent 60%),
+    linear-gradient(hsl(var(--surface-75)), hsl(var(--surface-100)));
+}
+[data-tone='contrast'] {
+  --background: 233 42% 8.5%;
+  --foreground: 228 18% 95%;
+  --card: 233 28% 12%;
+  --card-foreground: 228 18% 95%;
+  --popover: 233 28% 14%;
+  --secondary: 233 20% 16%;
+  --muted: 233 20% 16%;
+  --muted-foreground: 228 12% 72%;
+  --accent: 233 20% 18%;
+  --accent-foreground: 228 18% 95%;
+  --border: 230 16% 22%;
+  --input: 230 16% 24%;
+  --foreground-subtle: 228 11% 62%;
+  --foreground-ghost: 228 10% 42%;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+.dark [data-tone='contrast'] {
+  --background: 228 32% 96%;
+  --foreground: 230 24% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 230 24% 11%;
+  --popover: 0 0% 100%;
+  --secondary: 228 18% 93%;
+  --muted: 228 18% 93%;
+  --muted-foreground: 230 12% 32%;
+  --accent: 228 20% 90%;
+  --accent-foreground: 230 20% 16%;
+  --border: 228 16% 86%;
+  --input: 228 16% 84%;
+  --foreground-subtle: 230 9% 42%;
+  --foreground-ghost: 230 9% 58%;
+}
+
 /* ── Finite mark load animation — the stroke draws itself, the terminal dot lands, everything
    stops. One play per mount (~950ms total), the "settle, don't float" law as a logo. ── */
 @keyframes finite-draw {
@@ -189,6 +241,37 @@
   .finite-mark circle {
     animation: none;
     transform: scale(1);
+  }
+}
+
+/* The footer wordmark stays quietly alive — a faint trace sheen sweeps across the giant mark
+   forever (the terminal state is reached, but the machine keeps idling). */
+@keyframes wordmark-sheen {
+  0% {
+    background-position: 140% 0;
+  }
+  100% {
+    background-position: -40% 0;
+  }
+}
+.wordmark-sheen {
+  background-image: linear-gradient(
+    100deg,
+    hsl(var(--foreground) / 0.14) 0%,
+    hsl(var(--foreground) / 0.14) 38%,
+    hsl(var(--primary) / 0.55) 50%,
+    hsl(var(--foreground) / 0.14) 62%,
+    hsl(var(--foreground) / 0.14) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: wordmark-sheen 7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wordmark-sheen {
+    animation: none;
   }
 }
 

@@ -118,7 +118,7 @@ function PricingColumn({ tier }: { tier: Tier }) {
 /** The four pricing tiers as flat columns on hairlines — no boxes (together.ai register). */
 export function PricingTiers() {
   return (
-    <div className="mx-auto max-w-6xl px-6">
+    <div className="mx-auto max-w-7xl px-6">
       <Reveal>
         <div className="grid divide-y divide-border border-y border-border lg:grid-cols-4 lg:divide-x lg:divide-y-0">
           {PRICING_TIERS.map((tier) => (

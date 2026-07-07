@@ -30,7 +30,7 @@ export function PricingCalculator() {
   const savedUsd = savedHours * ENG_HOURLY_USD - monthly;
 
   return (
-    <div className="mx-auto max-w-6xl px-6 pt-14">
+    <div className="mx-auto max-w-7xl px-6 pt-14">
       <SeamCard innerClassName="p-6 sm:p-8">
         <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-2">
           <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">

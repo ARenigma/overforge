@@ -4,16 +4,15 @@ import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { Reveal } from '@/components/marketing/reveal';
 
-/** Section background band — base sits on the page; recessed/raised create subtle charcoal
- *  depth between adjacent sections (multi-band layering). base = no override. */
-const SECTION_TONES = {
-  base: '',
-  raised: 'bg-surface-200',
-  recessed: 'bg-surface-75',
-} as const;
+/** Section background band (together.ai/supabase rhythm — the page is a sequence of bands, not one
+ *  flat canvas). `base` = page bg; `raised`/`sunken` = subtle steps; `wash` = primary-tinted
+ *  gradient; `contrast` = the one inverse feature band (dark on a light site, paper on a dark one).
+ *  The `[data-tone]` rules in globals.css re-scope surface + text tokens so children need no
+ *  special-casing. */
+type SectionTone = 'base' | 'raised' | 'sunken' | 'wash' | 'contrast';
 
 /** One spacing + max-width rhythm for every marketing section (coherence). The tonal band is
- *  full-bleed; the content stays capped at max-w-6xl. */
+ *  full-bleed; the content stays capped at the shared container width. */
 export function Section({
   id,
   className,
@@ -22,12 +21,12 @@ export function Section({
 }: {
   id?: string;
   className?: string;
-  tone?: keyof typeof SECTION_TONES;
+  tone?: SectionTone;
   children: ReactNode;
 }) {
   return (
-    <section id={id} className={cn('w-full', SECTION_TONES[tone])}>
-      <div className={cn('mx-auto w-full max-w-6xl px-6 py-24 sm:py-28', className)}>
+    <section id={id} data-tone={tone === 'base' ? undefined : tone} className="w-full">
+      <div className={cn('mx-auto w-full max-w-7xl px-6 py-24 sm:py-28', className)}>
         {children}
       </div>
     </section>
@@ -40,7 +39,7 @@ export function Section({
  */
 export function SectionDivider() {
   return (
-    <div className="mx-auto w-full max-w-6xl px-6" aria-hidden="true">
+    <div className="mx-auto w-full max-w-7xl px-6" aria-hidden="true">
       <div
         className="h-px w-full bg-border"
         style={{

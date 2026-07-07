@@ -4,52 +4,64 @@ import { CountUp } from './count-up';
 import { SeamCard } from './seam-card';
 import { cn } from '@/lib/utils';
 
-/* Transcript stat-cards — metric-first, together.ai register: a mono spec-key on top, ONE giant
- * numeral with the payoff token accented, one short supporting line, then a SHORT readable
- * transcript receipt (no truncation, no noise). 2×2 so every card breathes. The 1px cursor-seam
- * glow (SeamCard) is the only hover behavior. */
+/* "Not a coding quiz. A real interview." — an asymmetric bento (together.ai/supabase register): one
+ * large card carrying a REAL interview transcript (the proof), three compact stat cards alongside.
+ * The 1px cursor-seam glow (SeamCard) is the only hover behavior. */
 
-function Receipt({
-  rows,
-}: {
-  rows: { t: string; chip: string; chipClass?: string; text: React.ReactNode }[];
-}) {
-  return (
-    <div className="mt-5 space-y-1.5 border-t border-border pt-4 font-mono text-[11.5px] leading-relaxed">
-      {rows.map((r, i) => (
-        <div key={i} className="flex items-baseline gap-3">
-          <span className="w-12 shrink-0 tabular-nums text-foreground-ghost">{r.t}</span>
-          <span className={cn('w-24 shrink-0', r.chipClass ?? 'text-foreground-subtle')}>
-            {r.chip}
-          </span>
-          <span className="min-w-0 flex-1 text-muted-foreground">{r.text}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
+type Line = { t: string; who: string; whoClass?: string; text: React.ReactNode };
+
+const TRANSCRIPT: Line[] = [
+  { t: '12:04', who: 'candidate', text: '…so I’d use a sliding window here.' },
+  {
+    t: '12:05',
+    who: 'interviewer',
+    whoClass: 'text-primary',
+    text: 'why a window over a hash map?',
+  },
+  {
+    t: '02:24',
+    who: 'run',
+    whoClass: 'text-destructive',
+    text: <span className="text-destructive">0 / 8 hidden tests</span>,
+  },
+  {
+    t: '02:38',
+    who: 'probe',
+    whoClass: 'text-primary',
+    text: 'what happens on an empty input?',
+  },
+  {
+    t: '04:15',
+    who: 'run',
+    whoClass: 'text-success',
+    text: <span className="text-success">8 / 8 hidden tests</span>,
+  },
+  {
+    t: '05:02',
+    who: 'score',
+    whoClass: 'text-primary',
+    text: <span className="text-foreground">82 · lean hire</span>,
+  },
+];
 
 function StatCard({
   label,
   numeral,
   line,
-  rows,
 }: {
   label: string;
   numeral: React.ReactNode;
-  line: React.ReactNode;
-  rows: { t: string; chip: string; chipClass?: string; text: React.ReactNode }[];
+  line: string;
 }) {
   return (
-    <SeamCard innerClassName="p-6">
-      <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
+    <SeamCard innerClassName="flex h-full flex-col justify-center p-5">
+      <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-foreground-subtle">
         {label}
       </p>
-      <div className="mt-3.5 font-mono text-4xl font-medium leading-none tracking-tight tabular-nums text-foreground sm:text-5xl">
+      <div className="mt-2 font-mono text-4xl font-medium leading-none tracking-tight tabular-nums text-foreground">
         {numeral}
       </div>
-      <p className="mt-2.5 max-w-md text-sm leading-relaxed text-muted-foreground">{line}</p>
-      <Receipt rows={rows} />
+      <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">{line}</p>
     </SeamCard>
   );
 }
@@ -65,112 +77,70 @@ export function TranscriptStats() {
             Not a coding quiz. A <span className="text-primary">real interview</span>, at scale.
           </>
         }
-        sub="It adapts, it probes, it scores fairly — every number below comes with its receipt from the transcript."
+        sub="It adapts, it probes, it scores fairly — every number comes with its receipt from the transcript."
       />
 
-      <Reveal className="mt-12 grid gap-4 lg:grid-cols-2">
-        <StatCard
-          label="response latency"
-          numeral={
-            <>
-              <span className="text-foreground-ghost">~</span>1
-              <span className="text-primary">s</span>
-            </>
-          }
-          line={
-            <>
-              Median spoken response. No dead air, no <em>&ldquo;processing&rdquo;</em> — it answers
-              like a person on the call.
-            </>
-          }
-          rows={[
-            { t: '12:04', chip: 'candidate', text: '…so I’d use a sliding window.' },
-            {
-              t: '12:05',
-              chip: 'interviewer',
-              chipClass: 'text-primary',
-              text: 'why a window over a hash map here?',
-            },
-          ]}
-        />
+      <div className="mt-10 grid gap-4 lg:grid-cols-3">
+        {/* Hero card — the transcript itself, the proof the numbers point to. */}
+        <Reveal className="lg:col-span-2">
+          <SeamCard innerClassName="flex h-full flex-col p-0">
+            <div className="flex items-center justify-between border-b border-border px-5 py-3">
+              <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-foreground-subtle">
+                one session · transcript
+              </span>
+              <span className="flex items-center gap-1.5 font-mono text-[11px] text-foreground-subtle">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-success" />
+                scored
+              </span>
+            </div>
+            <div className="flex-1 space-y-2 px-5 py-4 font-mono text-[12.5px] leading-relaxed sm:text-[13px]">
+              {TRANSCRIPT.map((l, i) => (
+                <div key={i} className="flex items-baseline gap-3">
+                  <span className="w-12 shrink-0 tabular-nums text-foreground-ghost">{l.t}</span>
+                  <span className={cn('w-24 shrink-0', l.whoClass ?? 'text-foreground-subtle')}>
+                    {l.who}
+                  </span>
+                  <span className="min-w-0 flex-1 text-muted-foreground">{l.text}</span>
+                </div>
+              ))}
+            </div>
+          </SeamCard>
+        </Reveal>
 
-        <StatCard
-          label="guided, never given"
-          numeral={
-            <>
-              0<span className="mx-1 text-foreground-ghost">→</span>
-              <span className="text-success">8/8</span>
-            </>
-          }
-          line="From failing to green in one session — steered by probes, never handed the fix."
-          rows={[
-            {
-              t: '02:24',
-              chip: 'run',
-              chipClass: 'text-destructive',
-              text: <span className="text-destructive">0 / 8 hidden tests</span>,
-            },
-            {
-              t: '02:38',
-              chip: 'probe',
-              chipClass: 'text-primary',
-              text: 'what happens on an empty input?',
-            },
-            {
-              t: '04:15',
-              chip: 'run',
-              chipClass: 'text-success',
-              text: <span className="text-success">8 / 8 hidden tests</span>,
-            },
-          ]}
-        />
-
-        <StatCard
-          label="intervention budget"
-          numeral={
-            <>
-              <span className="text-primary">2</span>
-              <span className="text-xl text-foreground-subtle sm:text-2xl"> max</span>
-            </>
-          }
-          line="Hard cap per question — and declining help is respected, never penalised."
-          rows={[
-            {
-              t: '03:29',
-              chip: 'offer',
-              chipClass: 'text-primary',
-              text: 'want a pointer, or keep going?',
-            },
-            { t: '03:41', chip: 'candidate', text: 'no — let me try once more.' },
-            {
-              t: '03:42',
-              chip: 'interviewer',
-              chipClass: 'text-primary',
-              text: 'your call. I’m here.',
-            },
-          ]}
-        />
-
-        <StatCard
-          label="score reproducibility"
-          numeral={
-            <>
-              <CountUp value={100} />
-              <span className="text-primary">%</span>
-            </>
-          }
-          line="Same answers, same rubric, same score — rerun it and the machine lands on the same state."
-          rows={[
-            {
-              t: '05:02',
-              chip: 'score',
-              chipClass: 'text-primary',
-              text: <span className="text-foreground">82 · lean hire</span>,
-            },
-            { t: 'rerun', chip: 'score', text: '82 · lean hire — identical' },
-          ]}
-        />
-      </Reveal>
+        {/* Three compact stat cards. */}
+        <Reveal delay={80} className="grid gap-4">
+          <StatCard
+            label="response latency"
+            numeral={
+              <>
+                <span className="text-foreground-ghost">~</span>1
+                <span className="text-primary">s</span>
+              </>
+            }
+            line="Median spoken response — no dead air."
+          />
+          <StatCard
+            label="guided, never given"
+            numeral={
+              <>
+                0<span className="mx-1 text-foreground-ghost">→</span>
+                <span className="text-success">8/8</span>
+              </>
+            }
+            line="Steered by probes to green — never handed the fix."
+          />
+          <StatCard
+            label="reproducibility"
+            numeral={
+              <>
+                <CountUp value={100} />
+                <span className="text-primary">%</span>
+              </>
+            }
+            line="Rerun the session — identical score."
+          />
+        </Reveal>
+      </div>
     </Section>
   );
 }

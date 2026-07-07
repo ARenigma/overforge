@@ -1,6 +1,5 @@
 import { Link } from 'next-view-transitions';
 import { ShieldCheck, Lock, Globe, Database } from 'lucide-react';
-import { Wordmark } from './wordmark';
 import { SectionDivider } from './section';
 
 type LiveLink = { label: string; href: string; soon?: false };
@@ -51,24 +50,23 @@ const COMPLIANCE = [
 
 export function Footer() {
   return (
-    <footer className="overflow-hidden bg-surface-deep">
-      {/* The brand, at architectural scale — the page signs its name (together.ai register). */}
-      <div className="mx-auto max-w-6xl px-6 pt-14">
-        <p
-          aria-hidden="true"
-          className="select-none whitespace-nowrap text-[clamp(72px,12.5vw,168px)] font-medium leading-[0.9] tracking-[-0.045em] text-foreground"
-        >
-          finite<span className="text-primary">.</span>
-        </p>
-      </div>
+    <footer className="relative flex min-h-[100svh] flex-col justify-between overflow-hidden bg-surface-deep">
+      {/* Colour wash bleeding from the top — together.ai's footer glow, our trace. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            'radial-gradient(60% 50% at 15% 0%, hsl(var(--primary-wash) / 0.08), transparent 60%), radial-gradient(50% 50% at 90% 10%, hsl(var(--primary-wash) / 0.06), transparent 55%)',
+        }}
+      />
 
-      {/* Section 1 — brand, navigation, and the compliance strip */}
-      <div className="mx-auto max-w-6xl px-6 py-14">
+      {/* Top — tagline + navigation + compliance. No redundant small logo; the giant wordmark below
+          signs the page. */}
+      <div className="relative mx-auto w-full max-w-7xl px-6 pt-20">
         <div className="grid grid-cols-2 gap-x-8 gap-y-10 md:grid-cols-6">
-          {/* Brand column — spans 2 cols */}
           <div className="col-span-2">
-            <Wordmark />
-            <p className="mt-3 max-w-xs text-sm text-muted-foreground">
+            <p className="max-w-xs text-sm text-muted-foreground">
               The autonomous technical interviewer. Deterministic, sandboxed, auditable.
             </p>
             <p className="mt-4 font-mono text-[11px] text-foreground-subtle">
@@ -77,7 +75,6 @@ export function Footer() {
             </p>
           </div>
 
-          {/* Link columns */}
           {COLUMNS.map((col) => (
             <nav key={col.title} aria-label={col.title}>
               <p className="text-sm font-medium text-foreground">{col.title}</p>
@@ -85,7 +82,7 @@ export function Footer() {
                 {col.links.map((l) =>
                   l.soon ? (
                     <li key={l.label}>
-                      <span className="text-sm text-foreground-subtle cursor-default select-none">
+                      <span className="cursor-default select-none text-sm text-foreground-subtle">
                         {l.label}
                         <span className="ml-1.5 text-[10px] font-medium uppercase tracking-wide opacity-60">
                           soon
@@ -108,7 +105,6 @@ export function Footer() {
           ))}
         </div>
 
-        {/* Compliance / security strip */}
         <div className="mt-12 flex flex-wrap items-center gap-x-6 gap-y-3">
           {COMPLIANCE.map(({ icon: Icon, label }) => (
             <div key={label} className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -119,28 +115,41 @@ export function Footer() {
         </div>
       </div>
 
-      {/* Faded hairline between the two footer sections */}
-      <SectionDivider />
-
-      {/* Section 2 — copyright and legal */}
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-6 py-5 sm:flex-row">
-        <p className="text-xs text-muted-foreground">
-          &copy; {new Date().getFullYear()} Finite. All rights reserved.
+      {/* The brand, at architectural scale — the page signs its name (together.ai register), anchored
+          to the bottom of the full-height footer with a forever-idling trace sheen. */}
+      <div className="relative mx-auto w-full max-w-7xl px-6">
+        <p
+          aria-hidden="true"
+          className="wordmark-sheen select-none whitespace-nowrap text-[clamp(84px,15vw,220px)] font-medium leading-[0.82] tracking-[-0.05em]"
+        >
+          finite
+          <span className="text-primary" style={{ WebkitTextFillColor: 'currentColor' }}>
+            .
+          </span>
         </p>
-        <div className="flex items-center gap-4">
-          <Link
-            href="/privacy"
-            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Privacy
-          </Link>
-          <Link
-            href="/terms"
-            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            Terms
-          </Link>
-          <span className="text-xs text-foreground-subtle">Candidate data stays isolated.</span>
+      </div>
+
+      <div className="relative">
+        <SectionDivider />
+        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-6 py-5 sm:flex-row">
+          <p className="font-mono text-[11px] uppercase tracking-[0.1em] text-foreground-subtle">
+            &copy; {new Date().getFullYear()} Finite. All rights reserved.
+          </p>
+          <div className="flex items-center gap-4">
+            <Link
+              href="/privacy"
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Privacy
+            </Link>
+            <Link
+              href="/terms"
+              className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Terms
+            </Link>
+            <span className="text-xs text-foreground-subtle">Candidate data stays isolated.</span>
+          </div>
         </div>
       </div>
     </footer>
