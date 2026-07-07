@@ -8,7 +8,11 @@ import { cn } from '@/lib/utils';
  * then opens the popup; if it fails, we fall back to opening cal.com directly. The whole feature
  * is env-gated on NEXT_PUBLIC_CAL_LINK (e.g. "amit/finite-pilot") — unset renders nothing. */
 
-const CAL_LINK = process.env.NEXT_PUBLIC_CAL_LINK ?? '';
+// Accept either the bare path ("finite" / "team/finite/pilot") or a full https://cal.com/… URL —
+// whichever form the env was set with, the embed needs only the path.
+const CAL_LINK = (process.env.NEXT_PUBLIC_CAL_LINK ?? '')
+  .replace(/^https?:\/\/(www\.)?cal\.com\//i, '')
+  .replace(/^\/+|\/+$/g, '');
 
 declare global {
   interface Window {

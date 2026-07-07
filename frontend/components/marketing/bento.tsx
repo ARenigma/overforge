@@ -1,12 +1,14 @@
-'use client';
-
 import type { ReactNode } from 'react';
-import { Mic, BarChart3, Code2, ShieldCheck, Terminal, Link2, type LucideIcon } from 'lucide-react';
+import { Link2 } from 'lucide-react';
 import { Section, EditorialHeader } from './section';
 import { Reveal } from '@/components/marketing/reveal';
-import { cn } from '@/lib/utils';
+import { SeamCard } from './seam-card';
 
-/* ── mini-visuals (token-driven; the embedded-demo polish from Supabase) ── */
+/* The pipeline bento — every card is a mono spec-key + an embedded product mini-visual (the
+ * Supabase register: the demo IS the card). No icons standing in for substance, no hover
+ * translate/sheen — the SeamCard's 1px cursor glow is the only hover behavior. */
+
+/* ── mini-visuals (token-driven) ── */
 
 function Waveform() {
   const bars = [6, 13, 22, 34, 18, 42, 26, 44, 30, 16, 38, 12, 28, 20, 8];
@@ -76,7 +78,7 @@ function TerminalMini() {
 }
 
 function LangChips() {
-  const langs = ['Python', 'JS', 'Java', 'C++', 'Go', 'Ruby'];
+  const langs = ['Python', 'JS', 'TS', 'Java', 'C++', 'Go', 'Ruby'];
   return (
     <div className="flex flex-wrap gap-1.5">
       {langs.map((l) => (
@@ -104,73 +106,30 @@ function InviteMini() {
 
 /* ── card ── */
 
-function Card({
-  icon: Icon,
+function Cell({
+  k,
   title,
   lead,
   tail,
   visual,
-  hoverDetail,
-  className,
 }: {
-  icon: LucideIcon;
+  /** Mono spec-key, e.g. "oral" — the card's machine label. */
+  k: string;
   title: string;
   lead: string;
   tail: string;
   visual: ReactNode;
-  /** Optional short label that slides up from below the card on hover — CSS only, no JS. */
-  hoverDetail?: string;
-  className?: string;
 }) {
   return (
-    <div
-      className={cn(
-        'group relative isolate flex flex-col overflow-hidden rounded-xl border border-border bg-card p-6 transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30',
-        className
-      )}
-    >
-      {/* Ember glow — lava light blooming from above on hover (CSS opacity fade). */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-        style={{
-          background:
-            'radial-gradient(130% 90% at 50% -20%, hsl(var(--primary) / 0.14), transparent 65%)',
-        }}
-      />
-      {/* Ember sheen — a single diagonal light sweep on hover (motion-safe). */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
-      >
-        <div className="absolute inset-y-0 -left-1/4 w-1/2 bg-gradient-to-r from-transparent via-primary/15 to-transparent opacity-0 motion-safe:group-hover:animate-ember-sheen" />
-      </div>
-      <Icon className="h-5 w-5 text-primary" aria-hidden="true" />
-      <h3 className="mt-3 text-sm font-medium text-foreground">{title}</h3>
+    <SeamCard innerClassName="flex h-full flex-col p-6">
+      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">{k}</p>
+      <h3 className="mt-2 text-sm font-medium text-foreground">{title}</h3>
       <p className="mt-1.5 text-sm leading-relaxed">
         <span className="text-foreground/90">{lead}</span>{' '}
         <span className="text-muted-foreground">{tail}</span>
       </p>
-      <div className="mt-4">{visual}</div>
-
-      {/* Hover-reveal-from-below: parked at translateY(100%), slides to translateY(0) on
-          group-hover. Pure CSS transition — no JS. backface-visibility + translateZ(0)
-          (via transform-gpu) guard against subpixel flicker on webkit. */}
-      {hoverDetail && (
-        <div
-          className={cn(
-            'absolute inset-x-0 bottom-0 transform-gpu',
-            'translate-y-full group-hover:translate-y-0',
-            'bg-primary/10 px-4 py-2.5',
-            'transition-transform duration-300',
-            '[backface-visibility:hidden]'
-          )}
-          style={{ transitionTimingFunction: 'cubic-bezier(.25,.25,0,1)' }}
-        >
-          <p className="font-mono text-[11px] text-primary">{hoverDetail}</p>
-        </div>
-      )}
-    </div>
+      <div className="mt-auto pt-4">{visual}</div>
+    </SeamCard>
   );
 }
 
@@ -185,47 +144,46 @@ export function Bento() {
         sub="One deterministic pipeline from invite to scorecard — no agent soup, no flaky tooling."
       />
       <div className="mt-12">
-        <Reveal className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <Card
-            icon={Mic}
+        <Reveal className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <Cell
+            k="oral"
             title="A spoken oral round"
             lead="Two or three conversational questions to open."
             tail="The AI listens, adapts, and follows up — like a real interviewer."
             visual={<Waveform />}
           />
-          <Card
-            icon={BarChart3}
+          <Cell
+            k="score"
             title="Deterministic scorecards"
             lead="Fixed rubrics, not vibes."
             tail="The same answer earns the same score — emailed the moment it's ready."
             visual={<Scorecard />}
-            hoverDetail="Scores land in your inbox within minutes of session end."
           />
         </Reveal>
-        <Reveal className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-          <Card
-            icon={Code2}
+        <Reveal className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Cell
+            k="editor"
             title="Sandboxed IDE"
             lead="Split-pane CodeMirror."
             tail="Real code, run for real."
             visual={<CodeMini />}
           />
-          <Card
-            icon={ShieldCheck}
+          <Cell
+            k="exec"
             title="Isolated runs"
             lead="Network-less, capped."
             tail="No escape."
             visual={<TerminalMini />}
           />
-          <Card
-            icon={Terminal}
-            title="Six languages"
+          <Cell
+            k="langs"
+            title="Seven languages"
             lead="ARM-native."
             tail="More in a line of config."
             visual={<LangChips />}
           />
-          <Card
-            icon={Link2}
+          <Cell
+            k="invite"
             title="Invite by link"
             lead="One tokenized link."
             tail="No candidate account."

@@ -119,17 +119,10 @@ const config: Config = {
             height: '0',
           },
         },
-        // Ember sheen: a single diagonal light sweep across a card on hover (the "lava" catching light).
-        'ember-sheen': {
-          '0%': { transform: 'translateX(-160%) skewX(-12deg)', opacity: '0' },
-          '35%': { opacity: '1' },
-          '100%': { transform: 'translateX(220%) skewX(-12deg)', opacity: '0' },
-        },
       },
       animation: {
         'accordion-down': 'accordion-down 0.2s ease-out',
         'accordion-up': 'accordion-up 0.2s ease-out',
-        'ember-sheen': 'ember-sheen 0.85s cubic-bezier(0.16,1,0.3,1)',
       },
     },
   },

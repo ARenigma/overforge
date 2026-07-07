@@ -66,8 +66,10 @@ export function EditorialHeader({
 }: {
   index: string;
   eyebrow: string;
-  lead: string;
-  tail?: string;
+  /** Lead/tail accept nodes so a crucial phrase can carry the trace color (together.ai/supabase
+   *  highlight exactly one payoff phrase per headline — never the whole line). */
+  lead: ReactNode;
+  tail?: ReactNode;
   sub?: string;
   meta?: ReactNode;
 }) {
