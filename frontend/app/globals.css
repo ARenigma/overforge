@@ -32,10 +32,12 @@
     --dur-4: 600ms; /* section reveal */
     --dur-5: 900ms; /* hero / logo draw — the ceiling */
 
-    /* ── Brand accent — ultramarine trace pen. Deep on paper (readable as text/CTA on white). ── */
-    --primary: 232 80% 48%;
+    /* ── Brand accent — electric ultramarine, THE ONE VALUE IN BOTH MODES so the brand reads as a
+       single color everywhere (contrast: 4.45 on white, 4.25 on the dark canvas, 4.45 for white
+       CTA text — balanced by construction, verified). ── */
+    --primary: 226 100% 62%;
     --primary-foreground: 0 0% 100%;
-    --primary-wash: 232 80% 48%; /* use with an alpha: hsl(var(--primary-wash) / 0.08) */
+    --primary-wash: 226 100% 62%; /* use with an alpha: hsl(var(--primary-wash) / 0.08) */
 
     /* ── Light (native) — engineering paper. ONE hue (228). Positive elevation: sunken < canvas < card. ── */
     --background: 228 24% 98%;
@@ -97,10 +99,11 @@
   }
 
   .dark {
-    /* ── Ultramarine, LIFTED for night (glows on the dark drawing; ink text sits on the bright fill). ── */
-    --primary: 230 92% 70%;
-    --primary-foreground: 230 45% 9%;
-    --primary-wash: 230 92% 70%;
+    /* ── Same electric ultramarine as light — the brand is ONE color in both modes. White CTA
+       text passes on it (4.45), and it reads clearly on the night canvas (4.25). ── */
+    --primary: 226 100% 62%;
+    --primary-foreground: 0 0% 100%;
+    --primary-wash: 226 100% 62%;
 
     /* ── Dark — the drawing photographed at night. Navy-tinted charcoal, ONE hue (233). ── */
     --background: 233 26% 8%;

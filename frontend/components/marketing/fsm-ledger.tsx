@@ -53,13 +53,16 @@ const KIND_STYLES: Record<Kind, { chip: string; dot: string; detail?: string }> 
 
 const STEP_MS = 850; // one turn revealed per beat — clock-like, deterministic
 const HOLD_MS = 3600; // settle on the accepting state before replaying
+// The ledger must never paint as an empty box: the first rows are pre-seeded at mount and the
+// replay resets to them, so there's always visible content while the rest streams in.
+const SEED_ROWS = 3;
 
 export function FsmLedger() {
   const prefersReduced = usePrefersReducedMotion();
-  const [count, setCount] = React.useState(prefersReduced ? SCRIPT.length : 0);
+  const [count, setCount] = React.useState(prefersReduced ? SCRIPT.length : SEED_ROWS);
   const ref = React.useRef<HTMLDivElement>(null);
   const inView = useInView(ref);
-  const atStart = count === 0; // re-arm the play loop each time it resets to the start
+  const atStart = count === SEED_ROWS; // re-arm the play loop each time it resets to the seed
 
   React.useEffect(() => {
     if (prefersReduced || !inView || !atStart) return;
@@ -67,7 +70,7 @@ export function FsmLedger() {
     const tick = () => {
       setCount((c) => {
         if (c >= SCRIPT.length) {
-          timer = setTimeout(() => setCount(0), HOLD_MS); // hold on terminal, then reset
+          timer = setTimeout(() => setCount(SEED_ROWS), HOLD_MS); // hold on terminal, then reset
           return c;
         }
         timer = setTimeout(tick, STEP_MS);
