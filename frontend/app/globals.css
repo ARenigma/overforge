@@ -152,6 +152,56 @@
   }
 }
 
+/* ── Finite mark load animation — the stroke draws itself, the terminal dot lands, everything
+   stops. One play per mount (~950ms total), the "settle, don't float" law as a logo. ── */
+@keyframes finite-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes finite-land {
+  0% {
+    transform: scale(0);
+  }
+  70% {
+    transform: scale(1.3);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.finite-mark path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: finite-draw 650ms var(--ease-out) 120ms forwards;
+}
+.finite-mark circle {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0);
+  animation: finite-land 280ms var(--ease-out) 700ms forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .finite-mark path {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .finite-mark circle {
+    animation: none;
+    transform: scale(1);
+  }
+}
+
+/* Anatomy state-tabs — the linear (deterministic) auto-advance bar. */
+@keyframes anatomy-bar {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 /* ── Sonner toast accent overrides (token-driven, no hardcoded colours) ── */
 [data-sonner-toast][data-type='success'] [data-icon] {
   color: hsl(var(--success));

@@ -1,30 +1,35 @@
 import { SiteNav } from '@/components/marketing/nav';
 import { Hero } from '@/components/marketing/hero';
-import { UspPillars } from '@/components/marketing/usp-pillars';
-import { HowItWorks } from '@/components/marketing/how-it-works';
-import { LanguageMatrix } from '@/components/marketing/language-matrix';
-import { StartInSeconds } from '@/components/marketing/start-in-seconds';
-import { EditorShowcase } from '@/components/marketing/editor-showcase';
+import { TranscriptStats } from '@/components/marketing/transcript-stats';
+import { Anatomy } from '@/components/marketing/anatomy';
 import { Bento } from '@/components/marketing/bento';
+import { LanguageMatrix } from '@/components/marketing/language-matrix';
 import { Security } from '@/components/marketing/security';
 import { CTA } from '@/components/marketing/cta';
 import { Footer } from '@/components/marketing/footer';
 import { SectionDivider } from '@/components/marketing/section';
 
+// ONE canvas, hairline seams — sections never change the page background (depth comes from framed
+// blocks, not full-bleed bands). Order: hero → why (transcript stats) → anatomy (state-tab console
+// with real product screenshots) → bento → languages → isolation spec → the bookend. Every section
+// is its own device; the centered-heading + icon-card recipe is banned.
 export default function LandingPage() {
   return (
     <main className="relative">
       <SiteNav />
       <Hero />
-      <UspPillars />
-      <HowItWorks />
-      <LanguageMatrix />
-      <StartInSeconds />
-      <EditorShowcase />
-      <Bento />
-      <Security />
-      <CTA />
       <SectionDivider />
+      <TranscriptStats />
+      <SectionDivider />
+      <Anatomy />
+      <SectionDivider />
+      <Bento />
+      <SectionDivider />
+      <LanguageMatrix />
+      <SectionDivider />
+      <Security />
+      <SectionDivider />
+      <CTA />
       <Footer />
     </main>
   );

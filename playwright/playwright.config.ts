@@ -56,7 +56,7 @@ export default defineConfig({
     },
     {
       name: 'matrix',
-      testMatch: /behavior-matrix\.spec\.ts/,
+      testMatch: /(behavior-matrix|capture-marketing)\.spec\.ts/,
       // Text-driven like the mimic: silent mic so STT can't race the composer while the matrix
       // drives the probing/hinting ladder + idle behaviors.
       use: { ...baseUse, launchOptions: { args: chromiumArgs('silence.wav') } },

@@ -3,22 +3,19 @@ import {
   SiJavascript,
   SiTypescript,
   SiGo,
-  SiRust,
   SiCplusplus,
   SiRuby,
   SiOpenjdk,
 } from 'react-icons/si';
-import { Section, SectionHeading } from './section';
 import { Reveal } from '@/components/marketing/reveal';
 
-// Accurate brand glyphs from Simple Icons (react-icons/si) — rendered monochrome,
-// lighting up to the brand green on hover (Supabase-style logo wall).
+// The supported-language RAIL — a framed hairline strip of monochrome brand glyphs (together.ai's
+// logo-wall register), not a grid of hover-bouncing cards. Matches the backend's SUPPORTED_LANGUAGES.
 const LANGUAGES = [
   { name: 'Python', ext: '.py', Icon: SiPython },
   { name: 'JavaScript', ext: '.js', Icon: SiJavascript },
   { name: 'TypeScript', ext: '.ts', Icon: SiTypescript },
   { name: 'Go', ext: '.go', Icon: SiGo },
-  { name: 'Rust', ext: '.rs', Icon: SiRust },
   { name: 'C++', ext: '.cpp', Icon: SiCplusplus },
   { name: 'Java', ext: '.java', Icon: SiOpenjdk },
   { name: 'Ruby', ext: '.rb', Icon: SiRuby },
@@ -26,31 +23,29 @@ const LANGUAGES = [
 
 export function LanguageMatrix() {
   return (
-    <Section id="languages" tone="recessed">
-      <SectionHeading
-        lead="Interview in any language."
-        tail="Real code, in the candidate's stack."
-      />
-      <Reveal className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8">
-        {LANGUAGES.map((lang) => {
-          const { Icon } = lang;
-          return (
-            <div
-              key={lang.name}
-              className="group flex aspect-square cursor-default select-none flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card transition-all duration-200 hover:-translate-y-1 hover:border-primary/40 hover:bg-accent/30"
-            >
-              <Icon
-                className="h-7 w-7 text-foreground-subtle transition-all duration-200 group-hover:scale-110 group-hover:text-primary"
-                aria-hidden="true"
-              />
-              <div className="flex flex-col items-center gap-0.5">
-                <span className="text-xs font-medium text-foreground">{lang.name}</span>
-                <span className="font-mono text-[10px] text-foreground-subtle">{lang.ext}</span>
+    <section id="languages" className="w-full">
+      <div className="mx-auto w-full max-w-5xl px-6 py-14">
+        <Reveal>
+          <p className="mb-6 text-center font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
+            seven languages — sandboxed, hidden-test graded
+          </p>
+          <div className="grid grid-cols-4 border-y border-border sm:grid-cols-7">
+            {LANGUAGES.map(({ name, ext, Icon }, i) => (
+              <div
+                key={name}
+                title={name}
+                className={
+                  'flex flex-col items-center justify-center gap-2 py-6 opacity-70 transition-opacity duration-base ease-out-cubic hover:opacity-100 ' +
+                  (i > 0 ? 'border-l border-border' : '')
+                }
+              >
+                <Icon className="h-6 w-6 text-foreground" aria-hidden="true" />
+                <span className="font-mono text-[10px] text-foreground-subtle">{ext}</span>
               </div>
-            </div>
-          );
-        })}
-      </Reveal>
-    </Section>
+            ))}
+          </div>
+        </Reveal>
+      </div>
+    </section>
   );
 }

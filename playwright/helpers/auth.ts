@@ -3,8 +3,24 @@
 
 import { config } from './env';
 
+/** Node's fetch (undici) occasionally throws a transient network-level `TypeError: fetch failed`
+ *  (DNS/socket hiccup) that a curl of the same endpoint immediately succeeds on. Retry those a
+ *  couple of times with a short backoff; HTTP-level failures (4xx/5xx) still throw immediately. */
+async function fetchWithRetry(url: string, init: RequestInit, tries = 3): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fetch(url, init);
+    } catch (err) {
+      lastErr = err;
+      await new Promise((r) => setTimeout(r, 800 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 export async function getAccessToken(): Promise<string> {
-  const res = await fetch(`${config.supabaseUrl}/auth/v1/token?grant_type=password`, {
+  const res = await fetchWithRetry(`${config.supabaseUrl}/auth/v1/token?grant_type=password`, {
     method: 'POST',
     headers: {
       apikey: config.supabaseAnonKey,

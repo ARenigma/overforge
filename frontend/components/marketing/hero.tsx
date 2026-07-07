@@ -1,8 +1,8 @@
-import Link from 'next/link';
-import { ArrowRight } from 'lucide-react';
 import { Reveal } from '@/components/marketing/reveal';
 import { FsmLedger } from '@/components/marketing/fsm-ledger';
 import { CountUp } from '@/components/marketing/count-up';
+import { Cta } from '@/components/marketing/controls';
+import { ProductFrame } from '@/components/marketing/frame';
 
 // A faint state-machine field — nodes and directed edges as texture (not decoration: the pattern is
 // the product's own topology). Static <pre>, ~0 bytes, masked to a whisper. The WebGL upgrade (P5)
@@ -63,19 +63,12 @@ export function Hero() {
               everyone against the same rubric. Deterministic. Auditable.
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-3">
-              <Link
-                href="/auth"
-                className="group inline-flex h-11 items-center gap-1.5 rounded-md bg-primary px-6 text-sm font-medium text-primary-foreground transition-opacity duration-fast ease-out-cubic hover:opacity-90"
-              >
+              <Cta href="/auth" arrow>
                 Run an interview
-                <ArrowRight className="h-4 w-4 transition-transform duration-fast ease-out-cubic group-hover:translate-x-0.5" />
-              </Link>
-              <Link
-                href="/how-it-works"
-                className="inline-flex h-11 items-center rounded-md border border-border px-6 text-sm font-medium text-foreground transition-colors duration-fast ease-out-cubic hover:bg-accent"
-              >
-                See how it works
-              </Link>
+              </Cta>
+              <Cta href="/how-it-works" variant="outline">
+                How it works
+              </Cta>
             </div>
           </Reveal>
         </div>
@@ -120,20 +113,6 @@ export function Hero() {
         </Reveal>
       </div>
     </section>
-  );
-}
-
-/** Supabase-style product frame: monochrome dot chrome, inner card, deep stacked shadow + ring. */
-function ProductFrame({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg bg-surface-inset p-2 shadow-[0_1px_1px_rgba(0,0,0,0.04),0_8px_16px_-8px_rgba(0,0,0,0.12),0_40px_80px_-24px_rgba(0,0,0,0.18)] ring-1 ring-border">
-      <div className="flex items-center gap-1.5 px-2 py-2">
-        <span className="h-2 w-2 rounded-full bg-border" />
-        <span className="h-2 w-2 rounded-full bg-border" />
-        <span className="h-2 w-2 rounded-full bg-border" />
-      </div>
-      <div className="overflow-hidden rounded-md border border-border bg-card">{children}</div>
-    </div>
   );
 }
 

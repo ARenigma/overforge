@@ -53,6 +53,42 @@ export function SectionDivider() {
   );
 }
 
+/** Editorial section header — the anti-template header: LEFT-aligned two-tone title under an
+ *  indexed mono eyebrow (`02 — WHY IT WORKS`), with an optional right-hand meta slot (a note or
+ *  CTA) that bottom-aligns against the title. Every landing section uses this, center is banned. */
+export function EditorialHeader({
+  index,
+  eyebrow,
+  lead,
+  tail,
+  sub,
+  meta,
+}: {
+  index: string;
+  eyebrow: string;
+  lead: string;
+  tail?: string;
+  sub?: string;
+  meta?: ReactNode;
+}) {
+  return (
+    <Reveal>
+      <div className="flex flex-wrap items-end justify-between gap-x-10 gap-y-4">
+        <div className="max-w-3xl">
+          <p className="mb-4 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
+            <span className="text-primary">{index}</span> — {eyebrow}
+          </p>
+          <h2 className="text-balance text-3xl font-medium tracking-[-0.02em] text-foreground sm:text-4xl">
+            {lead} {tail && <span className="text-foreground-subtle">{tail}</span>}
+          </h2>
+          {sub && <p className="mt-3 max-w-xl text-pretty text-muted-foreground">{sub}</p>}
+        </div>
+        {meta && <div className="shrink-0 pb-1">{meta}</div>}
+      </div>
+    </Reveal>
+  );
+}
+
 /** Two-tone section heading (foreground lead + muted tail), Supabase-style. */
 export function SectionHeading({
   lead,

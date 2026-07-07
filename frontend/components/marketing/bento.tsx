@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { Mic, BarChart3, Code2, ShieldCheck, Terminal, Link2, type LucideIcon } from 'lucide-react';
-import { Section, SectionHeading } from './section';
+import { Section, EditorialHeader } from './section';
 import { Reveal } from '@/components/marketing/reveal';
 import { cn } from '@/lib/utils';
 
@@ -96,7 +96,7 @@ function InviteMini() {
     <div className="rounded-lg border border-border bg-surface-inset p-3">
       <div className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
         <Link2 className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
-        overforge.app/i/x7f2k9
+        finite.dev/i/x7f2k9
       </div>
     </div>
   );
@@ -177,7 +177,9 @@ function Card({
 export function Bento() {
   return (
     <Section id="product">
-      <SectionHeading
+      <EditorialHeader
+        index="04"
+        eyebrow="the pipeline"
         lead="Everything a screen needs."
         tail="Nothing it doesn't."
         sub="One deterministic pipeline from invite to scorecard — no agent soup, no flaky tooling."
