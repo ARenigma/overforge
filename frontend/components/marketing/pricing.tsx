@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Check } from 'lucide-react';
 import { Reveal } from '@/components/marketing/reveal';
+import { SeamCard } from '@/components/marketing/seam-card';
 import { cn } from '@/lib/utils';
 
 interface Tier {
@@ -61,16 +62,16 @@ export const PRICING_TIERS: Tier[] = [
 
 function PricingCard({ tier }: { tier: Tier }) {
   return (
-    <div
-      className={cn(
-        'flex flex-col rounded-xl border bg-card p-6',
-        tier.highlighted ? 'border-primary ring-1 ring-primary/30' : 'border-border'
-      )}
+    <SeamCard
+      className={cn(tier.highlighted && 'ring-1 ring-primary/40')}
+      innerClassName="flex h-full flex-col p-6"
     >
       <div className="flex items-center gap-2">
         <span className="text-sm font-medium text-foreground">{tier.name}</span>
         {tier.highlighted && (
-          <span className="font-mono text-[11px] font-medium text-primary">Most popular</span>
+          <span className="font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-primary">
+            recommended
+          </span>
         )}
       </div>
 
@@ -94,16 +95,16 @@ function PricingCard({ tier }: { tier: Tier }) {
         <Link
           href={tier.href}
           className={cn(
-            'inline-flex h-11 w-full items-center justify-center rounded-md text-sm font-medium transition-colors',
+            'inline-flex h-11 w-full items-center justify-center rounded-md font-mono text-[12px] font-medium uppercase tracking-[0.08em] transition-colors duration-fast ease-out-cubic',
             tier.highlighted
-              ? 'bg-primary text-primary-foreground transition-opacity hover:opacity-90 active:scale-[0.98]'
-              : 'border border-border bg-card text-foreground hover:bg-accent'
+              ? 'bg-primary text-primary-foreground transition-opacity hover:opacity-90'
+              : 'border border-border text-foreground hover:bg-accent'
           )}
         >
           {tier.cta}
         </Link>
       </div>
-    </div>
+    </SeamCard>
   );
 }
 

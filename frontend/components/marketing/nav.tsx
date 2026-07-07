@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Menu, X } from 'lucide-react';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Wordmark } from '@/components/marketing/wordmark';
+import { BookDemo } from '@/components/marketing/book-demo';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 
@@ -69,6 +70,9 @@ export function SiteNav() {
 
         <div className="flex items-center gap-2">
           <ThemeToggle />
+          <BookDemo variant="ghost" className="hidden h-9 px-3 lg:inline-flex">
+            Book a demo
+          </BookDemo>
           <Link
             href={accountHref}
             className="hidden text-sm text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-foreground sm:inline-flex"

@@ -91,37 +91,19 @@ export function Anatomy() {
 
       <Reveal className="mt-10">
         <div ref={ref}>
-          {/* State tabs */}
-          <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+          {/* State tabs — story-tab register: the linear progress bar rides the TOP of each tab
+              (deterministic, clock-like); active = emphasis, never a box. */}
+          <div className="grid grid-cols-2 gap-x-6 gap-y-4 lg:grid-cols-4">
             {STATES.map((s, i) => (
               <button
                 key={s.key}
                 type="button"
                 onClick={() => select(i)}
                 aria-pressed={i === active}
-                className={cn(
-                  'group relative overflow-hidden rounded-md border px-4 pb-3 pt-3.5 text-left transition-colors duration-fast ease-out-cubic',
-                  i === active ? 'border-border bg-card' : 'border-transparent hover:bg-accent/50'
-                )}
+                className="group relative pt-3.5 text-left"
               >
-                <span
-                  className={cn(
-                    'block font-mono text-[11px] uppercase tracking-[0.1em]',
-                    i === active ? 'text-primary' : 'text-foreground-subtle'
-                  )}
-                >
-                  {s.label}
-                </span>
-                <span
-                  className={cn(
-                    'mt-1 block text-sm',
-                    i === active ? 'text-foreground' : 'text-muted-foreground'
-                  )}
-                >
-                  {s.title}
-                </span>
-                {/* Linear, deterministic progress bar — ease:none is the brand statement. */}
-                <span className="absolute inset-x-0 bottom-0 h-px bg-border">
+                {/* Track + linear bar (ease:none is the brand statement). */}
+                <span className="absolute inset-x-0 top-0 h-[2px] overflow-hidden rounded-full bg-border">
                   {i === active && inView && !reduced && (
                     <span
                       key={cycle}
@@ -129,6 +111,29 @@ export function Anatomy() {
                       style={{ animation: `anatomy-bar ${ADVANCE_MS}ms linear forwards` }}
                     />
                   )}
+                  {i === active && (reduced || !inView) && (
+                    <span className="block h-full bg-primary" />
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    'block font-mono text-[11px] uppercase tracking-[0.1em] transition-colors duration-fast ease-out-cubic',
+                    i === active
+                      ? 'text-primary'
+                      : 'text-foreground-subtle group-hover:text-muted-foreground'
+                  )}
+                >
+                  {s.label}
+                </span>
+                <span
+                  className={cn(
+                    'mt-1 block text-sm transition-colors duration-fast ease-out-cubic',
+                    i === active
+                      ? 'text-foreground'
+                      : 'text-muted-foreground group-hover:text-foreground'
+                  )}
+                >
+                  {s.title}
                 </span>
               </button>
             ))}

@@ -18,7 +18,7 @@ const ASCII_FIELD = `   ○───→○        ·      ○╌╌→◉       
 
 export function Hero() {
   return (
-    <section className="relative isolate overflow-hidden">
+    <section id="hero" className="relative isolate overflow-hidden">
       {/* Ambient trace glow from the top (token-driven ultramarine). */}
       <div
         aria-hidden="true"

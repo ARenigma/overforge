@@ -1,6 +1,7 @@
 import { Section, EditorialHeader } from './section';
 import { Reveal } from './reveal';
 import { CountUp } from './count-up';
+import { SeamCard } from './seam-card';
 import { cn } from '@/lib/utils';
 
 /* Transcript stat-cards — the anti-icon-card. Each card is a display-sized mono numeral doing the
@@ -38,9 +39,9 @@ export function TranscriptStats() {
         sub="It adapts, it probes, it scores fairly — and every claim below is drawn from the transcript it leaves behind."
       />
 
-      <Reveal className="mt-12 grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+      <Reveal className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {/* ~1s — latency */}
-        <div className="bg-card p-6">
+        <SeamCard innerClassName="p-6">
           <div className="font-mono text-5xl font-medium tabular-nums text-foreground">
             <span className="text-foreground-subtle">~</span>
             <CountUp value={1} suffix="s" />
@@ -64,10 +65,10 @@ export function TranscriptStats() {
               },
             ]}
           />
-        </div>
+        </SeamCard>
 
         {/* 0 → 8/8 — guided not given */}
-        <div className="bg-card p-6">
+        <SeamCard innerClassName="p-6">
           <div className="font-mono text-5xl font-medium tabular-nums text-foreground">
             0<span className="text-foreground-subtle">→</span>8
             <span className="text-foreground-subtle">/8</span>
@@ -99,10 +100,10 @@ export function TranscriptStats() {
               },
             ]}
           />
-        </div>
+        </SeamCard>
 
         {/* max 2 — never nags */}
-        <div className="bg-card p-6">
+        <SeamCard innerClassName="p-6">
           <div className="font-mono text-5xl font-medium tabular-nums text-foreground">
             max <CountUp value={2} />
           </div>
@@ -131,10 +132,10 @@ export function TranscriptStats() {
               },
             ]}
           />
-        </div>
+        </SeamCard>
 
         {/* 100% — reproducible */}
-        <div className="bg-card p-6">
+        <SeamCard innerClassName="p-6">
           <div className="font-mono text-5xl font-medium tabular-nums text-foreground">
             <CountUp value={100} suffix="%" />
           </div>
@@ -158,7 +159,7 @@ export function TranscriptStats() {
               },
             ]}
           />
-        </div>
+        </SeamCard>
       </Reveal>
     </Section>
   );

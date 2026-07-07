@@ -4,6 +4,7 @@ import { Footer } from '@/components/marketing/footer';
 import { SectionDivider } from '@/components/marketing/section';
 import { PricingTiers } from '@/components/marketing/pricing';
 import { PricingComparison } from '@/components/marketing/pricing-comparison';
+import { PricingCalculator } from '@/components/marketing/pricing-calculator';
 
 export const metadata: Metadata = {
   title: 'Pricing — Finite',
@@ -29,6 +30,7 @@ export default function PricingPage() {
       </section>
 
       <PricingTiers />
+      <PricingCalculator />
       <PricingComparison />
 
       <SectionDivider />
