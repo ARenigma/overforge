@@ -15,7 +15,7 @@ function Receipt({
   rows: { t: string; chip: string; chipClass?: string; text: React.ReactNode }[];
 }) {
   return (
-    <div className="mt-7 space-y-2 border-t border-border pt-5 font-mono text-[12px] leading-relaxed">
+    <div className="mt-5 space-y-1.5 border-t border-border pt-4 font-mono text-[11.5px] leading-relaxed">
       {rows.map((r, i) => (
         <div key={i} className="flex items-baseline gap-3">
           <span className="w-12 shrink-0 tabular-nums text-foreground-ghost">{r.t}</span>
@@ -41,14 +41,14 @@ function StatCard({
   rows: { t: string; chip: string; chipClass?: string; text: React.ReactNode }[];
 }) {
   return (
-    <SeamCard innerClassName="p-7 sm:p-8">
+    <SeamCard innerClassName="p-6">
       <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
         {label}
       </p>
-      <div className="mt-4 font-mono text-5xl font-medium leading-none tracking-tight tabular-nums text-foreground sm:text-6xl">
+      <div className="mt-3.5 font-mono text-4xl font-medium leading-none tracking-tight tabular-nums text-foreground sm:text-5xl">
         {numeral}
       </div>
-      <p className="mt-3 max-w-md text-[15px] leading-relaxed text-muted-foreground">{line}</p>
+      <p className="mt-2.5 max-w-md text-sm leading-relaxed text-muted-foreground">{line}</p>
       <Receipt rows={rows} />
     </SeamCard>
   );
@@ -130,7 +130,7 @@ export function TranscriptStats() {
           numeral={
             <>
               <span className="text-primary">2</span>
-              <span className="text-2xl text-foreground-subtle sm:text-3xl"> max</span>
+              <span className="text-xl text-foreground-subtle sm:text-2xl"> max</span>
             </>
           }
           line="Hard cap per question — and declining help is respected, never penalised."

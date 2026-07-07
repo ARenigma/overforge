@@ -30,7 +30,7 @@ export function PricingCalculator() {
   const savedUsd = savedHours * ENG_HOURLY_USD - monthly;
 
   return (
-    <div className="mx-auto max-w-5xl px-6 pt-14">
+    <div className="mx-auto max-w-6xl px-6 pt-14">
       <SeamCard innerClassName="p-6 sm:p-8">
         <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-2">
           <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
@@ -89,12 +89,6 @@ export function PricingCalculator() {
             </p>
           </div>
         </div>
-
-        <p className="mt-6 border-t border-border pt-4 font-mono text-[10px] leading-relaxed text-foreground-ghost">
-          assumes a first-round human screen costs ~{ENG_HOURS_PER_SCREEN} engineer-hours (interview
-          + writeup + calibration) at ~${ENG_HOURLY_USD}/h loaded — adjust for your team.
-          Launch-preview pricing; confirmed at GA.
-        </p>
       </SeamCard>
     </div>
   );

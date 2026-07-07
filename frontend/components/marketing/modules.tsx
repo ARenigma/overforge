@@ -95,7 +95,7 @@ const MODULES: {
 
 export function Modules() {
   return (
-    <div className="mx-auto max-w-5xl space-y-4 px-6">
+    <div className="mx-auto max-w-6xl space-y-4 px-6">
       {MODULES.map((m, i) => (
         <Reveal key={m.n} delay={i * 40}>
           <SeamCard innerClassName="grid gap-x-10 gap-y-5 p-7 sm:p-8 lg:grid-cols-[1.2fr_1fr]">

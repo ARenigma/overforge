@@ -27,7 +27,7 @@ const fmt = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}m
 export function LanguageMatrix() {
   return (
     <section id="languages" className="w-full">
-      <div className="mx-auto w-full max-w-5xl px-6 py-14">
+      <div className="mx-auto w-full max-w-6xl px-6 py-14">
         <Reveal>
           <p className="mb-6 text-center font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
             seven languages — sandboxed, hidden-test graded,{' '}
@@ -56,9 +56,6 @@ export function LanguageMatrix() {
               </div>
             ))}
           </div>
-          <p className="mt-3 text-center font-mono text-[10px] text-foreground-ghost">
-            median run — isolated gVisor container, cold start to verdict · prod, Jul 2026
-          </p>
         </Reveal>
       </div>
     </section>

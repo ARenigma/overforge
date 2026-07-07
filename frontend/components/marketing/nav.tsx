@@ -40,93 +40,98 @@ export function SiteNav() {
   const accountLabel = authed ? 'Dashboard' : 'Sign in';
 
   return (
-    <header
-      className={cn(
-        'fixed inset-x-0 top-0 z-50 transition-colors duration-base ease-out-cubic',
-        scrolled
-          ? 'border-b border-border bg-background/80 backdrop-blur-md'
-          : 'border-b border-transparent'
-      )}
-    >
-      <nav
-        aria-label="Primary"
-        className="relative mx-auto flex h-16 max-w-[1280px] items-center justify-between gap-6 px-6 sm:px-8"
+    <>
+      {/* Page-long grid rules — the max-w-6xl container edges drawn top to bottom on every
+          marketing page (together.ai's page grid). Hairline, behind the nav, above the canvas. */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-y-0 left-1/2 z-30 hidden w-full max-w-6xl -translate-x-1/2 border-x border-border/50 lg:block"
+      />
+      <header
+        className={cn(
+          'fixed inset-x-0 top-0 z-50 transition-colors duration-base ease-out-cubic',
+          scrolled
+            ? 'border-b border-border bg-background/80 backdrop-blur-md'
+            : 'border-b border-transparent'
+        )}
       >
-        <Link href="/" aria-label="Finite — home" className="shrink-0">
-          <Wordmark />
-        </Link>
-
-        {/* TRULY centered — absolutely positioned so uneven side clusters can never tilt it. */}
-        <div className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-1 md:flex">
-          {LINKS.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className="px-3 py-2 text-sm text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-foreground"
-            >
-              {l.label}
-            </Link>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-3">
-          <ThemeToggle />
-          {/* Book a demo — the standout: trace-bordered mono-caps with the accepting-state dot. */}
-          <BookDemo
-            variant="ghost"
-            className="hidden h-9 gap-2 rounded-md border border-primary/45 px-3.5 text-primary hover:border-primary/70 hover:bg-primary/[0.06] hover:text-primary lg:inline-flex"
-          >
-            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary" />
-            Book a demo
-          </BookDemo>
-          <Link
-            href={accountHref}
-            className="hidden text-sm text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-foreground sm:inline-flex"
-          >
-            {accountLabel}
+        <nav
+          aria-label="Primary"
+          className="relative mx-auto flex h-16 max-w-6xl items-center justify-between gap-6 px-6 sm:px-8"
+        >
+          <Link href="/" aria-label="Finite — home" className="shrink-0">
+            <Wordmark />
           </Link>
-          <Link
-            href="/auth"
-            className="hidden h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity duration-fast ease-out-cubic hover:opacity-90 sm:inline-flex"
-          >
-            Start free
-          </Link>
-          <button
-            type="button"
-            aria-label={open ? 'Close menu' : 'Open menu'}
-            aria-expanded={open}
-            onClick={() => setOpen((v) => !v)}
-            className="inline-flex h-9 w-9 items-center justify-center text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-foreground md:hidden"
-          >
-            {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-          </button>
-        </div>
-      </nav>
 
-      {open && (
-        <div className="border-t border-border bg-background/95 backdrop-blur-md md:hidden">
-          <div className="mx-auto max-w-[1280px] px-6 py-3">
+          {/* TRULY centered — absolutely positioned so uneven side clusters can never tilt it. */}
+          <div className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-1 md:flex">
             {LINKS.map((l) => (
               <Link
                 key={l.href}
                 href={l.href}
-                onClick={() => setOpen(false)}
-                className="block rounded-md px-3 py-2.5 transition-colors hover:bg-accent"
+                className="px-3 py-2 text-sm text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-primary"
               >
-                <span className="block text-sm text-foreground">{l.label}</span>
-                <span className="block font-mono text-[11px] text-foreground-subtle">{l.desc}</span>
+                {l.label}
               </Link>
             ))}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
+            <BookDemo variant="outline" className="hidden h-9 px-4 lg:inline-flex">
+              Book a pilot
+            </BookDemo>
             <Link
               href={accountHref}
-              onClick={() => setOpen(false)}
-              className="mt-2 block rounded-md bg-primary px-3 py-2.5 text-center text-sm font-medium text-primary-foreground"
+              className="hidden text-sm text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-foreground sm:inline-flex"
             >
               {accountLabel}
             </Link>
+            <Link
+              href="/auth"
+              className="hidden h-9 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-opacity duration-fast ease-out-cubic hover:opacity-90 sm:inline-flex"
+            >
+              Start free
+            </Link>
+            <button
+              type="button"
+              aria-label={open ? 'Close menu' : 'Open menu'}
+              aria-expanded={open}
+              onClick={() => setOpen((v) => !v)}
+              className="inline-flex h-9 w-9 items-center justify-center text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-foreground md:hidden"
+            >
+              {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+            </button>
           </div>
-        </div>
-      )}
-    </header>
+        </nav>
+
+        {open && (
+          <div className="border-t border-border bg-background/95 backdrop-blur-md md:hidden">
+            <div className="mx-auto max-w-6xl px-6 py-3">
+              {LINKS.map((l) => (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  onClick={() => setOpen(false)}
+                  className="block rounded-md px-3 py-2.5 transition-colors hover:bg-accent"
+                >
+                  <span className="block text-sm text-foreground">{l.label}</span>
+                  <span className="block font-mono text-[11px] text-foreground-subtle">
+                    {l.desc}
+                  </span>
+                </Link>
+              ))}
+              <Link
+                href={accountHref}
+                onClick={() => setOpen(false)}
+                className="mt-2 block rounded-md bg-primary px-3 py-2.5 text-center text-sm font-medium text-primary-foreground"
+              >
+                {accountLabel}
+              </Link>
+            </div>
+          </div>
+        )}
+      </header>
+    </>
   );
 }

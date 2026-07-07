@@ -100,17 +100,13 @@ function VoicePipeline() {
           </span>
         ))}
       </div>
-      <p className="mt-3 font-mono text-[10px] text-foreground-ghost">
-        stage medians, prod voice telemetry · was ~23s as a naive chain — rebuilt as a streaming
-        pipeline
-      </p>
     </div>
   );
 }
 
 export function Walkthrough() {
   return (
-    <div className="mx-auto max-w-5xl px-6">
+    <div className="mx-auto max-w-6xl px-6">
       <WalkRow
         index="01"
         state="state: invite"

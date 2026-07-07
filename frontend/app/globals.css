@@ -49,7 +49,7 @@
     --secondary: 228 18% 95%;
     --secondary-foreground: 230 20% 16%;
     --muted: 228 18% 95%;
-    --muted-foreground: 230 9% 40%;
+    --muted-foreground: 230 12% 32%;
     --accent: 228 20% 93%;
     --accent-foreground: 230 20% 16%;
     --destructive: 8 74% 46%;
@@ -68,8 +68,8 @@
        white in light mode and erase nested structure). Never translucent. */
     --surface-inset: 228 18% 94%;
     /* Text hierarchy below muted-foreground (40%): subtle = de-emphasized labels; ghost = dots. */
-    --foreground-subtle: 230 8% 50%;
-    --foreground-ghost: 230 10% 68%;
+    --foreground-subtle: 230 9% 42%;
+    --foreground-ghost: 230 9% 60%;
     /* Modal scrim — tinted ink, lighter in light mode. */
     --overlay-scrim: 230 30% 8% / 0.45;
     /* Sharp structure is the brand: 0 radius on surfaces, cards, buttons. Only text-entry fields
@@ -115,7 +115,7 @@
     --secondary: 233 18% 16%;
     --secondary-foreground: 228 16% 92%;
     --muted: 233 18% 16%;
-    --muted-foreground: 228 9% 62%;
+    --muted-foreground: 228 11% 72%;
     --accent: 233 18% 18%;
     --accent-foreground: 228 16% 92%;
     --destructive: 8 78% 62%;
@@ -129,8 +129,8 @@
     --surface-100: 233 26% 8%;
     --surface-200: 233 22% 11%;
     --surface-inset: 233 26% 6%;
-    --foreground-subtle: 228 9% 50%;
-    --foreground-ghost: 228 10% 34%;
+    --foreground-subtle: 228 10% 62%;
+    --foreground-ghost: 228 9% 44%;
     --overlay-scrim: 233 40% 3% / 0.75;
 
     --ring: var(--primary);
@@ -194,6 +194,25 @@
 
 /* Anatomy state-tabs — the linear (deterministic) auto-advance bar. */
 @keyframes anatomy-bar {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Alive product visuals — hover-driven (paused at rest, settle on exit; the Supabase play-state
+   pattern) and view-driven one-shot fills. */
+@keyframes eq {
+  from {
+    transform: scaleY(0.35);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+@keyframes fill-bar {
   from {
     transform: scaleX(0);
   }

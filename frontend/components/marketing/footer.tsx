@@ -51,9 +51,19 @@ const COMPLIANCE = [
 
 export function Footer() {
   return (
-    <footer className="bg-surface-deep">
+    <footer className="overflow-hidden bg-surface-deep">
+      {/* The brand, at architectural scale — the page signs its name (together.ai register). */}
+      <div className="mx-auto max-w-6xl px-6 pt-14">
+        <p
+          aria-hidden="true"
+          className="select-none whitespace-nowrap text-[clamp(72px,12.5vw,168px)] font-medium leading-[0.9] tracking-[-0.045em] text-foreground"
+        >
+          finite<span className="text-primary">.</span>
+        </p>
+      </div>
+
       {/* Section 1 — brand, navigation, and the compliance strip */}
-      <div className="mx-auto max-w-[1280px] px-6 py-14">
+      <div className="mx-auto max-w-6xl px-6 py-14">
         <div className="grid grid-cols-2 gap-x-8 gap-y-10 md:grid-cols-6">
           {/* Brand column — spans 2 cols */}
           <div className="col-span-2">
@@ -113,7 +123,7 @@ export function Footer() {
       <SectionDivider />
 
       {/* Section 2 — copyright and legal */}
-      <div className="mx-auto flex max-w-[1280px] flex-col items-center justify-between gap-3 px-6 py-5 sm:flex-row">
+      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-6 py-5 sm:flex-row">
         <p className="text-xs text-muted-foreground">
           &copy; {new Date().getFullYear()} Finite. All rights reserved.
         </p>

@@ -18,7 +18,7 @@ export default function ProductPage() {
       <SiteNav />
 
       {/* Editorial page hero — the system map. */}
-      <section className="mx-auto max-w-5xl px-6 pb-10 pt-36 sm:pt-40">
+      <section className="mx-auto max-w-6xl px-6 pb-10 pt-36 sm:pt-40">
         <p className="mb-5 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
           <span className="text-primary">product</span> — the system, module by module
         </p>

@@ -1,3 +1,6 @@
+'use client';
+
+import * as React from 'react';
 import { Section, EditorialHeader } from './section';
 import { Reveal } from './reveal';
 import { cn } from '@/lib/utils';
@@ -14,7 +17,7 @@ interface Bar {
   finite?: boolean;
 }
 
-const GROUPS: { title: string; unit: string; bars: Bar[]; note: string }[] = [
+const GROUPS: { title: string; unit: string; bars: Bar[] }[] = [
   {
     title: 'Interviewer response, mid-conversation',
     unit: 'seconds',
@@ -22,7 +25,6 @@ const GROUPS: { title: string; unit: string; bars: Bar[]; note: string }[] = [
       { label: 'finite', value: '~1s', frac: 0.125, finite: true },
       { label: 'generic LLM chat interviewer', value: '~8s', frac: 1 },
     ],
-    note: 'median spoken turn, voice in → voice out · prod telemetry',
   },
   {
     title: 'Time to scorecard',
@@ -32,7 +34,6 @@ const GROUPS: { title: string; unit: string; bars: Bar[]; note: string }[] = [
       { label: 'take-home review', value: '~72h', frac: 0.6 },
       { label: 'panel + debrief', value: '~120h', frac: 1 },
     ],
-    note: 'session end → written, rubric-mapped scorecard · market figures are typical ranges',
   },
   {
     title: 'Engineer-hours per screen',
@@ -41,11 +42,32 @@ const GROUPS: { title: string; unit: string; bars: Bar[]; note: string }[] = [
       { label: 'finite', value: '0h', frac: 0.02, finite: true },
       { label: 'engineer-led screen', value: '~1.5h', frac: 1 },
     ],
-    note: 'interview + write-up + calibration · your engineers meet only the shortlist',
   },
 ];
 
 export function Benchmark() {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const [inView, setInView] = React.useState(false);
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setInView(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      ([e]) => {
+        if (e.isIntersecting) {
+          setInView(true);
+          io.disconnect();
+        }
+      },
+      { threshold: 0.35 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
   return (
     <Section id="proof">
       <EditorialHeader
@@ -56,50 +78,52 @@ export function Benchmark() {
         sub="Three measures that decide whether a screen respects everyone's time — with sources."
       />
       <Reveal className="mt-10 space-y-9">
-        {GROUPS.map((g) => (
-          <div key={g.title}>
-            <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-              <h3 className="text-sm font-medium text-foreground">{g.title}</h3>
-              <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-foreground-ghost">
-                {g.unit}
-              </span>
-            </div>
-            <div className="mt-3 space-y-2">
-              {g.bars.map((b) => (
-                <div key={b.label} className="flex items-center gap-4">
-                  <span
-                    className={cn(
-                      'w-56 shrink-0 truncate font-mono text-[12px]',
-                      b.finite ? 'text-foreground' : 'text-foreground-subtle'
-                    )}
-                  >
-                    {b.label}
-                    {b.finite && <span className="text-primary">.</span>}
-                  </span>
-                  <div className="relative h-5 min-w-0 flex-1">
-                    <div
-                      className={cn(
-                        'h-full rounded-sm',
-                        b.finite ? 'bg-primary' : 'bg-foreground-ghost/25'
-                      )}
-                      style={{ width: `${Math.max(b.frac * 100, 1.25)}%` }}
-                    />
+        <div ref={ref} className="space-y-9">
+          {GROUPS.map((g) => (
+            <div key={g.title}>
+              <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+                <h3 className="text-sm font-medium text-foreground">{g.title}</h3>
+                <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-foreground-ghost">
+                  {g.unit}
+                </span>
+              </div>
+              <div className="mt-3 space-y-2">
+                {g.bars.map((b) => (
+                  <div key={b.label} className="flex items-center gap-4">
                     <span
                       className={cn(
-                        'absolute top-1/2 -translate-y-1/2 whitespace-nowrap font-mono text-[11px] tabular-nums',
-                        b.finite ? 'text-primary' : 'text-foreground-subtle'
+                        'w-56 shrink-0 truncate font-mono text-[12px]',
+                        b.finite ? 'text-foreground' : 'text-foreground-subtle'
                       )}
-                      style={{ left: `calc(${Math.max(b.frac * 100, 1.25)}% + 10px)` }}
                     >
-                      {b.value}
+                      {b.label}
+                      {b.finite && <span className="text-primary">.</span>}
                     </span>
+                    <div className="relative h-5 min-w-0 flex-1">
+                      <div
+                        className={cn(
+                          'h-full origin-left rounded-sm transition-transform duration-[700ms] ease-out-cubic',
+                          b.finite ? 'bg-primary' : 'bg-foreground-ghost/25',
+                          inView ? 'scale-x-100' : 'scale-x-0'
+                        )}
+                        style={{ width: `${Math.max(b.frac * 100, 1.25)}%` }}
+                      />
+                      <span
+                        className={cn(
+                          'absolute top-1/2 -translate-y-1/2 whitespace-nowrap font-mono text-[11px] tabular-nums',
+                          b.finite ? 'text-primary' : 'text-foreground-subtle'
+                        )}
+                        style={{ left: `calc(${Math.max(b.frac * 100, 1.25)}% + 10px)` }}
+                      >
+                        {b.value}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-            <p className="mt-2 font-mono text-[10px] text-foreground-ghost">{g.note}</p>
-          </div>
-        ))}
+          ))}
+        </div>
       </Reveal>
     </Section>
   );

@@ -19,8 +19,11 @@ function OralVisual() {
         {bars.map((h, i) => (
           <div
             key={i}
-            className={cn('w-1.5 rounded-t-full', i === 8 ? 'bg-primary' : 'bg-primary/45')}
-            style={{ height: `${h}px` }}
+            className={cn(
+              'w-1.5 origin-bottom rounded-t-full motion-safe:animate-[eq_720ms_ease-in-out_infinite_alternate] motion-safe:[animation-play-state:paused] motion-safe:group-hover:[animation-play-state:running]',
+              i === 8 ? 'bg-primary' : 'bg-primary/45'
+            )}
+            style={{ height: `${h}px`, animationDelay: `${(i % 5) * 90}ms` }}
           />
         ))}
       </div>
@@ -54,7 +57,10 @@ function ScoreVisual() {
           <div key={label} className="flex items-center gap-2">
             <span className="w-28 shrink-0 text-[11px] text-muted-foreground">{label}</span>
             <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
-              <div className="h-full rounded-full bg-primary" style={{ width: `${val}%` }} />
+              <div
+                className="h-full origin-left rounded-full bg-primary motion-safe:group-hover:animate-[fill-bar_600ms_var(--ease-out)]"
+                style={{ width: `${val}%` }}
+              />
             </div>
             <span className="w-6 text-right font-mono text-[10px] tabular-nums text-foreground-subtle">
               {val}

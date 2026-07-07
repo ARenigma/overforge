@@ -6,6 +6,9 @@ import { Bento } from '@/components/marketing/bento';
 import { LanguageMatrix } from '@/components/marketing/language-matrix';
 import { Benchmark } from '@/components/marketing/benchmark';
 import { Security } from '@/components/marketing/security';
+
+// NOTE: App Router already code-splits 'use client' components per boundary — an explicit
+// next/dynamic wrapper from a server page adds nothing (and trips the RSC client manifest).
 import { CTA } from '@/components/marketing/cta';
 import { Footer } from '@/components/marketing/footer';
 import { SectionDivider } from '@/components/marketing/section';

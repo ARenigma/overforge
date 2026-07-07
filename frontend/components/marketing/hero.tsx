@@ -33,11 +33,11 @@ export function Hero() {
           and SETTLE into nodes); the static ASCII rendition below is the SSR + reduced-motion +
           touch fallback, and they share the same masked, whisper-quiet register. */}
       <FsmField
-        className="pointer-events-none absolute inset-x-0 top-16 -z-10 mx-auto h-[560px] w-full max-w-[1280px]"
+        className="pointer-events-none absolute inset-x-0 top-16 -z-10 mx-auto h-[560px] w-full max-w-6xl"
         fallback={
           <pre
             aria-hidden="true"
-            className="pointer-events-none absolute inset-x-0 top-24 -z-10 mx-auto hidden max-w-[1280px] select-none whitespace-pre px-6 font-mono text-[13px] leading-[1.9] text-primary/[0.07] sm:block"
+            className="pointer-events-none absolute inset-x-0 top-24 -z-10 mx-auto hidden max-w-6xl select-none whitespace-pre px-6 font-mono text-[13px] leading-[1.9] text-primary/[0.07] sm:block"
             style={{
               WebkitMaskImage: 'radial-gradient(70% 60% at 50% 30%, black, transparent 80%)',
               maskImage: 'radial-gradient(70% 60% at 50% 30%, black, transparent 80%)',
@@ -48,9 +48,10 @@ export function Hero() {
         }
       />
 
-      <div className="mx-auto max-w-[1280px] px-6 pb-20 pt-32 sm:px-8 sm:pt-36">
-        {/* Headline (left) + subcopy & CTAs (right, bottom-aligned). */}
-        <div className="grid items-end gap-x-10 gap-y-8 lg:grid-cols-12">
+      <div className="mx-auto max-w-6xl px-6 pb-20 sm:px-8">
+        {/* FIRST VIEWPORT = brand only: headline, tagline, CTAs over the living field. The ledger
+            and proof strip live below the fold and arrive on scroll. */}
+        <div className="grid min-h-[calc(100svh-4rem)] content-center items-end gap-x-10 gap-y-8 pt-16 lg:grid-cols-12">
           <Reveal className="lg:col-span-7">
             <p className="mb-5 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
               <span className="text-primary">01</span> — autonomous technical interviewer

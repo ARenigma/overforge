@@ -111,7 +111,7 @@ function PricingCard({ tier }: { tier: Tier }) {
 /** The four pricing tier cards — composed by the dedicated /pricing page. */
 export function PricingTiers() {
   return (
-    <div className="mx-auto max-w-5xl px-6">
+    <div className="mx-auto max-w-6xl px-6">
       <Reveal className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {PRICING_TIERS.map((tier) => (
           <PricingCard key={tier.name} tier={tier} />

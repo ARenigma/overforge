@@ -13,7 +13,7 @@ const SECTION_TONES = {
 } as const;
 
 /** One spacing + max-width rhythm for every marketing section (coherence). The tonal band is
- *  full-bleed; the content stays capped at max-w-5xl. */
+ *  full-bleed; the content stays capped at max-w-6xl. */
 export function Section({
   id,
   className,
@@ -27,7 +27,7 @@ export function Section({
 }) {
   return (
     <section id={id} className={cn('w-full', SECTION_TONES[tone])}>
-      <div className={cn('mx-auto w-full max-w-5xl px-6 py-24 sm:py-28', className)}>
+      <div className={cn('mx-auto w-full max-w-6xl px-6 py-24 sm:py-28', className)}>
         {children}
       </div>
     </section>
@@ -40,7 +40,7 @@ export function Section({
  */
 export function SectionDivider() {
   return (
-    <div className="mx-auto w-full max-w-5xl px-6" aria-hidden="true">
+    <div className="mx-auto w-full max-w-6xl px-6" aria-hidden="true">
       <div
         className="h-px w-full bg-border"
         style={{
