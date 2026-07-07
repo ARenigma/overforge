@@ -50,27 +50,33 @@ export function SiteNav() {
     >
       <nav
         aria-label="Primary"
-        className="mx-auto flex h-16 max-w-[1280px] items-center justify-between gap-6 px-6 sm:px-8"
+        className="relative mx-auto flex h-16 max-w-[1280px] items-center justify-between gap-6 px-6 sm:px-8"
       >
         <Link href="/" aria-label="Finite — home" className="shrink-0">
           <Wordmark />
         </Link>
 
-        <div className="hidden items-center gap-1 md:flex">
+        {/* TRULY centered — absolutely positioned so uneven side clusters can never tilt it. */}
+        <div className="absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-1 md:flex">
           {LINKS.map((l) => (
             <Link
               key={l.href}
               href={l.href}
-              className="rounded-md px-3 py-2 text-sm text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-foreground"
+              className="px-3 py-2 text-sm text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-foreground"
             >
               {l.label}
             </Link>
           ))}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <ThemeToggle />
-          <BookDemo variant="ghost" className="hidden h-9 px-3 lg:inline-flex">
+          {/* Book a demo — the standout: trace-bordered mono-caps with the accepting-state dot. */}
+          <BookDemo
+            variant="ghost"
+            className="hidden h-9 gap-2 rounded-md border border-primary/45 px-3.5 text-primary hover:border-primary/70 hover:bg-primary/[0.06] hover:text-primary lg:inline-flex"
+          >
+            <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-primary" />
             Book a demo
           </BookDemo>
           <Link
@@ -90,7 +96,7 @@ export function SiteNav() {
             aria-label={open ? 'Close menu' : 'Open menu'}
             aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-foreground-subtle transition-colors hover:bg-accent hover:text-foreground md:hidden"
+            className="inline-flex h-9 w-9 items-center justify-center text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-foreground md:hidden"
           >
             {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </button>

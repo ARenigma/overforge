@@ -45,7 +45,7 @@ function StatCard({
       <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
         {label}
       </p>
-      <div className="mt-4 font-mono text-6xl font-medium leading-none tracking-tight tabular-nums text-foreground sm:text-7xl">
+      <div className="mt-4 font-mono text-5xl font-medium leading-none tracking-tight tabular-nums text-foreground sm:text-6xl">
         {numeral}
       </div>
       <p className="mt-3 max-w-md text-[15px] leading-relaxed text-muted-foreground">{line}</p>

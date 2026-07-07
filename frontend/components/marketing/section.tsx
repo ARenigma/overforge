@@ -80,10 +80,16 @@ export function EditorialHeader({
           <p className="mb-4 font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
             <span className="text-primary">{index}</span> — {eyebrow}
           </p>
-          <h2 className="text-balance text-3xl font-medium tracking-[-0.02em] text-foreground sm:text-4xl">
+          {/* together.ai register: section titles sit at ~2xl/3xl weight-500 — restrained, the
+              devices below carry the size. */}
+          <h2 className="text-balance text-2xl font-medium tracking-[-0.02em] text-foreground sm:text-3xl">
             {lead} {tail && <span className="text-foreground-subtle">{tail}</span>}
           </h2>
-          {sub && <p className="mt-3 max-w-xl text-pretty text-muted-foreground">{sub}</p>}
+          {sub && (
+            <p className="mt-2.5 max-w-xl text-pretty text-sm text-muted-foreground sm:text-[15px]">
+              {sub}
+            </p>
+          )}
         </div>
         {meta && <div className="shrink-0 pb-1">{meta}</div>}
       </div>

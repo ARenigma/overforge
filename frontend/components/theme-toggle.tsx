@@ -3,8 +3,9 @@
 import * as React from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { useTheme } from '@/components/theme-provider';
-import { Button } from '@/components/ui/button';
 
+/** Theme toggle — same highlight system as the nav links: the ICON brightens on hover
+ *  (text-color transition only), never a boxed background. */
 export function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
@@ -13,12 +14,11 @@ export function ThemeToggle() {
   const isDark = resolvedTheme === 'dark';
 
   return (
-    <Button
-      variant="ghost"
-      size="icon"
+    <button
+      type="button"
       aria-label="Toggle theme"
       onClick={() => setTheme(isDark ? 'light' : 'dark')}
-      className="h-9 w-9 text-muted-foreground hover:text-foreground"
+      className="inline-flex h-9 w-9 items-center justify-center text-foreground-subtle transition-colors duration-fast ease-out-cubic hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
     >
       {mounted ? (
         isDark ? (
@@ -29,6 +29,6 @@ export function ThemeToggle() {
       ) : (
         <Sun className="h-4 w-4 opacity-0" />
       )}
-    </Button>
+    </button>
   );
 }
