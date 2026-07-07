@@ -98,31 +98,42 @@ export function FsmLedger() {
         </span>
       </div>
 
-      <div
-        className="relative min-h-[340px] px-2 py-1.5 sm:min-h-[360px]"
-        style={{
-          WebkitMaskImage: 'linear-gradient(to bottom, black 88%, transparent)',
-          maskImage: 'linear-gradient(to bottom, black 88%, transparent)',
-        }}
-      >
-        {SCRIPT.slice(0, count).map((turn, i) => {
+      {/* The FULL path is always rendered — future transitions sit as ghosts and LIGHT UP as the
+          run reaches them (the machine's path is known in advance; that's what deterministic
+          means). The frame is never a half-empty box. */}
+      <div className="px-2 py-1.5">
+        {SCRIPT.map((turn, i) => {
           const s = KIND_STYLES[turn.kind];
-          const isNewest = !prefersReduced && i === count - 1;
+          const played = i < count;
+          const isNewest = !prefersReduced && played && i === count - 1;
           return (
             <div
               key={turn.t}
               className={cn(
-                'flex items-baseline gap-3 rounded-md px-2 py-1.5 font-mono text-[12px] leading-relaxed sm:text-[13px]',
+                'flex items-baseline gap-3 rounded-md px-2 py-1.5 font-mono text-[12px] leading-relaxed transition-opacity duration-slow ease-out-cubic sm:text-[13px]',
+                played ? 'opacity-100' : 'opacity-[0.28]',
                 isNewest &&
                   'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300'
               )}
             >
               <span className="w-11 shrink-0 tabular-nums text-foreground-subtle">{turn.t}</span>
               <span className="flex w-[9.5rem] shrink-0 items-center gap-1.5 sm:w-44">
-                <span className={cn('inline-block h-1.5 w-1.5 shrink-0 rounded-full', s.dot)} />
-                <span className={cn('truncate', s.chip)}>{turn.label}</span>
+                <span
+                  className={cn(
+                    'inline-block h-1.5 w-1.5 shrink-0 rounded-full',
+                    played ? s.dot : 'bg-foreground-ghost'
+                  )}
+                />
+                <span className={cn('truncate', played ? s.chip : 'text-foreground-subtle')}>
+                  {turn.label}
+                </span>
               </span>
-              <span className={cn('min-w-0 flex-1 truncate text-foreground-subtle', s.detail)}>
+              <span
+                className={cn(
+                  'min-w-0 flex-1 truncate',
+                  played ? cn('text-foreground-subtle', s.detail) : 'text-foreground-subtle'
+                )}
+              >
                 {turn.detail}
               </span>
             </div>

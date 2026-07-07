@@ -130,7 +130,7 @@ export function FsmField({
 
       // Edges — hairlines.
       ctx.lineWidth = 1;
-      ctx.strokeStyle = `${trace} / 0.05)`;
+      ctx.strokeStyle = `${trace} / 0.08)`;
       ctx.beginPath();
       for (const e of edges) {
         ctx.moveTo(nodes[e.a].x, nodes[e.a].y);
@@ -140,7 +140,7 @@ export function FsmField({
 
       // Nodes — rings; accepting states get the double circle.
       for (const n of nodes) {
-        ctx.strokeStyle = `${trace} / 0.10)`;
+        ctx.strokeStyle = `${trace} / 0.15)`;
         ctx.beginPath();
         ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
         ctx.stroke();
