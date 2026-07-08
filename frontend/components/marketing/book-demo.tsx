@@ -14,32 +14,46 @@ const CAL_LINK = (process.env.NEXT_PUBLIC_CAL_LINK ?? '')
   .replace(/^https?:\/\/(www\.)?cal\.com\//i, '')
   .replace(/^\/+|\/+$/g, '');
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 declare global {
   interface Window {
-    Cal?: ((...args: unknown[]) => void) & { loaded?: boolean; ns?: Record<string, unknown> };
+    Cal?: any;
   }
 }
 
-let loading: Promise<void> | null = null;
-function loadCal(): Promise<void> {
-  if (window.Cal?.loaded) return Promise.resolve();
-  if (loading) return loading;
-  loading = new Promise<void>((resolve, reject) => {
-    // Official Cal.com embed bootstrap (queues calls until embed.js arrives).
-    const w = window as Window;
-    const cal = function (...args: unknown[]) {
-      (cal.q = cal.q || ([] as unknown[])).push(args);
-    } as unknown as NonNullable<Window['Cal']> & { q?: unknown[] };
-    w.Cal = w.Cal || cal;
-    const s = document.createElement('script');
-    s.src = 'https://app.cal.com/embed/embed.js';
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('cal embed failed'));
-    document.head.appendChild(s);
-    w.Cal('init', { origin: 'https://cal.com' });
-  });
-  return loading;
+// Cal.com's OFFICIAL embed bootstrap, verbatim. Our earlier hand-rolled shim skipped the `loaded`
+// flag + `ns` namespace map that embed.js reads on arrival, so the real script threw (an opaque
+// cross-origin "Script error.") and the modal span forever. This is the exact queue embed.js expects.
+function ensureCalLoaded() {
+  const C = window as any;
+  if (C.Cal) return;
+  const A = 'https://app.cal.com/embed/embed.js';
+  const L = 'init';
+  const d = C.document;
+  const p = (a: any, ar: any) => a.q.push(ar);
+  C.Cal = function (...ar: any[]) {
+    const cal = C.Cal;
+    if (!cal.loaded) {
+      cal.ns = {};
+      cal.q = cal.q || [];
+      d.head.appendChild(d.createElement('script')).src = A;
+      cal.loaded = true;
+    }
+    if (ar[0] === L) {
+      const api: any = function (...a: any[]) {
+        p(api, a);
+      };
+      const namespace = ar[1];
+      api.q = api.q || [];
+      if (typeof namespace === 'string') {
+        cal.ns[namespace] = cal.ns[namespace] || api;
+        p(cal.ns[namespace], ar);
+        p(cal, ['initNamespace', namespace]);
+      } else p(cal, ar);
+      return;
+    }
+    p(cal, ar);
+  };
 }
 
 export function BookDemo({
@@ -51,31 +65,29 @@ export function BookDemo({
   className?: string;
   variant?: 'outline' | 'ghost';
 }) {
-  const [busy, setBusy] = React.useState(false);
   if (!CAL_LINK) return null;
 
-  const open = async () => {
-    setBusy(true);
+  const open = () => {
     try {
-      await loadCal();
-      window.Cal?.('modal', {
+      ensureCalLoaded();
+      // init is idempotent; embed.js replays the queue in order once it loads.
+      window.Cal('init', { origin: 'https://cal.com' });
+      window.Cal('modal', {
         calLink: CAL_LINK,
         config: { theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light' },
       });
     } catch {
+      // Bulletproof fallback: Cal's hosted booking page in a new tab.
       window.open(`https://cal.com/${CAL_LINK}`, '_blank', 'noopener');
-    } finally {
-      setBusy(false);
     }
   };
 
   return (
     <button
       type="button"
-      onClick={() => void open()}
-      disabled={busy}
+      onClick={open}
       className={cn(
-        'inline-flex h-11 items-center gap-2 rounded-md px-6 font-mono text-[12px] font-medium uppercase tracking-[0.08em] transition-colors duration-fast ease-out-cubic disabled:opacity-60',
+        'inline-flex h-11 items-center gap-2 rounded-md px-6 font-mono text-[12px] font-medium uppercase tracking-[0.08em] transition-colors duration-fast ease-out-cubic',
         variant === 'outline'
           ? 'border border-border text-foreground hover:bg-accent'
           : 'text-foreground-subtle hover:text-foreground',
