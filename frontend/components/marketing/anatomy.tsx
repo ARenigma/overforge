@@ -2,16 +2,16 @@
 
 import * as React from 'react';
 import Image from 'next/image';
-import { Section, EditorialHeader } from './section';
+import { EditorialHeader } from './section';
 import { ProductFrame } from './frame';
-import { Reveal } from './reveal';
 import { cn } from '@/lib/utils';
 
-/* Anatomy of an interview — the state-tab console. Tabs are the FSM's states; each panel is a REAL
- * screenshot of the product in that state (the product is the imagery). Tabs auto-advance on a
- * LINEAR progress bar — deterministic, clock-like, the brand's motion signature — and any click
- * takes over. IO-paused off-screen; reduced-motion disables auto-advance. Plain stills — no staged
- * hover theater. */
+/* Anatomy of an interview — the state-tab console as a SCROLL-SCRUBBED walkthrough. The console
+ * pins (position: sticky) while a tall track scrolls behind it, and scroll progress steps the active
+ * state invite → oral → coding → score, so the reader physically passes through every stage and
+ * can't scroll past one (the old timer auto-advanced whether or not you were looking). Each panel is
+ * a REAL screenshot; the tab bars scrub with scroll. No transformed ancestor (that would break the
+ * sticky); the panel is capped in vh units so the whole console fits one viewport at any height. */
 
 const STATES = [
   {
@@ -48,103 +48,110 @@ const STATES = [
   },
 ] as const;
 
-const ADVANCE_MS = 7000;
-
 export function Anatomy() {
+  const trackRef = React.useRef<HTMLElement>(null);
   const [active, setActive] = React.useState(0);
-  const [cycle, setCycle] = React.useState(0); // bumps to restart the bar animation on manual select
-  const ref = React.useRef<HTMLDivElement>(null);
-  const [inView, setInView] = React.useState(false);
-  const [reduced, setReduced] = React.useState(false);
+  const [frac, setFrac] = React.useState(0); // intra-state scroll progress (0..1) for the active bar
 
   React.useEffect(() => {
-    setReduced(window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-    const el = ref.current;
-    if (!el) return;
-    const io = new IntersectionObserver(([e]) => setInView(e.isIntersecting), { threshold: 0.25 });
-    io.observe(el);
-    return () => io.disconnect();
+    const track = trackRef.current;
+    if (!track) return;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const dist = track.offsetHeight - window.innerHeight; // distance the console stays pinned
+      const p = dist > 0 ? Math.min(Math.max(-track.getBoundingClientRect().top / dist, 0), 1) : 0;
+      const scaled = p * STATES.length;
+      const idx = Math.min(STATES.length - 1, Math.floor(scaled));
+      setActive(idx);
+      setFrac(Math.min(Math.max(scaled - idx, 0), 1));
+    };
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(update);
+    };
+    update();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, []);
 
-  React.useEffect(() => {
-    if (!inView || reduced) return;
-    const t = setTimeout(() => {
-      setActive((a) => (a + 1) % STATES.length);
-      setCycle((c) => c + 1);
-    }, ADVANCE_MS);
-    return () => clearTimeout(t);
-  }, [inView, reduced, active, cycle]);
-
-  const select = (i: number) => {
-    setActive(i);
-    setCycle((c) => c + 1);
+  // Clicking a tab scrolls to that stage's slice of the pinned track.
+  const goTo = (i: number) => {
+    const track = trackRef.current;
+    if (!track) return;
+    const dist = track.offsetHeight - window.innerHeight;
+    const top = track.getBoundingClientRect().top + window.scrollY;
+    window.scrollTo({ top: top + ((i + 0.5) / STATES.length) * dist, behavior: 'smooth' });
   };
 
   return (
-    <Section id="anatomy">
-      <EditorialHeader
-        index="03"
-        eyebrow="anatomy of an interview"
-        lead="Five states."
-        tail="No improvisation."
-        sub="The interview is a finite-state machine — every session walks the same auditable path."
-      />
+    <section
+      id="anatomy"
+      ref={trackRef}
+      className="relative"
+      style={{ height: `calc(${STATES.length * 70}vh + 100vh)` }}
+    >
+      <div className="sticky top-0 flex h-screen flex-col justify-center overflow-hidden py-16">
+        <div className="mx-auto w-full max-w-7xl px-6">
+          <EditorialHeader
+            index="03"
+            eyebrow="anatomy of an interview"
+            lead="Five states."
+            tail="No improvisation."
+            sub="Scroll the machine — every session walks the same auditable path, state by state."
+          />
 
-      <Reveal className="mt-8">
-        <div ref={ref}>
-          {/* State tabs — story-tab register: the linear progress bar rides the TOP of each tab
-              (deterministic, clock-like); active = emphasis, never a box. */}
-          <div className="grid grid-cols-2 gap-x-6 gap-y-4 lg:grid-cols-4">
-            {STATES.map((s, i) => (
-              <button
-                key={s.key}
-                type="button"
-                onClick={() => select(i)}
-                aria-pressed={i === active}
-                className="group relative pt-3.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              >
-                <span className="absolute inset-x-0 top-0 h-[2px] overflow-hidden rounded-full bg-border">
-                  {i === active && inView && !reduced && (
+          {/* State tabs — the linear bar SCRUBS with scroll (past = full, active = scroll frac). */}
+          <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-4 lg:grid-cols-4">
+            {STATES.map((s, i) => {
+              const fill = i < active ? 1 : i === active ? frac : 0;
+              return (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => goTo(i)}
+                  aria-pressed={i === active}
+                  className="group relative pt-3.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                >
+                  <span className="absolute inset-x-0 top-0 h-[2px] overflow-hidden rounded-full bg-border">
                     <span
-                      key={cycle}
                       className="block h-full origin-left bg-primary"
-                      style={{ animation: `anatomy-bar ${ADVANCE_MS}ms linear forwards` }}
+                      style={{ transform: `scaleX(${fill})` }}
                     />
-                  )}
-                  {i === active && (reduced || !inView) && (
-                    <span className="block h-full bg-primary" />
-                  )}
-                </span>
-                <span
-                  className={cn(
-                    'block font-mono text-[11px] uppercase tracking-[0.1em] transition-colors duration-fast ease-out-cubic',
-                    i === active
-                      ? 'text-primary'
-                      : 'text-foreground-subtle group-hover:text-muted-foreground'
-                  )}
-                >
-                  {s.label}
-                </span>
-                <span
-                  className={cn(
-                    'mt-1 block text-sm transition-colors duration-fast ease-out-cubic',
-                    i === active
-                      ? 'text-foreground'
-                      : 'text-muted-foreground group-hover:text-foreground'
-                  )}
-                >
-                  {s.title}
-                </span>
-              </button>
-            ))}
+                  </span>
+                  <span
+                    className={cn(
+                      'block font-mono text-[11px] uppercase tracking-[0.1em] transition-colors duration-fast ease-out-cubic',
+                      i === active
+                        ? 'text-primary'
+                        : 'text-foreground-subtle group-hover:text-muted-foreground'
+                    )}
+                  >
+                    {s.label}
+                  </span>
+                  <span
+                    className={cn(
+                      'mt-1 block text-sm transition-colors duration-fast ease-out-cubic',
+                      i === active
+                        ? 'text-foreground'
+                        : 'text-muted-foreground group-hover:text-foreground'
+                    )}
+                  >
+                    {s.title}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          {/* Panel — theme-paired real screenshots. Height is capped so the whole console (header +
-              tabs + panel) stays within one viewport. */}
-          <div className="mt-6">
-            {/* Full-width frame with a flush gutter so the screenshot is large + readable and its
-                edges meet the browser shell (object-cover at the shots' native 16/10 → no crop). */}
-            <ProductFrame className="p-1">
+          {/* Panel — theme-paired real screenshots; width capped in vh so the console fits the pinned
+              viewport (large, readable, edges flush to the browser shell). */}
+          <div className="mt-5">
+            <ProductFrame className="mx-auto w-full max-w-[92vh] p-1">
               <div className="relative aspect-[16/10] w-full">
                 {STATES.map((s, i) => (
                   <div
@@ -175,10 +182,12 @@ export function Anatomy() {
                 ))}
               </div>
             </ProductFrame>
-            <p className="mt-4 max-w-2xl text-sm text-muted-foreground">{STATES[active].desc}</p>
+            <p className="mx-auto mt-4 max-w-2xl text-center text-sm text-muted-foreground">
+              {STATES[active].desc}
+            </p>
           </div>
         </div>
-      </Reveal>
-    </Section>
+      </div>
+    </section>
   );
 }

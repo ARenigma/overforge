@@ -251,16 +251,6 @@
   }
 }
 
-/* Anatomy state-tabs — the linear (deterministic) auto-advance bar. */
-@keyframes anatomy-bar {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(1);
-  }
-}
-
 /* ── Sonner toast accent overrides (token-driven, no hardcoded colours) ── */
 [data-sonner-toast][data-type='success'] [data-icon] {
   color: hsl(var(--success));
