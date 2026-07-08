@@ -1,13 +1,13 @@
 import { Reveal } from '@/components/marketing/reveal';
-import { FsmLedger } from '@/components/marketing/fsm-ledger';
 import { CountUp } from '@/components/marketing/count-up';
 import { Cta } from '@/components/marketing/controls';
-import { ProductFrame } from '@/components/marketing/frame';
 import { HeroVisual } from '@/components/marketing/hero-visual';
+import { HeroLedger } from '@/components/marketing/hero-ledger';
 
 export function Hero() {
   return (
-    <section id="hero" data-tone="wash" className="relative isolate overflow-hidden">
+    // NOTE: no `overflow-hidden` here — it would break the HeroLedger's position: sticky scrub.
+    <section id="hero" data-tone="wash" className="relative isolate">
       <div className="mx-auto max-w-7xl px-6 sm:px-8">
         {/* FIRST VIEWPORT — together.ai structure: brand headline + one-liner + CTAs on the left,
             the live 3D state-machine system on the right. The ledger + proof strip live below the
@@ -45,17 +45,16 @@ export function Hero() {
             <HeroVisual className="mx-auto aspect-square w-full max-w-[420px] lg:max-w-[540px]" />
           </Reveal>
         </div>
+      </div>
 
-        {/* Below the fold — the FSM ledger in a product frame, then the proof strip. */}
-        <div className="pb-24 pt-10">
-          <Reveal className="mt-4">
-            <ProductFrame>
-              <FsmLedger />
-            </ProductFrame>
-          </Reveal>
+      {/* Below the fold — the FSM ledger, scroll-scrubbed: it pins and plays the run transition-by-
+          transition as you scroll (a sibling of the max-w wrapper so nothing clips its sticky). */}
+      <HeroLedger />
 
-          <Reveal delay={80}>
-            <dl className="mt-12 grid grid-cols-1 divide-y divide-border border-y border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+      <div className="mx-auto max-w-7xl px-6 sm:px-8">
+        <div className="pb-24">
+          <Reveal>
+            <dl className="grid grid-cols-1 divide-y divide-border border-y border-border sm:grid-cols-3 sm:divide-x sm:divide-y-0">
               <Stat
                 value={
                   <>

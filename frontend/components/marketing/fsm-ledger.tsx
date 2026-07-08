@@ -57,10 +57,23 @@ const HOLD_MS = 3600; // settle on the accepting state before replaying
 // replay resets to them, so there's always visible content while the rest streams in.
 const SEED_ROWS = 3;
 
-export function FsmLedger() {
+export function FsmLedger({ progress }: { progress?: number } = {}) {
+  const controlled = typeof progress === 'number'; // scroll-driven by the parent scrub
   const prefersReduced = usePrefersReducedMotion();
-  const [count, setCount] = React.useState(SEED_ROWS);
+  const [autoCount, setAutoCount] = React.useState(SEED_ROWS);
   const ref = React.useRef<HTMLDivElement>(null);
+
+  // Controlled → map scroll progress (0..1) to rows revealed (seed → terminal). Uncontrolled → the
+  // self-playing loop below drives it.
+  const count = controlled
+    ? Math.min(
+        SCRIPT.length,
+        Math.max(
+          SEED_ROWS,
+          Math.round(SEED_ROWS + (progress as number) * (SCRIPT.length - SEED_ROWS))
+        )
+      )
+    : autoCount;
 
   // Self-playing loop, DECOUPLED from React re-renders: visibility lives in a mutable local updated
   // by the IntersectionObserver callback (never React state), and the effect depends only on
@@ -70,8 +83,9 @@ export function FsmLedger() {
   // climbs seed → terminal, holds on the accepting state, then replays; it only PAUSES ticking while
   // off-screen and resumes where it left off.
   React.useEffect(() => {
+    if (controlled) return; // scroll-driven by the parent — no self-play
     if (prefersReduced) {
-      setCount(SCRIPT.length); // reduced motion: whole ledger at rest
+      setAutoCount(SCRIPT.length); // reduced motion: whole ledger at rest
       return;
     }
     const el = ref.current;
@@ -91,7 +105,7 @@ export function FsmLedger() {
         return;
       }
       n = n >= SCRIPT.length ? SEED_ROWS : n + 1; // climb, or wrap to the seed to replay
-      setCount(n);
+      setAutoCount(n);
       timer = setTimeout(tick, n >= SCRIPT.length ? HOLD_MS : STEP_MS); // hold on the terminal state
     };
     timer = setTimeout(tick, STEP_MS);
@@ -100,7 +114,7 @@ export function FsmLedger() {
       clearTimeout(timer);
       io?.disconnect();
     };
-  }, [prefersReduced]);
+  }, [prefersReduced, controlled]);
 
   return (
     <div
