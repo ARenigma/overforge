@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
  *  currentColor; the terminal dot is the ultramarine trace. On mount the stroke draws itself and
  *  the dot lands, then everything stops (`.finite-mark` keyframes in globals.css — the brand's
  *  "settle, don't float" law as a logo). Pure SVG, token-driven, no asset. */
-export function FiniteMark({ className }: { className?: string }) {
+function FiniteMark({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"

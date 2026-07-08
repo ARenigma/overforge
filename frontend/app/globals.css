@@ -261,25 +261,6 @@
   }
 }
 
-/* Alive product visuals — hover-driven (paused at rest, settle on exit; the Supabase play-state
-   pattern) and view-driven one-shot fills. */
-@keyframes eq {
-  from {
-    transform: scaleY(0.35);
-  }
-  to {
-    transform: scaleY(1);
-  }
-}
-@keyframes fill-bar {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(1);
-  }
-}
-
 /* ── Sonner toast accent overrides (token-driven, no hardcoded colours) ── */
 [data-sonner-toast][data-type='success'] [data-icon] {
   color: hsl(var(--success));
