@@ -59,27 +59,48 @@ const SEED_ROWS = 3;
 
 export function FsmLedger() {
   const prefersReduced = usePrefersReducedMotion();
-  const [count, setCount] = React.useState(prefersReduced ? SCRIPT.length : SEED_ROWS);
+  const [count, setCount] = React.useState(SEED_ROWS);
   const ref = React.useRef<HTMLDivElement>(null);
-  const inView = useInView(ref);
-  const atStart = count === SEED_ROWS; // re-arm the play loop each time it resets to the seed
 
+  // Self-playing loop, DECOUPLED from React re-renders: visibility lives in a mutable local updated
+  // by the IntersectionObserver callback (never React state), and the effect depends only on
+  // `prefersReduced`. That's the fix for the old freeze — any version that kept the IO's inView state
+  // (or a count-derived flag) in the deps re-ran the effect on the first tick and cleared its own
+  // pending timer, so the ledger died after one step. Here the timer chain runs uninterrupted: it
+  // climbs seed → terminal, holds on the accepting state, then replays; it only PAUSES ticking while
+  // off-screen and resumes where it left off.
   React.useEffect(() => {
-    if (prefersReduced || !inView || !atStart) return;
+    if (prefersReduced) {
+      setCount(SCRIPT.length); // reduced motion: whole ledger at rest
+      return;
+    }
+    const el = ref.current;
+    let visible = true;
+    const io = el
+      ? new IntersectionObserver(([e]) => (visible = e.isIntersecting), { threshold: 0.15 })
+      : null;
+    if (el && io) io.observe(el);
+
     let timer: ReturnType<typeof setTimeout>;
+    let cancelled = false;
+    let n = SEED_ROWS;
     const tick = () => {
-      setCount((c) => {
-        if (c >= SCRIPT.length) {
-          timer = setTimeout(() => setCount(SEED_ROWS), HOLD_MS); // hold on terminal, then reset
-          return c;
-        }
-        timer = setTimeout(tick, STEP_MS);
-        return c + 1;
-      });
+      if (cancelled) return;
+      if (!visible) {
+        timer = setTimeout(tick, STEP_MS); // paused off-screen; resume where we left off
+        return;
+      }
+      n = n >= SCRIPT.length ? SEED_ROWS : n + 1; // climb, or wrap to the seed to replay
+      setCount(n);
+      timer = setTimeout(tick, n >= SCRIPT.length ? HOLD_MS : STEP_MS); // hold on the terminal state
     };
     timer = setTimeout(tick, STEP_MS);
-    return () => clearTimeout(timer);
-  }, [inView, prefersReduced, atStart]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      io?.disconnect();
+    };
+  }, [prefersReduced]);
 
   return (
     <div
@@ -159,16 +180,4 @@ function usePrefersReducedMotion() {
     return () => mq.removeEventListener('change', on);
   }, []);
   return reduced;
-}
-
-function useInView(ref: React.RefObject<HTMLElement | null>) {
-  const [inView, setInView] = React.useState(true);
-  React.useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const io = new IntersectionObserver(([e]) => setInView(e.isIntersecting), { threshold: 0.15 });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [ref]);
-  return inView;
 }
