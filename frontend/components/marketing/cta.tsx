@@ -22,7 +22,7 @@ export function CTA() {
             Finite answers<span className="text-primary">.</span>
           </span>
         </h2>
-        <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
+        <div className="mt-16 flex flex-wrap items-center justify-center gap-3">
           <Cta href="/auth" arrow>
             Run an interview
           </Cta>

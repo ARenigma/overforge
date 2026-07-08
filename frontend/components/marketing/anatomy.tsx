@@ -142,9 +142,9 @@ export function Anatomy() {
           {/* Panel — theme-paired real screenshots. Height is capped so the whole console (header +
               tabs + panel) stays within one viewport. */}
           <div className="mt-6">
-            {/* Frame width is capped to the shots' native 16/10 so the browser shell hugs the image
-                (no pillarbox); height stays within the viewport via the vh-based max-width. */}
-            <ProductFrame className="mx-auto w-full max-w-[100vh]">
+            {/* Full-width frame with a flush gutter so the screenshot is large + readable and its
+                edges meet the browser shell (object-cover at the shots' native 16/10 → no crop). */}
+            <ProductFrame className="p-1">
               <div className="relative aspect-[16/10] w-full">
                 {STATES.map((s, i) => (
                   <div

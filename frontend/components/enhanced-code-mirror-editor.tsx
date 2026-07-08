@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { EditorView, basicSetup } from 'codemirror';
 import { python } from '@codemirror/lang-python';
 import { javascript } from '@codemirror/lang-javascript';
@@ -31,6 +31,27 @@ const brandHighlight = HighlightStyle.define([
   { tag: [t.variableName, t.propertyName, t.definition(t.variableName)], color: 'hsl(0 0% 90%)' },
   { tag: [t.operator, t.punctuation, t.bracket, t.separator], color: 'hsl(0 0% 55%)' },
   { tag: t.invalid, color: 'hsl(358 75% 65%)' },
+]);
+
+/** Light-mode syntax theme — same hues, darkened so they read on a paper background (the dark
+ *  theme's light-L colors wash out on white). Chosen at editor build time by the active theme. */
+const brandHighlightLight = HighlightStyle.define([
+  {
+    tag: [t.keyword, t.controlKeyword, t.moduleKeyword, t.operatorKeyword],
+    color: 'hsl(153 64% 30%)',
+    fontWeight: '600',
+  },
+  { tag: [t.function(t.variableName), t.function(t.propertyName)], color: 'hsl(199 85% 38%)' },
+  { tag: [t.string, t.special(t.string), t.regexp], color: 'hsl(28 82% 40%)' },
+  { tag: [t.number, t.bool, t.null, t.atom], color: 'hsl(280 58% 48%)' },
+  { tag: [t.typeName, t.className, t.namespace], color: 'hsl(40 88% 36%)' },
+  { tag: [t.comment, t.lineComment, t.blockComment], color: 'hsl(0 0% 52%)', fontStyle: 'italic' },
+  {
+    tag: [t.variableName, t.propertyName, t.definition(t.variableName)],
+    color: 'hsl(230 24% 18%)',
+  },
+  { tag: [t.operator, t.punctuation, t.bracket, t.separator], color: 'hsl(0 0% 42%)' },
+  { tag: t.invalid, color: 'hsl(8 74% 46%)' },
 ]);
 
 interface EnhancedCodeMirrorEditorProps {
@@ -64,6 +85,15 @@ export function EnhancedCodeMirrorEditor({
   const viewRef = useRef<EditorView | null>(null);
   const isRecreatingRef = useRef(false); // Track when editor is being recreated
   const lastValueRef = useRef<string>(value); // Track last value
+  // Bumped when the app's light/dark class flips, so the editor rebuilds with the matching theme
+  // (the syntax HighlightStyle is static and can't track a token live).
+  const [themeVersion, setThemeVersion] = useState(0);
+
+  useEffect(() => {
+    const obs = new MutationObserver(() => setThemeVersion((v) => v + 1));
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => obs.disconnect();
+  }, []);
 
   const getLanguageExtension = (lang: string) => {
     switch (lang.toLowerCase()) {
@@ -108,9 +138,11 @@ export function EnhancedCodeMirrorEditor({
       },
     ];
 
+    const isDark = document.documentElement.classList.contains('dark');
+
     const extensions = [
       basicSetup,
-      syntaxHighlighting(brandHighlight),
+      syntaxHighlighting(isDark ? brandHighlight : brandHighlightLight),
       getLanguageExtension(language),
       indentUnit.of(' '.repeat(tabSize)),
       keymap.of([...searchKeymap, ...customKeymap]),
@@ -147,11 +179,13 @@ export function EnhancedCodeMirrorEditor({
         }
       }),
       EditorView.theme({
+        // Chrome reads design tokens, so the editor follows the app's light/dark theme instead of
+        // being a hardcoded dark block (the "light mode - interview" fix).
         '&': {
           height: '100%',
           fontSize: '13px',
-          backgroundColor: 'hsl(0 0% 6%)',
-          color: 'hsl(0 0% 92%)',
+          backgroundColor: 'hsl(var(--card))',
+          color: 'hsl(var(--foreground))',
         },
         '.cm-content': {
           padding: '12px',
@@ -164,29 +198,29 @@ export function EnhancedCodeMirrorEditor({
         },
         '.cm-editor': {
           height: '100%',
-          backgroundColor: 'hsl(0 0% 6%)',
+          backgroundColor: 'hsl(var(--card))',
         },
         '.cm-scroller': {
           fontFamily:
             "var(--font-mono, 'JetBrains Mono', Consolas, Monaco, 'Courier New', monospace)",
         },
         '.cm-gutters': {
-          backgroundColor: 'hsl(0 0% 9%)',
-          borderRight: '1px solid hsl(0 0% 18%) !important',
-          color: 'hsl(0 0% 40%)',
+          backgroundColor: 'hsl(var(--muted))',
+          borderRight: '1px solid hsl(var(--border)) !important',
+          color: 'hsl(var(--foreground-ghost))',
         },
         '.cm-lineNumbers': {
-          color: 'hsl(0 0% 40%)',
+          color: 'hsl(var(--foreground-ghost))',
           fontSize: '11px',
           minWidth: '3ch',
           paddingRight: '8px',
         },
         '.cm-activeLine': {
-          backgroundColor: 'hsl(0 0% 11%)',
+          backgroundColor: 'hsl(var(--accent) / 0.5)',
         },
         '.cm-activeLineGutter': {
-          backgroundColor: 'hsl(0 0% 11%)',
-          color: 'hsl(0 0% 65%)',
+          backgroundColor: 'hsl(var(--accent) / 0.5)',
+          color: 'hsl(var(--foreground-subtle))',
         },
         '.cm-selectionMatch': {
           backgroundColor: accentColorCss(0.18),
@@ -226,7 +260,7 @@ export function EnhancedCodeMirrorEditor({
         view.destroy();
       }
     };
-  }, [language, tabSize, isExecuting, pasteDisabled]);
+  }, [language, tabSize, isExecuting, pasteDisabled, themeVersion]);
 
   // Handle value changes (e.g., when switching between questions)
   useEffect(() => {

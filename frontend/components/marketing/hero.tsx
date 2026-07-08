@@ -47,7 +47,7 @@ export function Hero() {
         </div>
 
         {/* Below the fold — the FSM ledger in a product frame, then the proof strip. */}
-        <div className="pb-24">
+        <div className="pb-24 pt-10">
           <Reveal className="mt-4">
             <ProductFrame>
               <FsmLedger />

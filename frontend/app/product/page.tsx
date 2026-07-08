@@ -15,9 +15,12 @@ export const metadata: Metadata = {
 };
 
 const TINTS = {
-  primary: 'bg-[hsl(var(--primary-wash)/0.07)] border-primary/25 text-primary',
-  success: 'bg-[hsl(var(--success)/0.08)] border-[hsl(var(--success)/0.3)] text-success',
-  neutral: 'bg-surface-inset border-border text-foreground-subtle',
+  primary:
+    'text-primary border-primary/25 bg-[hsl(var(--primary-wash)/0.07)] hover:border-primary/50 hover:bg-[hsl(var(--primary-wash)/0.13)]',
+  success:
+    'text-success border-[hsl(var(--success)/0.3)] bg-[hsl(var(--success)/0.08)] hover:border-[hsl(var(--success)/0.55)] hover:bg-[hsl(var(--success)/0.14)]',
+  neutral:
+    'text-foreground-subtle border-border bg-surface-inset hover:border-primary/30 hover:bg-accent',
 } as const;
 
 const STATS: { tint: keyof typeof TINTS; chip: string; numeral: string; caption: string }[] = [
@@ -71,7 +74,7 @@ export default function ProductPage() {
             <div
               key={s.chip}
               className={cn(
-                'flex min-h-[13rem] flex-col justify-between rounded-lg border p-6',
+                'flex min-h-[13rem] flex-col justify-between rounded-lg border p-6 transition-[background-color,border-color] duration-300 ease-out-cubic',
                 TINTS[s.tint]
               )}
             >

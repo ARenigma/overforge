@@ -9,10 +9,14 @@ import { cn } from '@/lib/utils';
  * capability strip on hairlines. Color differentiates the cards (our own semantic tints, never
  * off-palette pastels); the numbers carry the weight. */
 
+// together.ai's `.metric-card:hover` deepens the tint background AND reveals a hidden detail that
+// slides up from the foot — we mirror that exactly: bg + border deepen, a mono proof line rises in.
 const TINTS = {
-  primary: 'bg-[hsl(var(--primary-wash)/0.07)] border-primary/25',
-  success: 'bg-[hsl(var(--success)/0.08)] border-[hsl(var(--success)/0.3)]',
-  neutral: 'bg-surface-inset border-border',
+  primary:
+    'border-primary/25 bg-[hsl(var(--primary-wash)/0.07)] hover:border-primary/50 hover:bg-[hsl(var(--primary-wash)/0.13)]',
+  success:
+    'border-[hsl(var(--success)/0.3)] bg-[hsl(var(--success)/0.08)] hover:border-[hsl(var(--success)/0.55)] hover:bg-[hsl(var(--success)/0.14)]',
+  neutral: 'border-border bg-surface-inset hover:border-primary/30 hover:bg-accent',
 } as const;
 
 const CHIP = {
@@ -26,16 +30,18 @@ function StatCard({
   chip,
   numeral,
   caption,
+  reveal,
 }: {
   tint: keyof typeof TINTS;
   chip: string;
   numeral: ReactNode;
   caption: string;
+  reveal: string;
 }) {
   return (
     <div
       className={cn(
-        'flex min-h-[15rem] flex-col justify-between rounded-lg border p-6',
+        'group flex min-h-[15rem] flex-col rounded-lg border p-6 transition-[background-color,border-color] duration-300 ease-out-cubic',
         TINTS[tint]
       )}
     >
@@ -50,7 +56,14 @@ function StatCard({
       <div className="mt-6 font-mono text-6xl font-medium leading-none tracking-tight tabular-nums text-foreground">
         {numeral}
       </div>
-      <p className="mt-auto pt-6 text-sm leading-relaxed text-muted-foreground">{caption}</p>
+      <div className="mt-auto pt-6">
+        <p className="text-sm leading-relaxed text-muted-foreground">{caption}</p>
+        {/* Hidden proof line — rises + fades in on hover (the together.ai metric-card reveal). */}
+        <span className="mt-3 flex translate-y-1 items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-primary opacity-0 transition-all duration-300 ease-out-cubic group-hover:translate-y-0 group-hover:opacity-100">
+          {reveal}
+          <span aria-hidden="true">→</span>
+        </span>
+      </div>
     </div>
   );
 }
@@ -89,6 +102,7 @@ export function Bento() {
             </>
           }
           caption="Median spoken response, mid-conversation — it answers like a person on the call."
+          reveal="voice in → voice out"
         />
         <StatCard
           tint="success"
@@ -100,6 +114,7 @@ export function Bento() {
             </>
           }
           caption="Hidden tests executed per run, in an isolated sandbox — not eyeballed."
+          reveal="server-injected stdin"
         />
         <StatCard
           tint="neutral"
@@ -110,6 +125,7 @@ export function Bento() {
             </>
           }
           caption="Reproducible: rerun the same session and the machine lands on the same score."
+          reveal="same inputs → same state"
         />
       </Reveal>
 
@@ -117,7 +133,10 @@ export function Bento() {
       <Reveal className="mt-4">
         <div className="grid divide-y divide-border rounded-lg border border-border md:grid-cols-5 md:divide-x md:divide-y-0">
           {CAPABILITIES.map((c) => (
-            <div key={c.k} className="p-5">
+            <div
+              key={c.k}
+              className="p-5 transition-colors duration-300 ease-out-cubic hover:bg-[hsl(var(--primary-wash)/0.05)]"
+            >
               <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary">
                 {c.k}
               </p>
