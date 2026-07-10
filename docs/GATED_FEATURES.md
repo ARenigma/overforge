@@ -37,8 +37,12 @@ nudge/question, quiet on a pending/declined offer or a solved problem), content-
 only (never a probe/offer/hint — nothing failed), persisted as a synthetic `status:'Idle'` run on
 the code-run channel (race-free; excluded from run signals, the assist budget, and the scorer).
 
-- **Remaining decision:** flipping `IDLE_NUDGE_ENABLED=1` in prod — after the Playwright matrix +
-  telemetry review. The flag stays OFF until Amit says go.
+- **✅ ENABLED in prod since 2026-07-07** (Amit's go); `IDLE_NUDGE_ENABLED=1` in the host
+  `deploy/backend.env`, re-confirmed live in the running backend container 2026-07-10.
+- **Next — data-gated tuning:** the 90 s idle / 150 s blank-editor windows are still the corpus
+  defaults. Once enough prod interviews accrue, review the synthetic `Idle` runs (fire rate, whether
+  the nudged candidate then acted, false positives on genuine thinking) and tune the windows +
+  consider a wall-clock stagnation backstop.
 
 ## 3. Mid-speech active-listening backchannels (held — V1.1-adjacent)
 
