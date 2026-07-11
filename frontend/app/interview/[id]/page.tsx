@@ -487,6 +487,11 @@ export default function InterviewPage() {
     if (!chatCollapsed && !chatAnimating) setChatSlideW(null);
   }, [chatCollapsed, chatAnimating]);
   const chatAnimClass = chatAnimating ? '[transition:flex_260ms_ease-in-out]' : '';
+  // Live mirror for callbacks that must read the collapse state without re-binding (refetchProblem).
+  const chatCollapsedRef = useRef(false);
+  useEffect(() => {
+    chatCollapsedRef.current = chatCollapsed;
+  }, [chatCollapsed]);
 
   // ── Proctor hook ──────────────────────────────────────────────────────────────
   // Camera proctoring: face detection runs entirely in-browser via a Web Worker.
@@ -593,8 +598,12 @@ export default function InterviewPage() {
       problemCodeIndexRef.current = res.codeIndex;
       problemStartElapsedRef.current = elapsedRef.current; // reset the per-problem soft clock
       setCodingProblem(res.problem);
+      // The question just landed in the dock — auto-collapse the chat so problem + editor get the
+      // full width. Anything conversational slides it back (see the expand effects below), and the
+      // top-bar button stays live for manual reopen.
+      if (!chatCollapsedRef.current) animateChatPanel('collapse');
     }
-  }, [id]);
+  }, [id, animateChatPanel]);
   useEffect(() => {
     if (phase === 'coding') {
       void refetchProblem();
@@ -603,6 +612,23 @@ export default function InterviewPage() {
       setCodingProblem(null);
     }
   }, [phase, messages.length, refetchProblem]);
+
+  // Slide the auto-collapsed chat back open the moment the interviewer says anything mid-coding —
+  // the composer lives in the chat panel, so a probe/hint the candidate must read (and answer)
+  // can never land behind a collapsed panel. Guarded on a NEW message so a manual re-collapse
+  // with a stale transcript isn't fought.
+  const prevMsgCountRef = useRef(0);
+  useEffect(() => {
+    const prev = prevMsgCountRef.current;
+    prevMsgCountRef.current = messages.length;
+    if (messages.length <= prev) return;
+    const last = messages[messages.length - 1];
+    if (phase === 'coding' && chatCollapsed && last?.role === 'ai') animateChatPanel('expand');
+  }, [messages, phase, chatCollapsed, animateChatPanel]);
+  // Coding is over — the conversation takes the stage again.
+  useEffect(() => {
+    if ((phase === 'wrap_up' || phase === 'done') && chatCollapsed) animateChatPanel('expand');
+  }, [phase, chatCollapsed, animateChatPanel]);
 
   const handleVoiceReady = useCallback((cue: ServerReady) => {
     lastExpectsRef.current = cue.expects;
