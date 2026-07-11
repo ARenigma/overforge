@@ -28,6 +28,9 @@ export interface ClientHello {
 export interface ClientSpoken {
   type: 'spoken';
   requestId: string;
+  /** Browser-measured TTFB: performance.now() delta (ms) from turn_ready receipt to first PCM
+   *  sample scheduled.  Omitted when first audio never played (TTS failure) or unknown. */
+  firstAudioMs?: number;
 }
 
 export interface ClientMicOff {

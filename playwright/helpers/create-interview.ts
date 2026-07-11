@@ -20,6 +20,9 @@ export interface CreateOpts {
   candidateEmail?: string;
   candidateName?: string;
   roleBrief?: string;
+  /** Default true (2-min dev interview, paste allowed). Pass false for a REAL-duration interview
+   *  (60-min cap) — needed when spoken multi-turn answers can't fit the dev window. */
+  devMode?: boolean;
 }
 
 export async function createInterview(opts: CreateOpts = {}): Promise<CreatedInterview> {
@@ -33,7 +36,7 @@ export async function createInterview(opts: CreateOpts = {}): Promise<CreatedInt
       language: opts.language ?? 'python',
       level: opts.level ?? 'mid',
       ...(opts.roleBrief ? { roleBrief: opts.roleBrief } : {}),
-      devMode: true,
+      devMode: opts.devMode ?? true,
     }),
   });
   if (!res.ok) {

@@ -186,7 +186,14 @@ class WsConnection:
         if mtype == "spoken":
             request_id = data.get("requestId")
             if isinstance(request_id, str) and self._sink is not None:
-                self._sink.ack(request_id)
+                raw_fa = data.get("firstAudioMs")
+                first_audio_ms: float | None = None
+                if isinstance(raw_fa, (int, float)) and not isinstance(raw_fa, bool):
+                    v = float(raw_fa)
+                    # Accept only finite values strictly between 0 and 120 000 ms.
+                    if v > 0.0 and v < 120_000.0:
+                        first_audio_ms = v
+                self._sink.ack(request_id, first_audio_ms)
         elif mtype == "bye":
             return True
         # 'mute' / 'mic_off' are advisory in B.4a (the browser stops sending frames itself).

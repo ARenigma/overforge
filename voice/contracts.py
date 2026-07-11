@@ -200,7 +200,7 @@ class TtsSink(Protocol):
         (NOT when filler audio finishes) — it runs concurrently with STT and must NOT block it.
     """
 
-    async def speak(self, turn: TurnResult) -> None: ...
+    async def speak(self, turn: TurnResult) -> float | None: ...
     async def on_thinking(self) -> None: ...
 
 
@@ -210,9 +210,10 @@ class NoopTtsSink:
     Lets the B.2/B.3 glue run end-to-end with no audio stack (and in tests).
     """
 
-    async def speak(self, turn: TurnResult) -> None:
+    async def speak(self, turn: TurnResult) -> float | None:
         if turn.utterance.text:
             logger.info("[tts:noop] interviewer> %s", turn.utterance.text)
+        return None
 
     async def on_thinking(self) -> None:
         logger.debug("[tts:noop] thinking…")

@@ -696,11 +696,11 @@ class VoiceSession:
                 is_terminal=True,
             )
             t_oracle = time.perf_counter()
-            await self._safe_speak(turn)
+            first_audio_ms = await self._safe_speak(turn)
             tts_ms = (time.perf_counter() - t_oracle) * 1000.0
             self._log_turn(
                 rid, reason, audio_s, stt_ms, oracle_ms, tts_ms, "done",
-                transcript=transcript, terminal=True,
+                transcript=transcript, terminal=True, first_audio_ms=first_audio_ms,
             )
             return turn
         oracle_ms = (time.perf_counter() - t_stt) * 1000.0
@@ -716,12 +716,12 @@ class VoiceSession:
         # Voice it (including a terminal closing line) BEFORE the caller arms the next turn, so the
         # endpointer reset (in arm_next_turn) can never fire while the interviewer still speaks.
         t_oracle = time.perf_counter()
-        await self._safe_speak(turn)
+        first_audio_ms = await self._safe_speak(turn)
         tts_ms = (time.perf_counter() - t_oracle) * 1000.0
         self._state = _State.TERMINAL if is_terminal else _State.SPEAKING
         self._log_turn(
             rid, reason, audio_s, stt_ms, oracle_ms, tts_ms, result.phase,
-            transcript=transcript, terminal=is_terminal,
+            transcript=transcript, terminal=is_terminal, first_audio_ms=first_audio_ms,
         )
         return turn
 
@@ -738,18 +738,20 @@ class VoiceSession:
         transcript: str = "",
         empty: bool = False,
         terminal: bool = False,
+        first_audio_ms: float | None = None,
     ) -> None:
         """Emit one structured per-turn telemetry line at INFO.
 
         Format is ``voice.turn`` + ``key=value`` fields so prod logs stay greppable/parseable:
         ``commit`` is the EOT kind (smartturn / backstop / maxlen / assemblyai_eot); the ``*_ms``
         are the post-EOT stage latencies, and ``gap_ms`` is their sum — the commit→interviewer-audio
-        gap that the thinking filler masks.
+        gap that the thinking filler masks.  ``first_audio_ms`` is the browser-measured TTFB (from
+        turn_ready receipt to first PCM sample played); None when the client didn't report it.
         """
         gap_ms = stt_ms + (oracle_ms or 0.0) + (tts_ms or 0.0)
         logger.info(
             "voice.turn rid=%s commit=%s audio_s=%.1f stt_ms=%.0f oracle_ms=%s tts_ms=%s "
-            "gap_ms=%.0f phase=%s%s%s",
+            "gap_ms=%.0f phase=%s first_audio_ms=%s%s%s",
             rid,
             commit,
             audio_s,
@@ -758,6 +760,7 @@ class VoiceSession:
             f"{tts_ms:.0f}" if tts_ms is not None else "na",
             gap_ms,
             phase,
+            f"{first_audio_ms:.0f}" if first_audio_ms is not None else "na",
             " empty=1" if empty else "",
             " terminal=1" if terminal else "",
         )
@@ -780,16 +783,21 @@ class VoiceSession:
             shadow_stt_ms=snap.stt_ms if snap else None,
             shadow_endpoint_ms=snap.endpoint_ms if snap else None,
             shadow_endpoint_count=snap.endpoint_count if snap else None,
+            first_audio_ms=first_audio_ms,
         )
         self._safe_telemetry(t)
 
-    async def _safe_speak(self, turn: TurnResult) -> None:
-        """Voice an utterance. A TTS failure is non-fatal (the room degrades to text) and must
-        never derail the session state — so we swallow + log it rather than let it propagate."""
+    async def _safe_speak(self, turn: TurnResult) -> float | None:
+        """Voice an utterance; return firstAudioMs from the browser ack (or None on failure/timeout).
+
+        A TTS failure is non-fatal (the room degrades to text) and must never derail the session
+        state — so we swallow + log it rather than let it propagate.
+        """
         try:
-            await self._sink.speak(turn)
+            return await self._sink.speak(turn)
         except Exception:
             logger.exception("TTS sink failed for turn %s — continuing.", turn.request_id)
+            return None
 
     def _safe_thinking(self) -> None:
         """Fire the EOT "thinking" backchannel cue WITHOUT blocking the STT pipeline.

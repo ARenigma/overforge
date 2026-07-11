@@ -49,6 +49,9 @@ class TurnTelemetry:
     shadow_endpoint_ms: float | None = None
     #: Count of shadow semantic endpoints in the window (0 = never ended; >=2 = would have split).
     shadow_endpoint_count: int | None = None
+    #: Browser-measured TTFB: performance.now() delta from turn_ready receipt to first PCM sample
+    #: scheduled for playback (ms).  None when the client didn't report it or TTS failed entirely.
+    first_audio_ms: float | None = None
 
 
 class TelemetrySink(Protocol):
@@ -125,6 +128,7 @@ class RestTelemetrySink:
                 "shadowSttMs": t.shadow_stt_ms,
                 "shadowEndpointMs": t.shadow_endpoint_ms,
                 "shadowEndpointCount": t.shadow_endpoint_count,
+                "firstAudioMs": t.first_audio_ms,
             }
             resp = await self._client.post(path, json=body)
             if resp.status_code not in (200, 204):

@@ -6,14 +6,17 @@
   "scripts": {
     "install:browser": "playwright install chromium",
     "fixtures": "bash fixtures/make-fixtures.sh",
+    "fixtures:voice": "npx tsx scripts/make-voice-fixtures.ts",
     "test": "playwright test",
     "test:mimic": "playwright test --project=mimic",
     "test:stt": "playwright test --project=stt",
+    "test:voice-mimic": "RUN_VOICE_MIMIC=1 playwright test --project=voice-mimic",
     "report": "playwright show-report"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
     "@types/node": "^20.14.0",
+    "tsx": "^4.23.0",
     "typescript": "^5.5.0"
   }
 }

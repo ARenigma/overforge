@@ -68,5 +68,15 @@ export default defineConfig({
       // real STT path so the FSM advances from voice alone.
       use: { ...baseUse, launchOptions: { args: chromiumArgs('answer.wav') } },
     },
+    {
+      name: 'voice-mimic',
+      testMatch: /voice-interview-mimic\.spec\.ts/,
+      // Per-turn audio injection via addInitScript overrides navigator.mediaDevices.getUserMedia
+      // for both the camera (canvas.captureStream) and mic (AudioContext destination node).
+      // No --use-file-for-fake-audio-capture: our __speakClip API controls each turn's audio.
+      // --use-fake-device + --use-fake-ui are still required so permission prompts auto-dismiss
+      // and a valid fake device is registered as a fallback before our override intercepts calls.
+      use: { ...baseUse, launchOptions: { args: chromiumArgs() } },
+    },
   ],
 });

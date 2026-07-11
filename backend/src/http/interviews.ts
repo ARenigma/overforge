@@ -535,6 +535,7 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       shadowSttMs,
       shadowEndpointMs,
       shadowEndpointCount,
+      firstAudioMs,
     } = req.body as {
       token?: string;
       requestId?: string;
@@ -553,6 +554,7 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       shadowSttMs?: unknown;
       shadowEndpointMs?: unknown;
       shadowEndpointCount?: unknown;
+      firstAudioMs?: unknown;
     };
 
     await validateCandidate(id, token ?? '');
@@ -571,6 +573,12 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       if (v == null) return null;
       const n = Number(v);
       return isFinite(n) ? Math.max(0, n) : null;
+    };
+    // firstAudioMs extra bounds: must be strictly > 0 and < 120 000 ms (finite already via toNum).
+    const toFirstAudioMs = (v: unknown): number | null => {
+      const n = toNum(v);
+      if (n == null || n === 0 || n >= 120_000) return null;
+      return n;
     };
     // Transcript fields: accept strings only, length-capped; anything else → null.
     const toText = (v: unknown): string | null => {
@@ -598,6 +606,7 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
         const n = toNum(shadowEndpointCount);
         return n == null ? null : Math.round(n);
       })(),
+      firstAudioMs: toFirstAudioMs(firstAudioMs),
     });
 
     res.status(204).end();

@@ -356,6 +356,9 @@ export interface VoiceTurnRecord {
   shadowEndpointMs?: number | null;
   /** Count of shadow semantic endpoints in the window (0 = never ended; >=2 = would have split). */
   shadowEndpointCount?: number | null;
+  /** Browser-measured TTFB: ms from turn_ready receipt to first PCM sample played. Null when the
+   *  client didn't report it (older client) or TTS failed before any audio played. */
+  firstAudioMs?: number | null;
 }
 
 /** Insert one voice-turn telemetry row.  Throws on DB error (the route swallows it). */
@@ -386,6 +389,7 @@ export async function recordVoiceTurn(interviewId: string, t: VoiceTurnRecord): 
     shadow_stt_ms: safeNum(t.shadowSttMs),
     shadow_endpoint_ms: safeNum(t.shadowEndpointMs),
     shadow_endpoint_count: t.shadowEndpointCount == null ? null : Math.round(t.shadowEndpointCount),
+    first_audio_ms: safeNum(t.firstAudioMs),
   });
 
   if (error) throw new Error(`recordVoiceTurn: ${error.message}`);

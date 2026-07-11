@@ -33,7 +33,7 @@ export type SocketStatus = 'disconnected' | 'connecting' | 'ready' | 'failed';
 interface UseVoiceSocketResult {
   socketStatus: SocketStatus;
   sendFrame: (buf: ArrayBuffer) => void;
-  sendSpoken: (requestId: string) => void;
+  sendSpoken: (requestId: string, firstAudioMs?: number | null) => void;
   sendMicOff: () => void;
   disconnect: () => void;
 }
@@ -220,8 +220,10 @@ export function useVoiceSocket({
   }, []);
 
   const sendSpoken = useCallback(
-    (requestId: string) => {
-      sendJson({ type: 'spoken', requestId });
+    (requestId: string, firstAudioMs?: number | null) => {
+      const msg: Record<string, unknown> = { type: 'spoken', requestId };
+      if (firstAudioMs != null) msg.firstAudioMs = firstAudioMs;
+      sendJson(msg);
     },
     [sendJson]
   );

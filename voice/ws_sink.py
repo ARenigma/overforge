@@ -33,13 +33,17 @@ class WsTtsSink:
         self._send_json = send_json
         self._ack_timeout_s = ack_timeout_s
         self._pending: dict[str, asyncio.Event] = {}
+        # Stores the firstAudioMs value carried by each {spoken} ack so speak() can return it.
+        self._first_audio_ms: dict[str, float | None] = {}
 
     async def on_thinking(self) -> None:
         await self._safe_send({"type": "thinking"})
 
-    async def speak(self, turn: TurnResult) -> None:
+    async def speak(self, turn: TurnResult) -> float | None:
+        """Send turn_ready, await the browser's {spoken} ack, return firstAudioMs (or None)."""
         event = asyncio.Event()
         self._pending[turn.request_id] = event
+        self._first_audio_ms[turn.request_id] = None
         await self._safe_send(
             {
                 "type": "turn_ready",
@@ -59,11 +63,18 @@ class WsTtsSink:
             )
         finally:
             self._pending.pop(turn.request_id, None)
+        return self._first_audio_ms.pop(turn.request_id, None)
 
-    def ack(self, request_id: str) -> None:
-        """Called by the read loop on a {type:'spoken'} message — resolves speak()'s await."""
+    def ack(self, request_id: str, first_audio_ms: float | None = None) -> None:
+        """Called by the read loop on a {type:'spoken'} message — resolves speak()'s await.
+
+        ``first_audio_ms`` is the TTFB the browser measured (performance.now() delta from
+        turn_ready receipt to first PCM sample scheduled).  May be None for older clients or
+        when TTS failed before any audio played.
+        """
         event = self._pending.get(request_id)
         if event is not None:
+            self._first_audio_ms[request_id] = first_audio_ms
             event.set()
 
     async def _safe_send(self, payload: dict[str, object]) -> None:
