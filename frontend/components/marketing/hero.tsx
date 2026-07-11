@@ -40,9 +40,16 @@ export function Hero() {
             </Reveal>
           </div>
 
-          {/* The 3D system — WebGL on capable desktops, static SVG otherwise. */}
+          {/* The 3D system — WebGL on capable desktops, static SVG otherwise — on a Supabase-style
+              dotted drafting mat that fades radially into the canvas. */}
           <Reveal delay={120} className="order-1 lg:order-2">
-            <HeroVisual className="mx-auto aspect-square w-full max-w-[420px] lg:max-w-[540px]" />
+            <div className="relative">
+              <div
+                aria-hidden="true"
+                className="bg-dot-grid pointer-events-none absolute -inset-10 [mask-image:radial-gradient(62%_62%_at_50%_50%,black,transparent)]"
+              />
+              <HeroVisual className="relative mx-auto aspect-square w-full max-w-[420px] lg:max-w-[540px]" />
+            </div>
           </Reveal>
         </div>
       </div>

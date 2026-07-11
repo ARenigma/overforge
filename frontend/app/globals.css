@@ -161,6 +161,14 @@
    special-casing (the same trick .dark uses). Used with rhythm: base is the page; raised/sunken are
    subtle steps; wash is a primary-tinted gradient; contrast is the ONE inverse feature band (dark on
    a light site, paper on a dark site) — together.ai's research band, supabase's framework band. */
+/* Supabase-style dotted grid — used ONLY as the hero backdrop (user pick; anywhere else was
+   judged bloat). Token-driven dots so the pattern tracks both themes; callers add a radial
+   mask so it fades into the canvas instead of ending on a hard edge. */
+.bg-dot-grid {
+  background-image: radial-gradient(circle, hsl(var(--border)) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
 [data-tone='raised'] {
   background-color: hsl(var(--surface-200));
 }

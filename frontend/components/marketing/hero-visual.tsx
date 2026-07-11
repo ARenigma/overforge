@@ -19,53 +19,53 @@ const NOTES = [
 ] as const;
 
 function StaticFallback() {
-  // A quiet static rendition of the same system — nodes on a loop — for SSR + incapable devices.
+  // A quiet static rendition of the wire-knot sculpture — three interleaved loops + the state
+  // marker — for SSR + incapable devices. Same caption register as the live scene.
   return (
-    <svg
-      viewBox="0 0 480 420"
-      className="h-full w-full"
-      fill="none"
-      aria-hidden="true"
-      style={{
-        WebkitMaskImage: 'radial-gradient(72% 72% at 50% 46%, black, transparent 92%)',
-        maskImage: 'radial-gradient(72% 72% at 50% 46%, black, transparent 92%)',
-      }}
-    >
-      <ellipse
-        cx="240"
-        cy="210"
-        rx="150"
-        ry="120"
-        transform="rotate(-16 240 210)"
-        stroke="hsl(var(--primary) / 0.28)"
-        strokeWidth="1.5"
-      />
-      <path
-        d="M96 250 C 150 150, 210 300, 260 190 S 380 150, 392 214"
-        stroke="hsl(var(--primary) / 0.5)"
-        strokeWidth="1.5"
-      />
-      {[
-        [96, 250, 5],
-        [175, 205, 6],
-        [260, 190, 5],
-        [330, 172, 6],
-        [392, 214, 9],
-      ].map(([cx, cy, r], i) => (
-        <g key={i}>
-          <circle cx={cx} cy={cy} r={r} fill="hsl(var(--primary) / 0.85)" />
-          {i === 4 && (
-            <circle
-              cx={cx}
-              cy={cy}
-              r={r + 7}
-              stroke="hsl(var(--primary) / 0.6)"
-              strokeWidth="1.5"
-            />
-          )}
-        </g>
-      ))}
-    </svg>
+    <div className="relative h-full w-full">
+      <svg
+        viewBox="0 0 480 420"
+        className="h-full w-full"
+        fill="none"
+        aria-hidden="true"
+        style={{
+          WebkitMaskImage: 'radial-gradient(72% 72% at 50% 46%, black, transparent 92%)',
+          maskImage: 'radial-gradient(72% 72% at 50% 46%, black, transparent 92%)',
+        }}
+      >
+        <ellipse
+          cx="240"
+          cy="200"
+          rx="152"
+          ry="86"
+          transform="rotate(-18 240 200)"
+          stroke="hsl(var(--primary) / 0.9)"
+          strokeWidth="1.6"
+        />
+        <ellipse
+          cx="240"
+          cy="200"
+          rx="150"
+          ry="88"
+          transform="rotate(44 240 200)"
+          stroke="hsl(var(--primary) / 0.45)"
+          strokeWidth="1.3"
+        />
+        <ellipse
+          cx="240"
+          cy="200"
+          rx="146"
+          ry="84"
+          transform="rotate(-80 240 200)"
+          stroke="hsl(var(--primary) / 0.25)"
+          strokeWidth="1.1"
+        />
+        <circle cx="380" cy="153" r="5" fill="hsl(var(--foreground) / 0.9)" />
+      </svg>
+      <div className="pointer-events-none absolute bottom-[4%] left-1/2 -translate-x-1/2 font-mono text-[10px] uppercase tracking-[0.16em] text-foreground-subtle">
+        state 3 of 5 — <span className="text-primary">coding</span>
+      </div>
+    </div>
   );
 }
 

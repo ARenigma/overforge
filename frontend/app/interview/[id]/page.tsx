@@ -259,6 +259,17 @@ function assistLabel(kind: string): string {
 // Must stay in sync with backend SUPPORTED_LANGUAGES and the new-interview dialog's options —
 // a value the interviewer can assign but that's missing here would fail isLanguage() and
 // silently skip the room lock.
+/** Editor-rail filename extension per language (cosmetic — the top rail's tab label). */
+const LANG_EXT: Record<string, string> = {
+  python: 'py',
+  javascript: 'js',
+  typescript: 'ts',
+  java: 'java',
+  cpp: 'cpp',
+  go: 'go',
+  ruby: 'rb',
+};
+
 const LANGUAGES = [
   { value: 'python', label: 'Python' },
   { value: 'javascript', label: 'JavaScript' },
@@ -1516,7 +1527,7 @@ export default function InterviewPage() {
               pick: LeetCode-style "split dock" — statement and code visible together). Panels are
               keyed so the editor keeps identity (no CodeMirror remount) when the dock mounts at
               the coding handoff or is collapsed to the rail. */}
-          <ResizablePanel defaultSize={62} minSize={30} className={chatAnimClass}>
+          <ResizablePanel defaultSize={61.8} minSize={30} className={chatAnimClass}>
             <div
               className={
                 isMobile ? 'flex h-full flex-col overflow-hidden' : 'flex h-full overflow-hidden'
@@ -1553,7 +1564,7 @@ export default function InterviewPage() {
                       key="problem-dock"
                       id="problem-dock"
                       order={1}
-                      defaultSize={32}
+                      defaultSize={38.2}
                       minSize={20}
                       maxSize={55}
                     >
@@ -1574,8 +1585,15 @@ export default function InterviewPage() {
                 )}
                 <ResizablePanel key="editor-col" id="editor-col" order={2} minSize={40}>
                   <div className="h-full flex flex-col overflow-hidden bg-surface-deep">
-                    {/* Editor — fills remaining vertical space. Single top bar = the app header; Run +
-                  language moved down into the console below. */}
+                    {/* Editor top rail — continues the h-10 header seam across all three panels
+                        (problem dock · editor · chat), so the horizontal grid line never breaks. */}
+                    <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border bg-card px-3">
+                      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                        solution.{LANG_EXT[language] ?? language}
+                      </span>
+                    </div>
+
+                    {/* Editor — fills remaining vertical space; Run + language live in the console. */}
                     <div className="flex-1 overflow-hidden">
                       <EnhancedCodeMirrorEditor
                         value={code}
@@ -1590,7 +1608,7 @@ export default function InterviewPage() {
                     </div>
 
                     {/* Terminal output — fixed-height console strip */}
-                    <div className="shrink-0 h-[180px] border-t border-border bg-surface-deep overflow-auto p-3 font-mono text-[11px]">
+                    <div className="shrink-0 h-[23.6%] min-h-[150px] border-t border-border bg-surface-deep overflow-auto p-3 font-mono text-[11px]">
                       {/* Console header — Run + language live here so the editor keeps a single top bar. */}
                       <div className="mb-2 flex items-center gap-2">
                         <Button
@@ -1694,7 +1712,7 @@ export default function InterviewPage() {
                     </div>
 
                     {/* Status bar — Replit-style */}
-                    <div className="flex h-6 shrink-0 items-center gap-3 border-t border-border bg-card px-3 font-mono text-[10px] text-muted-foreground">
+                    <div className="flex h-7 shrink-0 items-center gap-3 border-t border-border bg-card px-3 font-mono text-[10px] text-muted-foreground">
                       <span>
                         Ln {cursor.line}, Col {cursor.col}
                       </span>
@@ -1716,7 +1734,7 @@ export default function InterviewPage() {
           {/* RIGHT — AI chat / oral widget */}
           <ResizablePanel
             ref={chatPanelRef}
-            defaultSize={38}
+            defaultSize={38.2}
             minSize={25}
             collapsible
             collapsedSize={0}
