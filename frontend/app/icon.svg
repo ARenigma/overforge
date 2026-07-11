@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
   <!-- Finite favicon — "the clipped loop": an infinity band severed at the right lobe, terminating
        in the ultramarine dot. Infinite input, finite resolution. Ink chip so it reads on any tab. -->
-  <rect width="24" height="24" rx="5" fill="#0e1220" />
+  <rect width="24" height="24" rx="5" fill="#131313" />
   <path
     d="M 12 12.6 C 9.7 9.2 4.6 9.2 4.6 12.6 C 4.6 16 9.7 16 12 12.6 C 13.7 10 16.5 8.9 18.2 10"
     fill="none"
-    stroke="#e8ecf8"
+    stroke="#ededed"
     stroke-width="2.3"
     stroke-linecap="round"
   />

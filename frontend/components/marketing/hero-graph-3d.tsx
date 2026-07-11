@@ -105,7 +105,7 @@ export default function HeroGraph3D({ className }: { className?: string }) {
     PATH.forEach((p, i) => {
       const accepting = i === PATH.length - 1;
       const mat = new THREE.MeshPhysicalMaterial({
-        color: accepting ? primary.clone() : new THREE.Color('#eef1f8'),
+        color: accepting ? primary.clone() : new THREE.Color('#ededed'),
         emissive: accepting
           ? primary.clone().multiplyScalar(0.5)
           : primary.clone().multiplyScalar(0.04),

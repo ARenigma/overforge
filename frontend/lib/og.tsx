@@ -6,13 +6,13 @@ import { ImageResponse } from 'next/og';
 
 export const OG_SIZE = { width: 1200, height: 630 };
 
-const INK = '#0d1120'; // the favicon chip — brand night
-const PAPER = '#e8eaf0';
-const SUBTLE = '#8b91a3';
-const GHOST = '#565c6e';
+const INK = '#131313'; // the favicon chip — charcoal night (Supabase-neutral, no navy)
+const PAPER = '#ededed';
+const SUBTLE = '#8f8f8f';
+const GHOST = '#5e5e5e';
 const TRACE = '#3d6aff';
 const GREEN = '#4fce9b';
-const RULE = 'rgba(139,145,163,0.16)';
+const RULE = 'rgba(143,143,143,0.16)';
 
 async function loadFonts() {
   const [sans, mono] = await Promise.all([

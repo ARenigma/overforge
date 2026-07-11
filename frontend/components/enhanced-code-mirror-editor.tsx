@@ -48,7 +48,7 @@ const brandHighlightLight = HighlightStyle.define([
   { tag: [t.comment, t.lineComment, t.blockComment], color: 'hsl(0 0% 52%)', fontStyle: 'italic' },
   {
     tag: [t.variableName, t.propertyName, t.definition(t.variableName)],
-    color: 'hsl(230 24% 18%)',
+    color: 'hsl(0 0% 15%)',
   },
   { tag: [t.operator, t.punctuation, t.bracket, t.separator], color: 'hsl(0 0% 42%)' },
   { tag: t.invalid, color: 'hsl(8 74% 46%)' },
