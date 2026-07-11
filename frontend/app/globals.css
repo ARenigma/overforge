@@ -39,39 +39,40 @@
     --primary-foreground: 0 0% 100%;
     --primary-wash: 226 100% 62%; /* use with an alpha: hsl(var(--primary-wash) / 0.08) */
 
-    /* ── Light (native) — engineering paper. ONE hue (228). Positive elevation: sunken < canvas < card. ── */
-    --background: 228 24% 98%;
-    --foreground: 230 24% 11%;
+    /* ── Light (native) — neutral paper, ZERO saturation (Supabase-light). Blue lives only in the
+       accent system. Positive elevation: sunken < canvas < card. ── */
+    --background: 0 0% 98%;
+    --foreground: 0 0% 9%;
     --card: 0 0% 100%;
-    --card-foreground: 230 24% 11%;
+    --card-foreground: 0 0% 9%;
     --popover: 0 0% 100%;
-    --popover-foreground: 230 24% 11%;
-    --secondary: 228 18% 95%;
-    --secondary-foreground: 230 20% 16%;
-    --muted: 228 18% 95%;
-    --muted-foreground: 230 12% 32%;
-    --accent: 228 20% 93%;
-    --accent-foreground: 230 20% 16%;
+    --popover-foreground: 0 0% 9%;
+    --secondary: 0 0% 95%;
+    --secondary-foreground: 0 0% 15%;
+    --muted: 0 0% 95%;
+    --muted-foreground: 0 0% 32%;
+    --accent: 0 0% 93%;
+    --accent-foreground: 0 0% 15%;
     --destructive: 8 74% 46%;
     --destructive-foreground: 0 0% 100%;
     --warning: 36 88% 42%;
     --warning-foreground: 30 80% 26%; /* readable amber on a warning/10 tint */
-    --border: 228 16% 88%;
-    --input: 228 16% 85%;
+    --border: 0 0% 89%;
+    --input: 0 0% 86%;
     /* Elevation ramp (positive: higher = lighter). Sections are separated by hairline border-t
        seams, NOT by background color — these bands are used sparingly (proof band, footer). */
-    --surface-deep: 228 20% 95%; /* footer / deep recess */
-    --surface-75: 228 18% 96.5%; /* subtle recess */
-    --surface-100: 228 24% 98%; /* base (= background) */
+    --surface-deep: 0 0% 95%; /* footer / deep recess */
+    --surface-75: 0 0% 96.5%; /* subtle recess */
+    --surface-100: 0 0% 98%; /* base (= background) */
     --surface-200: 0 0% 100%; /* raised (= card) */
     /* Opaque nested chrome — replaces every bg-background/40|60 hack (those composite to pure
        white in light mode and erase nested structure). Never translucent. */
-    --surface-inset: 228 18% 94%;
+    --surface-inset: 0 0% 94%;
     /* Text hierarchy below muted-foreground (40%): subtle = de-emphasized labels; ghost = dots. */
-    --foreground-subtle: 230 9% 42%;
-    --foreground-ghost: 230 9% 60%;
+    --foreground-subtle: 0 0% 42%;
+    --foreground-ghost: 0 0% 60%;
     /* Modal scrim — tinted ink, lighter in light mode. */
-    --overlay-scrim: 230 30% 8% / 0.45;
+    --overlay-scrim: 0 0% 8% / 0.45;
     /* Sharp structure is the brand: 0 radius on surfaces, cards, buttons. Only text-entry fields
        (+ circles via rounded-full) soften. */
     --radius: 0rem;
@@ -91,11 +92,11 @@
     --chart-4: 40 88% 44%;
     --chart-5: 152 55% 40%;
     --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 230 12% 32%;
+    --sidebar-foreground: 0 0% 32%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 228 18% 95%;
-    --sidebar-accent-foreground: 230 20% 16%;
-    --sidebar-border: 228 16% 90%;
+    --sidebar-accent: 0 0% 95%;
+    --sidebar-accent-foreground: 0 0% 15%;
+    --sidebar-border: 0 0% 90%;
   }
 
   .dark {
@@ -105,33 +106,35 @@
     --primary-foreground: 0 0% 100%;
     --primary-wash: 226 100% 62%;
 
-    /* ── Dark — the drawing photographed at night. Navy-tinted charcoal, ONE hue (233). ── */
-    --background: 233 26% 8%;
-    --foreground: 228 16% 92%;
-    --card: 233 22% 11%;
-    --card-foreground: 228 16% 92%;
-    --popover: 233 22% 13%;
-    --popover-foreground: 228 16% 92%;
-    --secondary: 233 18% 16%;
-    --secondary-foreground: 228 16% 92%;
-    --muted: 233 18% 16%;
-    --muted-foreground: 228 11% 72%;
-    --accent: 233 18% 18%;
-    --accent-foreground: 228 16% 92%;
+    /* ── Dark — Supabase-exact charcoal, ZERO saturation (#121212 canvas / #171717 card /
+       #232323 border, resolved from Supabase's own oklch token formulas). Blue lives ONLY in
+       the accent system + the hero/footer primary washes fused over this neutral canvas. ── */
+    --background: 0 0% 7%;
+    --foreground: 0 0% 93%;
+    --card: 0 0% 9%;
+    --card-foreground: 0 0% 93%;
+    --popover: 0 0% 12%;
+    --popover-foreground: 0 0% 93%;
+    --secondary: 0 0% 13%;
+    --secondary-foreground: 0 0% 93%;
+    --muted: 0 0% 13%;
+    --muted-foreground: 0 0% 63%;
+    --accent: 0 0% 15%;
+    --accent-foreground: 0 0% 93%;
     --destructive: 8 78% 62%;
     --destructive-foreground: 0 0% 100%;
     --warning: 42 92% 62%;
     --warning-foreground: 42 92% 62%; /* on a dark warning/10 surface the foreground IS the amber */
-    --border: 230 14% 18%;
-    --input: 230 14% 22%;
-    --surface-deep: 233 30% 5%;
-    --surface-75: 233 26% 6.5%;
-    --surface-100: 233 26% 8%;
-    --surface-200: 233 22% 11%;
-    --surface-inset: 233 26% 6%;
-    --foreground-subtle: 228 10% 62%;
-    --foreground-ghost: 228 9% 44%;
-    --overlay-scrim: 233 40% 3% / 0.75;
+    --border: 0 0% 14%;
+    --input: 0 0% 18%;
+    --surface-deep: 0 0% 5%;
+    --surface-75: 0 0% 6%;
+    --surface-100: 0 0% 7%;
+    --surface-200: 0 0% 9%;
+    --surface-inset: 0 0% 6%;
+    --foreground-subtle: 0 0% 56%;
+    --foreground-ghost: 0 0% 40%;
+    --overlay-scrim: 0 0% 2% / 0.75;
 
     --ring: var(--primary);
     --success: 152 55% 56%;
@@ -143,12 +146,12 @@
     --chart-3: 288 60% 72%;
     --chart-4: 42 88% 64%;
     --chart-5: 152 55% 58%;
-    --sidebar-background: 233 24% 9%;
-    --sidebar-foreground: 228 10% 80%;
+    --sidebar-background: 0 0% 8%;
+    --sidebar-foreground: 0 0% 74%;
     --sidebar-primary-foreground: 230 45% 9%;
-    --sidebar-accent: 233 18% 16%;
-    --sidebar-accent-foreground: 228 16% 92%;
-    --sidebar-border: 230 14% 16%;
+    --sidebar-accent: 0 0% 13%;
+    --sidebar-accent-foreground: 0 0% 93%;
+    --sidebar-border: 0 0% 13%;
   }
 }
 

@@ -54,6 +54,7 @@ import {
   Loader2,
   Lock,
   Mic,
+  PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
   Play,
@@ -64,6 +65,7 @@ import {
 } from 'lucide-react';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
+import { ProblemDock } from '@/components/interview/problem-dock';
 import { useVoiceMic } from '@/lib/voice/use-voice-mic';
 import { useVoiceSocket } from '@/lib/voice/use-voice-socket';
 import type { ServerReady, ServerTurnReady } from '@/lib/voice/types';
@@ -129,8 +131,11 @@ async function playPcmStream(opts: {
   sampleRate: number;
   isCancelled: () => boolean;
   registerStop: (stop: () => void) => void;
+  /** Fires ONCE, when the first chunk is scheduled to play — the felt "interviewer starts
+   *  talking" moment (first_audio_ms telemetry). */
+  onFirstAudio?: () => void;
 }): Promise<boolean> {
-  const { body, ctx, sampleRate, isCancelled, registerStop } = opts;
+  const { body, ctx, sampleRate, isCancelled, registerStop, onFirstAudio } = opts;
   const reader = body.getReader();
   const sources: AudioBufferSourceNode[] = [];
   let playT = 0;
@@ -201,6 +206,7 @@ async function playPcmStream(opts: {
       src.start(playT);
       playT += buf.duration;
       sources.push(src);
+      if (!scheduledAny) onFirstAudio?.();
       scheduledAny = true;
     }
     await waitTail();
@@ -611,8 +617,17 @@ export default function InterviewPage() {
     setMicForwarding(false);
   }, []);
 
+  // performance.now() of the moment the CURRENT utterance's first audio actually played — set by
+  // speak() (streaming: first scheduled chunk; chunked: first clip's 'playing' event). Read after
+  // playback to compute first_audio_ms (felt TTFB) for the spoken ack. A ref, not state: the
+  // measurement must never be lost to a re-render (worklet stale-closure bug class).
+  const firstAudioAtRef = useRef<number | null>(null);
+
   const handleVoiceTurnReady = useCallback(
     (cue: ServerTurnReady) => {
+      // Clock starts when the cue lands — the same boundary the voice service's tts_ms starts at,
+      // so browser first_audio_ms ⊂ server tts_ms by construction.
+      const t0 = performance.now();
       lastExpectsRef.current = cue.utterance.expects;
       pendingVoiceRequestRef.current = cue.requestId;
 
@@ -647,8 +662,13 @@ export default function InterviewPage() {
           console.error('[voice] interviewer playback failed', err);
         } finally {
           voiceSpeakingRef.current = false;
-          // Ack playback so the server arms the next turn.
-          sendSpokenRef.current?.(cue.requestId);
+          // Ack playback so the server arms the next turn — carrying the measured TTFB (null when
+          // no audio played, or when the ref still holds a PREVIOUS turn's stamp: firstAt < t0).
+          const firstAt = firstAudioAtRef.current;
+          sendSpokenRef.current?.(
+            cue.requestId,
+            firstAt != null && firstAt >= t0 ? Math.round(firstAt - t0) : null
+          );
           // Re-arm mic if next phase is still voice.
           if (cue.utterance.expects === 'voice' && !cue.isTerminal) {
             setMicForwarding(true);
@@ -671,7 +691,9 @@ export default function InterviewPage() {
   }, [stopMic]);
 
   // These are populated once the socket hook is instantiated below.
-  const sendSpokenRef = useRef<((requestId: string) => void) | null>(null);
+  const sendSpokenRef = useRef<((requestId: string, firstAudioMs?: number | null) => void) | null>(
+    null
+  );
   const sendMicOffRef = useRef<(() => void) | null>(null);
 
   const { socketStatus, sendFrame, sendSpoken, sendMicOff } = useVoiceSocket({
@@ -992,6 +1014,7 @@ export default function InterviewPage() {
       const tok = tokenOverride ?? activeToken;
       if (!tok) return;
       const seq = ++speakSeqRef.current; // a newer turn supersedes this playback
+      firstAudioAtRef.current = null; // fresh utterance — a stale stamp must never be attributed
       audioRef.current?.pause();
       // Cancel any in-flight STREAMED playback from a previous turn (aborts its fetch + stops its
       // scheduled Web Audio sources) — the <audio> pause above only covers the chunked path.
@@ -1032,6 +1055,9 @@ export default function InterviewPage() {
                 isCancelled: () => seq !== speakSeqRef.current,
                 registerStop: (s) => {
                   stopPlayback = s;
+                },
+                onFirstAudio: () => {
+                  if (seq === speakSeqRef.current) firstAudioAtRef.current = performance.now();
                 },
               });
             }
@@ -1076,6 +1102,17 @@ export default function InterviewPage() {
             }, 30_000);
             a.addEventListener('ended', done);
             a.addEventListener('error', done);
+            if (i === 0) {
+              // Chunked-fallback TTFB: the first clip's 'playing' event is the felt first word.
+              a.addEventListener(
+                'playing',
+                () => {
+                  if (seq === speakSeqRef.current && firstAudioAtRef.current == null)
+                    firstAudioAtRef.current = performance.now();
+                },
+                { once: true }
+              );
+            }
             a.play().catch(done); // autoplay rejection → skip, room stays usable
           });
           if (seq !== speakSeqRef.current) return; // cancelled mid-clip
@@ -1449,134 +1486,201 @@ export default function InterviewPage() {
           direction={isMobile ? 'vertical' : 'horizontal'}
           className="flex-1 overflow-hidden"
         >
-          {/* LEFT — editor + terminal console */}
+          {/* LEFT — problem dock + editor + terminal console. The dock is a nested split (user
+              pick: LeetCode-style "split dock" — statement and code visible together). Panels are
+              keyed so the editor keeps identity (no CodeMirror remount) when the dock mounts at
+              the coding handoff or is collapsed to the rail. */}
           <ResizablePanel defaultSize={62} minSize={30} className={chatAnimClass}>
-            <div className="h-full flex flex-col overflow-hidden bg-surface-deep">
-              {/* Editor — fills remaining vertical space. Single top bar = the app header; Run +
-                  language moved down into the console below. */}
-              <div className="flex-1 overflow-hidden">
-                <EnhancedCodeMirrorEditor
-                  value={code}
-                  onCodeChangeAction={handleCodeChange}
-                  onCursorPositionChangeAction={(line, col) => setCursor({ line, col })}
-                  language={language}
-                  onExecuteAction={handleRunCode}
-                  isExecuting={running}
-                  pasteDisabled={!devMode}
-                  onPasteBlockedAction={handlePasteBlocked}
-                />
-              </div>
-
-              {/* Terminal output — fixed-height console strip */}
-              <div className="shrink-0 h-[180px] border-t border-border bg-surface-deep overflow-auto p-3 font-mono text-[11px]">
-                {/* Console header — Run + language live here so the editor keeps a single top bar. */}
-                <div className="mb-2 flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    onClick={handleRunCode}
-                    loading={running}
-                    variant="outline"
-                    className="h-6 gap-1 rounded-md border border-success/40 bg-success/10 px-3 font-mono text-[10px] text-success transition-colors hover:bg-success/20 focus-visible:ring-ring"
+            <div
+              className={
+                isMobile ? 'flex h-full flex-col overflow-hidden' : 'flex h-full overflow-hidden'
+              }
+            >
+              {phase === 'coding' && codingProblem && !problemOpen && (
+                <button
+                  type="button"
+                  onClick={() => setProblemOpen(true)}
+                  data-testid="problem-rail"
+                  aria-label="Open problem panel"
+                  className={
+                    isMobile
+                      ? 'flex h-8 w-full shrink-0 items-center justify-center gap-2 border-b border-border bg-card text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground'
+                      : 'flex h-full w-7 shrink-0 flex-col items-center gap-2 border-r border-border bg-card py-3 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground'
+                  }
+                >
+                  <PanelLeftOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span
+                    className="font-mono text-[10px] uppercase tracking-wider"
+                    style={isMobile ? undefined : { writingMode: 'vertical-rl' }}
                   >
-                    {!running && <Play className="h-3 w-3 fill-current" />}
-                    RUN
-                  </Button>
-                  {lockedLanguage ? (
-                    <div
-                      className="flex h-6 items-center gap-1.5 rounded-md border border-border bg-muted px-2 font-mono text-[10px] text-muted-foreground"
-                      title="Language set by the interviewer"
-                    >
-                      <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />
-                      {LANGUAGES.find((l) => l.value === lockedLanguage)?.label ?? lockedLanguage}
-                    </div>
-                  ) : (
-                    <Select
-                      value={language}
-                      onValueChange={(v) => {
-                        setLanguage(v as Language);
-                        if (typeof window !== 'undefined') localStorage.setItem(langKey, v);
-                      }}
-                    >
-                      <SelectTrigger className="h-6 w-28 border-border bg-muted font-mono text-[10px] text-foreground focus-visible:ring-ring">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="border-border bg-card text-foreground">
-                        {LANGUAGES.map((l) => (
-                          <SelectItem
-                            key={l.value}
-                            value={l.value}
-                            className="font-mono text-xs focus:bg-muted"
-                          >
-                            {l.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  <span className="ml-auto text-[9px] font-mono uppercase tracking-wider text-muted-foreground">
-                    OUTPUT
+                    Problem
                   </span>
-                  {running && <Loader2 className="w-3 h-3 animate-spin text-primary" />}
-                </div>
-
-                {runError && (
-                  <Alert className="mb-2 border-destructive/40 bg-destructive/10 py-2 px-3">
-                    <AlertDescription className="text-destructive text-xs font-mono">
-                      {runError}
-                    </AlertDescription>
-                  </Alert>
+                </button>
+              )}
+              <ResizablePanelGroup
+                direction={isMobile ? 'vertical' : 'horizontal'}
+                className="flex-1"
+              >
+                {phase === 'coding' && codingProblem && problemOpen && (
+                  <>
+                    <ResizablePanel
+                      key="problem-dock"
+                      id="problem-dock"
+                      order={1}
+                      defaultSize={32}
+                      minSize={20}
+                      maxSize={55}
+                    >
+                      <ProblemDock
+                        problem={codingProblem}
+                        clock={formatTime(Math.max(0, elapsed - problemStartElapsedRef.current))}
+                        overBudget={
+                          elapsed - problemStartElapsedRef.current > PROBLEM_SOFT_BUDGET_S
+                        }
+                        onCollapseAction={() => setProblemOpen(false)}
+                      />
+                    </ResizablePanel>
+                    <ResizableHandle
+                      withHandle
+                      className={isMobile ? 'h-px bg-border' : 'w-px bg-border'}
+                    />
+                  </>
                 )}
-                {runResult ? (
-                  <div className="space-y-1" data-testid="run-output">
-                    <div className="flex items-center gap-3 text-muted-foreground text-[10px] uppercase tracking-wider font-mono">
-                      <span
-                        data-testid="run-status"
-                        className={runResult.exitCode === 0 ? 'text-success' : 'text-destructive'}
-                      >
-                        {runResult.status}
-                      </span>
-                      {runResult.timeMs != null ? <span>{runResult.timeMs}ms</span> : null}
-                      {runResult.memoryKb ? (
-                        <span>{Math.round(runResult.memoryKb / 1024)}KB</span>
-                      ) : null}
+                <ResizablePanel key="editor-col" id="editor-col" order={2} minSize={40}>
+                  <div className="h-full flex flex-col overflow-hidden bg-surface-deep">
+                    {/* Editor — fills remaining vertical space. Single top bar = the app header; Run +
+                  language moved down into the console below. */}
+                    <div className="flex-1 overflow-hidden">
+                      <EnhancedCodeMirrorEditor
+                        value={code}
+                        onCodeChangeAction={handleCodeChange}
+                        onCursorPositionChangeAction={(line, col) => setCursor({ line, col })}
+                        language={language}
+                        onExecuteAction={handleRunCode}
+                        isExecuting={running}
+                        pasteDisabled={!devMode}
+                        onPasteBlockedAction={handlePasteBlocked}
+                      />
                     </div>
-                    {runResult.compileOutput && (
-                      <pre className="text-destructive whitespace-pre-wrap break-all">
-                        {runResult.compileOutput}
-                      </pre>
-                    )}
-                    {runResult.stdout && (
-                      <pre className="text-foreground whitespace-pre-wrap break-all">
-                        {runResult.stdout}
-                      </pre>
-                    )}
-                    {runResult.stderr && (
-                      <pre className="text-destructive whitespace-pre-wrap break-all">
-                        {runResult.stderr}
-                      </pre>
-                    )}
-                    {!runResult.stdout && !runResult.stderr && !runResult.compileOutput && (
-                      <span className="text-muted-foreground">(no output)</span>
-                    )}
-                  </div>
-                ) : (
-                  !runError && (
-                    <span className="text-muted-foreground">Run your code to see output here.</span>
-                  )
-                )}
-              </div>
 
-              {/* Status bar — Replit-style */}
-              <div className="flex h-6 shrink-0 items-center gap-3 border-t border-border bg-card px-3 font-mono text-[10px] text-muted-foreground">
-                <span>
-                  Ln {cursor.line}, Col {cursor.col}
-                </span>
-                <span className="text-foreground-ghost">·</span>
-                <span className="capitalize">{language}</span>
-                <span className="text-foreground-ghost">·</span>
-                <span>Spaces: 4</span>
-                <span className="ml-auto">UTF-8</span>
-              </div>
+                    {/* Terminal output — fixed-height console strip */}
+                    <div className="shrink-0 h-[180px] border-t border-border bg-surface-deep overflow-auto p-3 font-mono text-[11px]">
+                      {/* Console header — Run + language live here so the editor keeps a single top bar. */}
+                      <div className="mb-2 flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          onClick={handleRunCode}
+                          loading={running}
+                          variant="outline"
+                          className="h-6 gap-1 rounded-md border border-success/40 bg-success/10 px-3 font-mono text-[10px] text-success transition-colors hover:bg-success/20 focus-visible:ring-ring"
+                        >
+                          {!running && <Play className="h-3 w-3 fill-current" />}
+                          RUN
+                        </Button>
+                        {lockedLanguage ? (
+                          <div
+                            className="flex h-6 items-center gap-1.5 rounded-md border border-border bg-muted px-2 font-mono text-[10px] text-muted-foreground"
+                            title="Language set by the interviewer"
+                          >
+                            <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            {LANGUAGES.find((l) => l.value === lockedLanguage)?.label ??
+                              lockedLanguage}
+                          </div>
+                        ) : (
+                          <Select
+                            value={language}
+                            onValueChange={(v) => {
+                              setLanguage(v as Language);
+                              if (typeof window !== 'undefined') localStorage.setItem(langKey, v);
+                            }}
+                          >
+                            <SelectTrigger className="h-6 w-28 border-border bg-muted font-mono text-[10px] text-foreground focus-visible:ring-ring">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="border-border bg-card text-foreground">
+                              {LANGUAGES.map((l) => (
+                                <SelectItem
+                                  key={l.value}
+                                  value={l.value}
+                                  className="font-mono text-xs focus:bg-muted"
+                                >
+                                  {l.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                        <span className="ml-auto text-[9px] font-mono uppercase tracking-wider text-muted-foreground">
+                          OUTPUT
+                        </span>
+                        {running && <Loader2 className="w-3 h-3 animate-spin text-primary" />}
+                      </div>
+
+                      {runError && (
+                        <Alert className="mb-2 border-destructive/40 bg-destructive/10 py-2 px-3">
+                          <AlertDescription className="text-destructive text-xs font-mono">
+                            {runError}
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                      {runResult ? (
+                        <div className="space-y-1" data-testid="run-output">
+                          <div className="flex items-center gap-3 text-muted-foreground text-[10px] uppercase tracking-wider font-mono">
+                            <span
+                              data-testid="run-status"
+                              className={
+                                runResult.exitCode === 0 ? 'text-success' : 'text-destructive'
+                              }
+                            >
+                              {runResult.status}
+                            </span>
+                            {runResult.timeMs != null ? <span>{runResult.timeMs}ms</span> : null}
+                            {runResult.memoryKb ? (
+                              <span>{Math.round(runResult.memoryKb / 1024)}KB</span>
+                            ) : null}
+                          </div>
+                          {runResult.compileOutput && (
+                            <pre className="text-destructive whitespace-pre-wrap break-all">
+                              {runResult.compileOutput}
+                            </pre>
+                          )}
+                          {runResult.stdout && (
+                            <pre className="text-foreground whitespace-pre-wrap break-all">
+                              {runResult.stdout}
+                            </pre>
+                          )}
+                          {runResult.stderr && (
+                            <pre className="text-destructive whitespace-pre-wrap break-all">
+                              {runResult.stderr}
+                            </pre>
+                          )}
+                          {!runResult.stdout && !runResult.stderr && !runResult.compileOutput && (
+                            <span className="text-muted-foreground">(no output)</span>
+                          )}
+                        </div>
+                      ) : (
+                        !runError && (
+                          <span className="text-muted-foreground">
+                            Run your code to see output here.
+                          </span>
+                        )
+                      )}
+                    </div>
+
+                    {/* Status bar — Replit-style */}
+                    <div className="flex h-6 shrink-0 items-center gap-3 border-t border-border bg-card px-3 font-mono text-[10px] text-muted-foreground">
+                      <span>
+                        Ln {cursor.line}, Col {cursor.col}
+                      </span>
+                      <span className="text-foreground-ghost">·</span>
+                      <span className="capitalize">{language}</span>
+                      <span className="text-foreground-ghost">·</span>
+                      <span>Spaces: 4</span>
+                      <span className="ml-auto">UTF-8</span>
+                    </div>
+                  </div>
+                </ResizablePanel>
+              </ResizablePanelGroup>
             </div>
           </ResizablePanel>
 
@@ -1661,78 +1765,8 @@ export default function InterviewPage() {
                 )}
               </div>
 
-              {/* Transcript scroll area */}
-              {/* Problem panel — the assigned coding problem (statement/examples/constraints), pinned
-                  above the chat during the coding phase. Hidden tests are NEVER sent here. */}
-              {phase === 'coding' && codingProblem && (
-                <div className="shrink-0 border-b border-border" data-testid="problem-panel">
-                  <button
-                    type="button"
-                    onClick={() => setProblemOpen((o) => !o)}
-                    className="flex w-full items-center gap-2 px-4 py-2 text-left hover:bg-muted/50"
-                  >
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-primary">
-                      Problem
-                    </span>
-                    <span
-                      data-testid="problem-title"
-                      className="truncate text-xs font-semibold text-foreground"
-                    >
-                      {codingProblem.title}
-                    </span>
-                    <span
-                      className={`ml-auto shrink-0 font-mono text-[10px] ${
-                        elapsed - problemStartElapsedRef.current > PROBLEM_SOFT_BUDGET_S
-                          ? 'text-primary'
-                          : 'text-muted-foreground'
-                      }`}
-                      title="Suggested time for this problem (soft — only the overall interview limit hard-stops you)"
-                    >
-                      {formatTime(Math.max(0, elapsed - problemStartElapsedRef.current))} / 15:00
-                    </span>
-                    <span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-[9px] font-mono uppercase text-muted-foreground">
-                      {codingProblem.difficulty}
-                    </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {problemOpen ? '▾' : '▸'}
-                    </span>
-                  </button>
-                  {problemOpen && (
-                    <div className="max-h-[42vh] overflow-y-auto px-4 pb-3 text-sm text-foreground">
-                      <MarkdownMessage text={codingProblem.statement} />
-                      {codingProblem.examples.length > 0 && (
-                        <div className="mt-3 space-y-2">
-                          {codingProblem.examples.map((ex, i) => (
-                            <div
-                              key={i}
-                              className="rounded-md border border-border bg-surface-deep p-2 font-mono text-[11px]"
-                            >
-                              <div className="text-muted-foreground">Input</div>
-                              <pre className="whitespace-pre-wrap break-all text-foreground">
-                                {ex.input}
-                              </pre>
-                              <div className="mt-1 text-muted-foreground">Output</div>
-                              <pre className="whitespace-pre-wrap break-all text-foreground">
-                                {ex.output}
-                              </pre>
-                              {ex.explanation && (
-                                <div className="mt-1 text-muted-foreground">{ex.explanation}</div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {codingProblem.constraints && (
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          <span className="font-semibold">Constraints:</span>{' '}
-                          {codingProblem.constraints}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
+              {/* Transcript scroll area. (The coding problem no longer lives here — it's the
+                  ProblemDock split beside the editor, in the left pane.) */}
               <div className="flex-1 space-y-4 overflow-y-auto p-4">
                 {messages.map((msg, idx) => {
                   const isCandidate = msg.role === 'candidate';
