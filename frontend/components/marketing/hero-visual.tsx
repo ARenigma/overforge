@@ -19,8 +19,8 @@ const NOTES = [
 ] as const;
 
 function StaticFallback() {
-  // A quiet static rendition of the state turbine — five stacked ring stages on a shaft, the
-  // coding stage lit — for SSR + incapable devices. Same caption register as the live scene.
+  // A quiet static rendition of the wire-knot sculpture — three interleaved loops + the state
+  // marker — for SSR + incapable devices. Same caption register as the live scene.
   return (
     <div className="relative h-full w-full">
       <svg
@@ -33,55 +33,34 @@ function StaticFallback() {
           maskImage: 'radial-gradient(72% 72% at 50% 46%, black, transparent 92%)',
         }}
       >
-        <line
-          x1="240"
-          y1="60"
-          x2="240"
-          y2="345"
-          stroke="hsl(var(--foreground-ghost) / 0.5)"
-          strokeWidth="2"
+        <ellipse
+          cx="240"
+          cy="200"
+          rx="152"
+          ry="86"
+          transform="rotate(-18 240 200)"
+          stroke="hsl(var(--primary) / 0.9)"
+          strokeWidth="1.6"
         />
         <ellipse
           cx="240"
-          cy="105"
-          rx="104"
-          ry="26"
-          stroke="hsl(var(--foreground-ghost) / 0.55)"
-          strokeWidth="2.5"
+          cy="200"
+          rx="150"
+          ry="88"
+          transform="rotate(44 240 200)"
+          stroke="hsl(var(--primary) / 0.45)"
+          strokeWidth="1.3"
         />
         <ellipse
           cx="240"
-          cy="155"
-          rx="126"
-          ry="31"
-          stroke="hsl(var(--foreground-ghost) / 0.65)"
-          strokeWidth="2.5"
+          cy="200"
+          rx="146"
+          ry="84"
+          transform="rotate(-80 240 200)"
+          stroke="hsl(var(--primary) / 0.25)"
+          strokeWidth="1.1"
         />
-        <ellipse
-          cx="240"
-          cy="207"
-          rx="138"
-          ry="34"
-          stroke="hsl(var(--primary) / 0.95)"
-          strokeWidth="3"
-        />
-        <ellipse
-          cx="240"
-          cy="259"
-          rx="126"
-          ry="31"
-          stroke="hsl(var(--foreground-ghost) / 0.65)"
-          strokeWidth="2.5"
-        />
-        <ellipse
-          cx="240"
-          cy="308"
-          rx="104"
-          ry="26"
-          stroke="hsl(var(--foreground-ghost) / 0.45)"
-          strokeWidth="2.5"
-        />
-        <circle cx="378" cy="207" r="5.5" fill="hsl(var(--foreground) / 0.9)" />
+        <circle cx="380" cy="153" r="5" fill="hsl(var(--foreground) / 0.9)" />
       </svg>
       <div className="pointer-events-none absolute bottom-[4%] left-1/2 -translate-x-1/2 font-mono text-[10px] uppercase tracking-[0.16em] text-foreground-subtle">
         state 3 of 5 — <span className="text-primary">coding</span>

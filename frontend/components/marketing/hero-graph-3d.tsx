@@ -2,14 +2,13 @@
 
 import * as React from 'react';
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 
-/* The hero 3D system — the STATE TURBINE. Five machined rings on one axis, one per interview
- * state (invite → oral → coding → score → end, top to bottom); the active ring is lit ultramarine.
- * The rotor never spins freely: every few seconds it CLICKS 72° to the next detent with a spring
- * settle, and the light steps to the next ring. The rings are smooth CIRCLES (lathe-turned, not
- * faceted); the staggered detent beads are what make each 72° click legible as they sweep.
- * Glossy metal needs an environment; colors read from brand tokens so it tracks both themes. */
+/* The hero 3D system — "Five states. No improvisation." made kinetic. An ultramarine wireframe
+ * knot with exactly FIVE fixed configurations, one per interview state (invite → oral → coding →
+ * score → end). It never tweens freely: every few seconds it SNAPS to the next configuration with
+ * a fast spring settle — the "settle, don't float" law, and determinism made visible. Pure line
+ * rendering (no lights, no env map), so it's substantially lighter than the old glossy scene.
+ * Colors read from brand tokens so it tracks both themes; the wrapper capability-gates it. */
 
 function tokenColor(name: string, fallback: string): THREE.Color {
   if (typeof window === 'undefined') return new THREE.Color(fallback);
@@ -27,21 +26,50 @@ function tokenColor(name: string, fallback: string): THREE.Color {
 
 const STATES = ['invite', 'oral', 'coding', 'score', 'end'] as const;
 
-// The rotor: ring radius + height per state, tapered like a turbine stage stack.
-const RINGS: ReadonlyArray<{ R: number; y: number }> = [
-  { R: 1.28, y: 1.3 },
-  { R: 1.54, y: 0.65 },
-  { R: 1.7, y: 0 },
-  { R: 1.54, y: -0.65 },
-  { R: 1.28, y: -1.3 },
+// One torus knot per state — coprime (p,q) windings keep each a SINGLE closed curve (a different,
+// equally finite shape every time), with a silhouette + resting pose of its own.
+const CONFIGS: ReadonlyArray<{
+  p: number;
+  q: number;
+  R: number;
+  r: number;
+  z: number;
+  rot: readonly [number, number];
+}> = [
+  { p: 2, q: 3, R: 1.0, r: 0.42, z: 1.0, rot: [0.35, 0.0] },
+  { p: 3, q: 2, R: 0.95, r: 0.5, z: 1.15, rot: [0.12, 0.9] },
+  { p: 2, q: 5, R: 1.05, r: 0.34, z: 0.9, rot: [0.55, 1.8] },
+  { p: 3, q: 4, R: 0.9, r: 0.44, z: 1.05, rot: [0.08, 2.7] },
+  { p: 5, q: 2, R: 1.0, r: 0.48, z: 0.85, rot: [0.45, 3.6] },
 ];
 
-const CLICK_EVERY_MS = 3000;
-const CLICK_MS = 520;
-const STEP = (Math.PI * 2) / 5; // 72° — one fifth of a revolution per click (five states)
+const N = 720; // samples along the curve — smooth at hero size, trivial for a line draw
+const SIZE = 2.3; // world radius each knot is normalized to (uniform visual mass across states)
+const SNAP_EVERY_MS = 3000;
+const MORPH_MS = 650;
 
-// easeOutBack — fast attack, slight overshoot, decisive settle: the detent CLICK.
-function clickEase(u: number): number {
+function knotPositions(cfg: (typeof CONFIGS)[number]): Float32Array {
+  const raw: number[] = new Array(N * 3);
+  let max = 0;
+  for (let i = 0; i < N; i++) {
+    const t = (i / N) * Math.PI * 2;
+    const w = cfg.R + cfg.r * Math.cos(cfg.q * t);
+    const x = w * Math.cos(cfg.p * t);
+    const y = w * Math.sin(cfg.p * t);
+    const z = cfg.r * Math.sin(cfg.q * t) * cfg.z;
+    raw[i * 3] = x;
+    raw[i * 3 + 1] = y;
+    raw[i * 3 + 2] = z;
+    max = Math.max(max, Math.hypot(x, y, z));
+  }
+  const s = SIZE / max;
+  const out = new Float32Array(N * 3);
+  for (let i = 0; i < raw.length; i++) out[i] = raw[i] * s;
+  return out;
+}
+
+// easeOutBack — fast attack, a slight overshoot, then a decisive settle: the SNAP.
+function snapEase(u: number): number {
   const c1 = 1.70158;
   const c3 = c1 + 1;
   const v = u - 1;
@@ -63,8 +91,6 @@ export default function HeroGraph3D({ className }: { className?: string }) {
       powerPreference: 'high-performance',
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.05;
     mount.appendChild(renderer.domElement);
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
@@ -72,91 +98,54 @@ export default function HeroGraph3D({ className }: { className?: string }) {
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
-    camera.position.set(0, 0, 8.2);
-
-    // Studio environment — the machined-metal gloss.
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    camera.position.set(0, 0, 7.2);
 
     const primary = tokenColor('--primary', 'hsl(226, 100%, 62%)');
-    const steel = tokenColor('--foreground-ghost', 'hsl(0, 0%, 40%)');
 
     const group = new THREE.Group();
-    group.rotation.x = 0.42; // tilt the stack so the rings read as a 3D rotor
     scene.add(group);
 
-    // ── The rings — smooth lathe-turned tori, machined metal. ──
-    const ringMats: THREE.MeshPhysicalMaterial[] = [];
-    const rings: THREE.Mesh[] = [];
-    RINGS.forEach(({ R, y }, i) => {
-      const geo = new THREE.TorusGeometry(R, 0.055, 24, 96);
-      const mat = new THREE.MeshPhysicalMaterial({
-        color: steel.clone(),
-        metalness: 0.75,
-        roughness: 0.28,
-        clearcoat: 0.6,
-        clearcoatRoughness: 0.2,
+    // Pre-compute all five configurations once; morph between them by lerping ONE position buffer.
+    const targets = CONFIGS.map(knotPositions);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(targets[0].slice(), 3));
+    const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
+    const cur = posAttr.array as Float32Array;
+
+    // Three nested passes of the same curve — a bright core wire and two dimmer echoes — read as a
+    // drawn glow without any postprocessing.
+    const passes: Array<{ scale: number; color: THREE.Color; opacity: number }> = [
+      { scale: 1, color: primary.clone(), opacity: 0.95 },
+      { scale: 0.9, color: primary.clone().multiplyScalar(0.7), opacity: 0.4 },
+      { scale: 0.8, color: primary.clone().multiplyScalar(0.45), opacity: 0.22 },
+    ];
+    const materials: THREE.LineBasicMaterial[] = [];
+    for (const p of passes) {
+      const mat = new THREE.LineBasicMaterial({
+        color: p.color,
+        transparent: true,
+        opacity: p.opacity,
       });
-      ringMats.push(mat);
-      const ring = new THREE.Mesh(geo, mat);
-      ring.rotation.x = Math.PI / 2; // lay the ring flat on the axis
-      ring.rotation.z = i * 0.9; // stagger each stage's detent bead around the axis, blade-style
-      ring.position.y = y;
-      rings.push(ring);
-      group.add(ring);
+      materials.push(mat);
+      const line = new THREE.LineLoop(geometry, mat);
+      line.scale.setScalar(p.scale);
+      line.frustumCulled = false; // the buffer morphs in place — skip stale bounding-sphere culls
+      group.add(line);
+    }
 
-      // A detent bead per ring — makes the 72° click legible as the beads sweep.
-      const bead = new THREE.Mesh(
-        new THREE.SphereGeometry(0.075, 20, 20),
-        new THREE.MeshPhysicalMaterial({
-          color: new THREE.Color('#ededed'),
-          metalness: 0.2,
-          roughness: 0.15,
-          clearcoat: 1,
-        })
-      );
-      bead.position.set(R, 0.09, 0);
-      ring.add(bead); // parented to the ring so the stagger + rotor click carry it
-    });
-
-    // ── The axis — a thin machined shaft through the stack. ──
-    const axis = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.035, 0.035, 3.5, 24),
-      new THREE.MeshPhysicalMaterial({
-        color: steel.clone().multiplyScalar(0.8),
-        metalness: 0.85,
-        roughness: 0.3,
-      })
+    // The state marker — a small bright bead pinned to the curve's origin sample.
+    const marker = new THREE.Mesh(
+      new THREE.SphereGeometry(0.055, 20, 20),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color('#ededed') })
     );
-    group.add(axis);
+    group.add(marker);
 
-    // ── Lights — soft key + a brand rim so the active ring's emissive lifts. ──
-    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
-    const key = new THREE.DirectionalLight(0xffffff, 1.5);
-    key.position.set(3, 5, 4);
-    scene.add(key);
-    const rim = new THREE.DirectionalLight(primary.getHex(), 0.9);
-    rim.position.set(-4, -1, 2);
-    scene.add(rim);
-
-    // The active ring lights ultramarine; the rest are steel.
-    const setActive = (i: number) => {
-      ringMats.forEach((m, j) => {
-        const active = j === i;
-        m.color.copy(active ? primary.clone() : steel.clone());
-        m.emissive.copy(active ? primary.clone().multiplyScalar(0.45) : new THREE.Color(0));
-        m.metalness = active ? 0.4 : 0.75;
-        rings[j].scale.setScalar(active ? 1.05 : 1);
-      });
-    };
-    setActive(0);
-
-    // Pointer parallax — the rotor tilts gently toward the cursor (lerped, never jumpy).
+    // Pointer parallax — the sculpture tilts gently toward the cursor (lerped, never jumpy).
     const target = { x: 0, y: 0 };
     const onPointer = (e: PointerEvent) => {
       const r = mount.getBoundingClientRect();
       target.x = ((e.clientX - r.left) / r.width - 0.5) * 0.5;
-      target.y = ((e.clientY - r.top) / r.height - 0.5) * 0.35;
+      target.y = ((e.clientY - r.top) / r.height - 0.5) * 0.4;
     };
     window.addEventListener('pointermove', onPointer);
 
@@ -176,50 +165,58 @@ export default function HeroGraph3D({ className }: { className?: string }) {
     const io = new IntersectionObserver(([e]) => (running = e.isIntersecting));
     io.observe(mount);
 
-    // Click machinery: discrete detents; one in-flight click at a time.
+    // Snap machinery: discrete state index, one in-flight morph at a time.
     let idx = 0;
-    let lastClick = 0;
-    let clickStart: number | null = null;
-    let fromRot = 0;
-    let toRot = 0;
-    let rotorY = 0;
+    let lastSnap = 0;
+    let morphStart: number | null = null;
+    const from = new Float32Array(cur.length);
     let raf = 0;
     const clock = new THREE.Clock();
+
+    const applyMarker = () => marker.position.set(cur[0], cur[1], cur[2]);
+    applyMarker();
 
     const frame = () => {
       raf = requestAnimationFrame(frame);
       if (!running) return;
       const elapsed = clock.getElapsedTime() * 1000;
 
-      if (clickStart === null && elapsed - lastClick > CLICK_EVERY_MS) {
-        idx = (idx + 1) % STATES.length;
+      if (morphStart === null && elapsed - lastSnap > SNAP_EVERY_MS) {
+        idx = (idx + 1) % CONFIGS.length;
         setStateIdx(idx);
-        setActive(idx);
-        fromRot = rotorY;
-        toRot = rotorY + STEP;
-        clickStart = elapsed;
+        from.set(cur);
+        morphStart = elapsed;
       }
-      if (clickStart !== null) {
-        const u = Math.min(1, (elapsed - clickStart) / CLICK_MS);
-        rotorY = fromRot + (toRot - fromRot) * clickEase(u);
+      if (morphStart !== null) {
+        const u = Math.min(1, (elapsed - morphStart) / MORPH_MS);
+        const k = snapEase(u);
+        const to = targets[idx];
+        for (let j = 0; j < cur.length; j++) cur[j] = from[j] + (to[j] - from[j]) * k;
+        posAttr.needsUpdate = true;
+        applyMarker();
         if (u >= 1) {
-          rotorY = toRot;
-          clickStart = null;
-          lastClick = elapsed;
+          morphStart = null;
+          lastSnap = elapsed;
         }
       }
 
-      // The detent rotation + pointer parallax; NO free spin between clicks (deterministic).
-      group.rotation.y = rotorY + target.x;
-      group.rotation.x += (0.42 - target.y - group.rotation.x) * 0.05;
+      // Drift toward the state's resting pose + pointer parallax + a slow breath.
+      const cfg = CONFIGS[idx];
+      const ty = cfg.rot[1] * 0.22 + Math.sin(elapsed / 5200) * 0.14 + target.x;
+      const tx = cfg.rot[0] * 0.5 - target.y;
+      group.rotation.y += (ty - group.rotation.y) * 0.05;
+      group.rotation.x += (tx - group.rotation.x) * 0.05;
       renderer.render(scene, camera);
     };
 
     if (reduced) {
-      // One settled frame — the coding stage lit, rotor at rest.
+      // One settled frame — the coding configuration, no snapping.
       idx = 2;
       setStateIdx(2);
-      setActive(2);
+      cur.set(targets[2]);
+      posAttr.needsUpdate = true;
+      applyMarker();
+      group.rotation.set(CONFIGS[2].rot[0] * 0.5, CONFIGS[2].rot[1] * 0.22, 0);
       renderer.render(scene, camera);
     } else {
       raf = requestAnimationFrame(frame);
@@ -230,15 +227,11 @@ export default function HeroGraph3D({ className }: { className?: string }) {
       window.removeEventListener('pointermove', onPointer);
       ro.disconnect();
       io.disconnect();
-      pmrem.dispose();
       renderer.dispose();
-      scene.traverse((o) => {
-        if (o instanceof THREE.Mesh) {
-          o.geometry.dispose();
-          const m = o.material as THREE.Material | THREE.Material[];
-          Array.isArray(m) ? m.forEach((x) => x.dispose()) : m.dispose();
-        }
-      });
+      geometry.dispose();
+      materials.forEach((m) => m.dispose());
+      marker.geometry.dispose();
+      (marker.material as THREE.Material).dispose();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
     };
   }, []);
@@ -246,7 +239,7 @@ export default function HeroGraph3D({ className }: { className?: string }) {
   return (
     <div className={`relative ${className ?? ''}`}>
       <div ref={mountRef} aria-hidden="true" className="h-full w-full" />
-      {/* The state readout — the click made legible. Same mono-caps register as the annotations. */}
+      {/* The state readout — the snap made legible. Same mono-caps register as the annotations. */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute bottom-[4%] left-1/2 -translate-x-1/2 font-mono text-[10px] uppercase tracking-[0.16em] text-foreground-subtle"
