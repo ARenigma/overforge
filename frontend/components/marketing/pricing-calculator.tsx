@@ -3,9 +3,10 @@
 import * as React from 'react';
 import { SeamCard } from './seam-card';
 
-/* The pricing device — an INSTANT cost calculator (together.ai's unit-table register: every number
- * has a unit, savings shown in green, updates settle immediately — no spinner, no debounce).
- * Placeholder unit prices consistent with the tier cards; confirm before launch. */
+/* The pricing device — an INSTANT savings calculator (together.ai's unit-table register: every
+ * number has a unit, updates settle immediately — no spinner, no debounce). The NARRATIVE leads
+ * with what you save; what Finite costs is the supporting figure. The unit ladder still drives
+ * the math but is not displayed. Placeholder unit prices consistent with the tier cards. */
 
 const LADDER = [
   { upTo: 50, unit: 0.9 },
@@ -32,14 +33,9 @@ export function PricingCalculator() {
   return (
     <div className="mx-auto max-w-7xl px-6 pt-14">
       <SeamCard innerClassName="p-6 sm:p-8">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-8 gap-y-2">
-          <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
-            cost, computed — not &ldquo;from $X&rdquo;
-          </p>
-          <p className="font-mono text-[11px] text-foreground-ghost">
-            unit ladder: $0.90 → $0.60 → $0.45 / interview
-          </p>
-        </div>
+        <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-foreground-subtle">
+          savings, computed &mdash; not promised
+        </p>
 
         <div className="mt-6 grid items-end gap-8 lg:grid-cols-[1.1fr_1fr_1fr]">
           {/* Input */}
@@ -66,26 +62,27 @@ export function PricingCalculator() {
             </div>
           </div>
 
-          {/* Cost */}
+          {/* Savings — THE number. The narrative leads with what you get back. */}
           <div className="border-l border-border pl-8">
-            <span className="text-sm text-muted-foreground">Your cost</span>
-            <div className="mt-1 font-mono text-3xl font-medium tabular-nums text-foreground">
+            <span className="text-sm text-muted-foreground">You save</span>
+            <div className="mt-1 font-mono text-4xl font-bold tabular-nums text-success">
+              {money(Math.max(0, savedUsd))}
+              <span className="text-sm font-medium text-success/80"> /mo</span>
+            </div>
+            <p className="mt-1 font-mono text-[11px] text-success/80">
+              ≈ {Math.round(savedHours).toLocaleString('en-US')}h of engineer time returned
+            </p>
+          </div>
+
+          {/* What it costs — the supporting figure. */}
+          <div className="border-l border-border pl-8">
+            <span className="text-sm text-muted-foreground">What Finite costs</span>
+            <div className="mt-1 font-mono text-2xl font-medium tabular-nums text-foreground">
               {money(monthly)}
               <span className="text-sm text-foreground-subtle"> /mo</span>
             </div>
             <p className="mt-1 font-mono text-[11px] text-foreground-subtle">
               {money(unit)} per interview at this volume
-            </p>
-          </div>
-
-          {/* Savings — the green number */}
-          <div className="border-l border-border pl-8">
-            <span className="text-sm text-muted-foreground">Engineer time returned</span>
-            <div className="mt-1 font-mono text-3xl font-medium tabular-nums text-success">
-              {Math.round(savedHours).toLocaleString('en-US')}h
-            </div>
-            <p className="mt-1 font-mono text-[11px] text-success/80">
-              ≈ {money(Math.max(0, savedUsd))} /mo vs engineer-led screens
             </p>
           </div>
         </div>
