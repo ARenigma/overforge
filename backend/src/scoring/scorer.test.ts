@@ -67,3 +67,36 @@ describe('buildScoringPrompt level calibration', () => {
     expect(dflt).toContain('MID');
   });
 });
+
+describe('injection fencing in buildScoringPrompt (FIX 2)', () => {
+  test('a 50k-char transcript turn produces a prompt with a bounded length', () => {
+    const hugeText = 'x'.repeat(50_000);
+    const prompt = buildScoringPrompt({
+      transcript: [{ role: 'candidate', text: hugeText }],
+      codeRuns: [],
+    });
+    // The 2000-char cap per turn + fence overhead keeps the total well under 50k.
+    expect(prompt.length).toBeLessThan(10_000);
+  });
+
+  test('transcript turns are wrapped in CANDIDATE_DATA markers', () => {
+    const prompt = buildScoringPrompt({
+      transcript: [{ role: 'candidate', text: 'my answer to the question' }],
+      codeRuns: [],
+    });
+    expect(prompt).toContain('<<<CANDIDATE_DATA');
+    expect(prompt).toContain('CANDIDATE_DATA>>>');
+    expect(prompt).toContain('my answer to the question');
+  });
+
+  test('finalCode is wrapped in CANDIDATE_DATA markers', () => {
+    const prompt = buildScoringPrompt({
+      transcript: [],
+      codeRuns: [],
+      finalCode: 'def solution(): return 42',
+    });
+    expect(prompt).toContain('<<<CANDIDATE_DATA');
+    expect(prompt).toContain('CANDIDATE_DATA>>>');
+    expect(prompt).toContain('def solution(): return 42');
+  });
+});

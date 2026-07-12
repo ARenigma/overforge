@@ -1,9 +1,17 @@
 // Email sender implementation via Resend HTTP API.
-// If RESEND_API_KEY is absent, returns a no-op sender so dev/offline works.
+// If RESEND_API_KEY or RESEND_FROM is absent, returns a no-op sender so dev/offline works.
 
 import { EmailSender, EmailMessage } from './outbox';
 
 const RESEND_API = 'https://api.resend.com/emails';
+
+const _DISABLED_MSG =
+  '[email] DISABLED — RESEND_API_KEY/RESEND_FROM unset; candidate result emails are NOT being sent';
+
+// Warn once at module load-time so misconfigured deployments surface on startup.
+if (!process.env.RESEND_API_KEY || !process.env.RESEND_FROM) {
+  console.error(_DISABLED_MSG);
+}
 
 function makeResendSender(apiKey: string, from: string): EmailSender {
   return {
@@ -34,7 +42,8 @@ function makeResendSender(apiKey: string, from: string): EmailSender {
 function makeNoOpSender(): EmailSender {
   return {
     async send(msg: EmailMessage): Promise<void> {
-      console.log(`[email no-op] to=${msg.to} subject="${msg.subject}"`);
+      console.error(_DISABLED_MSG);
+      console.error(`[email no-op] to=${msg.to} subject="${msg.subject}" (not sent)`);
     },
   };
 }
@@ -42,9 +51,9 @@ function makeNoOpSender(): EmailSender {
 /** Returns the appropriate EmailSender based on environment configuration. */
 export function createEmailSender(): EmailSender {
   const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.RESEND_FROM ?? 'noreply@overforge.io';
+  const from = process.env.RESEND_FROM;
 
-  if (!apiKey) {
+  if (!apiKey || !from) {
     return makeNoOpSender();
   }
 

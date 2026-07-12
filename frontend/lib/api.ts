@@ -259,7 +259,7 @@ export async function answerInterview(
 
 /**
  * POST /api/interviews/:id/run
- * Executes the candidate's code via Judge0.
+ * Executes the candidate's code in the gVisor-sandboxed Docker executor.
  */
 export async function runCode(
   id: string,

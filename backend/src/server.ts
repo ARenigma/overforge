@@ -66,8 +66,12 @@ app.use((_req, res, next) => {
 // (anchored) regex is allowed, so per-deploy Vercel preview origins can reach this single backend
 // during MR E2E. credentials:true is preserved; the candidate token rides in the request body (not
 // a cookie), so an allowed preview origin gains no ambient cross-origin secret.
+// FORCE-ANCHOR the pattern: RegExp.test matches anywhere in the string, so an unanchored
+// `overforge-.*\.vercel\.app` would also match `https://overforge-x.vercel.app.attacker.com`.
+// Wrapping in ^(?:…)$ makes a loose env value safe by construction (existing anchors stripped
+// first, so an already-anchored pattern is unchanged in meaning).
 const previewRe: RegExp | null = process.env.CORS_PREVIEW_REGEX
-  ? new RegExp(process.env.CORS_PREVIEW_REGEX)
+  ? new RegExp(`^(?:${process.env.CORS_PREVIEW_REGEX.replace(/^\^/, '').replace(/\$$/, '')})$`)
   : null;
 if (process.env.NODE_ENV === 'production' && previewRe) {
   console.warn(

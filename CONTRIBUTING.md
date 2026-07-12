@@ -1,18 +1,20 @@
-# Contributing to overForge
+# Contributing to Finite
 
-> Monorepo for an AI-powered technical interview platform. PRs go through 3 regression gates before they can land.
+Monorepo for an autonomous AI technical interview platform. PRs go through regression
+gates locally (husky) and in CI (GitLab) before landing.
 
 ## Repository layout
 
 ```
 overforge/
-├── frontend/          # Next.js 14 (TypeScript)  — port 3000
-├── backend/           # Node.js/Express + Socket.IO  — port 5001
-├── ai_module/         # FastAPI (Python)  — port 9001
-├── setup/             # SQL migrations
-├── .github/           # Workflows, PR template, CODEOWNERS
-├── .husky/            # Git hooks (pre-commit, pre-push)
-├── package.json       # Root: workspaces + dev tooling
+├── frontend/          # Next.js App Router (TypeScript) — port 3000
+├── backend/           # Node.js/Express FSM + LLM + scorer — port 5001
+├── voice/             # FastAPI voice service (Python, uv-managed) — port 9001
+├── playwright/        # Playwright E2E harness
+├── deploy/            # docker-compose.yml, Caddy config, pull-runtimes.sh
+├── supabase/          # migrations/
+├── .husky/            # Git hooks (pre-commit: lint-staged; pre-push: tsc + jest)
+├── package.json       # Root npm workspace (backend + frontend); lint-staged config
 └── README.md
 ```
 
@@ -20,92 +22,55 @@ overforge/
 
 ```bash
 # 1. Clone
-git clone git@github.com:ARenigma/overforge.git
+git clone git@gitlab.com:overforge/overforge.git
 cd overforge
 
-# 2. Set up env files (NEVER commit the .env, only the .env.example)
-cp backend/.env.example   backend/.env
-cp frontend/.env.example  frontend/.env.local
-cp ai_module/.env.example ai_module/.env
-# then fill in the values
+# 2. Env files (never commit the real .env, only .env.example)
+cp backend/.env.example  backend/.env
+cp frontend/.env.example frontend/.env.local
 
-# 3. Install dependencies (root workspaces install both)
-npm install                # backend + frontend
-pip install -r ai_module/requirements.txt -r ai_module/requirements-dev.txt
+# 3. Install JS deps (root workspace hoists backend + frontend)
+npm ci
 
 # 4. Start services
-(cd backend   && npm run dev)   # http://localhost:5001
-(cd frontend  && npm run dev)   # http://localhost:3000
-(cd ai_module && python app.py) # http://localhost:9001
+(cd backend  && npm run dev)          # :5001
+(cd frontend && npm run dev)          # :3000
+
+# Voice service (optional)
+(cd voice && uv sync && uv run python ws_app.py)   # :9001
 ```
 
-## Regression gates — what's enforced and where
+## Gates
 
-| Gate | Local | CI | What it checks |
-|---|---|---|---|
-| Hygiene | `pre-push` | `hygiene` job | No real `.env` files, no `*_key.txt`, no `secrets/` tracked |
-| Prettier format | `pre-commit` | `lint` job | All staged files formatted |
-| ESLint | `pre-commit` (staged only) | `lint` job | Lint-staged on commit; full lint in CI |
-| Ruff (Python) | `pre-commit` (staged only) | `lint` job | pyflakes, isort, pyupgrade, bugbear, etc. |
-| TypeScript typecheck | `pre-push` | `build-frontend` job | `tsc --noEmit` |
-| Frontend build | — | `build-frontend` job | `next build` passes |
-| Backend jest | `pre-push` | `test-backend` job | All unit tests in `backend/src/services/__tests__/` |
-| AI module syntax | `pre-push` | `test-ai-smoke` job | `compileall` + import smoke |
-| Playwright E2E | — | `e2e` job (PR #4) | Full browser-driven E2E on every PR |
-
-## Workflow for a typical change
-
-```bash
-git checkout -b feat/my-change
-# ...edit code...
-git add -p                       # stage
-git commit -m "feat: ..."        # pre-commit runs prettier + ESLint/ruff --fix
-git push                         # pre-push runs jest + tsc + AI compileall
-# Open a PR on GitHub → CI runs full pipeline → you fix any red → merge
-```
-
-**Every commit must pass the local gates before it can be pushed.**
-**Every PR must pass CI before it can be merged** (branch protection will be enabled).
+| Gate | When | What it checks |
+|---|---|---|
+| Prettier + lint-staged | pre-commit | Format staged JS/TS/JSON/MD |
+| backend tsc + jest | pre-push | Type-check + all unit tests |
+| frontend tsc | pre-push | `tsc --noEmit` |
+| Repo hygiene | pre-push | No real `.env` files tracked |
+| Full CI pipeline | GitLab MR | Build, lint, test, E2E |
 
 ## Coding conventions
 
-### Frontend (Next.js / TS)
-- 2-space indent, single quotes, semicolons (Prettier default)
-- Component files use PascalCase, hooks use `useFoo` camelCase
-- Avoid `any`; use `unknown` + narrowing when type is unclear
-- Server-side secrets in `BACKEND_URL` / `SUPABASE_SERVICE_ROLE_KEY`; client-safe keys must be prefixed `NEXT_PUBLIC_`
+### Frontend (Next.js / TypeScript)
+- 2-space indent, single quotes, semicolons (Prettier)
+- `NEXT_PUBLIC_` prefix for any client-exposed env var
+- No `any`; use `unknown` + narrowing
 
-### Backend (Node / Express)
-- CommonJS `require` (existing codebase, don't migrate to ESM piecemeal)
+### Backend (Node / Express / TypeScript)
+- ESM (`import`/`export`) — do not mix with `require`
 - 2-space indent, single quotes, semicolons
-- Always add a test for new services in `backend/src/services/__tests__/`
-- Mock Supabase / Docker in tests — never hit real infra
+- New services need a Jest test in `backend/src/<module>/<module>.test.ts`
+- Mock Supabase and Docker in tests — never hit real infra
 
-### AI module (FastAPI)
-- Python 3.11, ruff format
-- All env access through `AIConfig` class in `config.py`
-- New endpoints: add Pydantic models for request/response
-- Don't write tests that hit real APIs — those go in `ai_module/test_*.py` as manual scripts, not in `tests/`
+### Voice service (FastAPI / Python)
+- `uv` for package management — `uv add <pkg>`, never bare `pip`
+- `ruff check --fix` before committing
+- New endpoints need a Pydantic model for request + response
 
 ## What NOT to do
 
-- ❌ Commit a real `.env` file (CI will block the PR)
-- ❌ Skip the pre-push hook with `--no-verify` (CI will catch what you skipped)
-- ❌ Add a `*_key.txt` file at any path (the new gitignore will block it)
-- ❌ Bump major deps without opening an issue first
-- ❌ Edit `.specstory/` files manually — they're auto-generated by Cursor
-
-## Setting up branch protection (one-time, admin only)
-
-After this PR merges:
-
-1. GitHub → Settings → Branches → Add rule
-2. Branch name pattern: `main`
-3. ✅ Require a pull request before merging
-4. ✅ Require approvals: 1
-5. ✅ Require status checks to pass: select `CI gate`, `Lint`, `Backend tests (jest)`, `Frontend build + typecheck`
-6. ✅ Require linear history
-7. ✅ Do not allow force pushes
-8. Save
-
-After this, **no PR can be merged unless all gates pass**.
+- Do not commit a real `.env` file (the pre-push hook will block it)
+- Do not skip hooks with `--no-verify`
+- Do not add `*_key.txt` files at any path
+- Do not bump major deps without opening an issue first

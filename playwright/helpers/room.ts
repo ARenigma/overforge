@@ -241,11 +241,22 @@ export class CandidateRoom {
     return (await el.getAttribute('data-concluded-by-time')) === 'true';
   }
 
-  /** Leak invariant: the candidate view must never surface hidden-test pass/fail counts. */
+  /**
+   * Leak invariant: the candidate view must never surface hidden-test counts or content.
+   *
+   * Distinction:
+   *   - LEAK: pass/fail counts, raw test-case data, or internal summary tokens
+   *     (e.g. "[hidden tests: 3/8]", "referencepython", "tests passed").
+   *   - NOT a leak: the interviewer mentioning that hidden tests exist in conversation
+   *     (e.g. "...causing the hidden tests to fail") — that's legitimate interviewer speech.
+   *
+   * Needles target content/counts, not the phrase "hidden tests" itself.
+   */
   async assertNoHiddenTestLeak(): Promise<void> {
     const body = (await this.page.locator('body').innerText()).toLowerCase();
     for (const needle of [
-      'hidden test',
+      '[hidden tests:', // internal scorer/run summary format
+      'referencepython', // lowercased reference solution body
       'tests passed',
       'tests failed',
       '/ 8 tests',

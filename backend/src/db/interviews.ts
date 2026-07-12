@@ -244,6 +244,34 @@ export async function appendCodeRunOnly(id: string, run: RunResult): Promise<voi
   if (error) throw new Error(`appendCodeRunOnly: ${error.message}`);
 }
 
+/** Atomically claim an invited interview for begin (single-flight CAS). Sets status to
+ *  'in_progress' AND writes the rotated session-token + T&C fields in one UPDATE WHERE
+ *  status='invited'. Returns true only for the caller that performed the flip; a concurrent
+ *  /begin caller that races here will find the row already transitioned and gets false.
+ *
+ *  This closes the double-begin race: two concurrent requests both pass the optimistic
+ *  `status !== 'invited'` read, but only one can win the CAS — the loser's session token is
+ *  never persisted, so there is no window for session theft via a forwarded invite link. */
+export async function claimBegin(
+  id: string,
+  patch: {
+    tnc_accepted_at: string;
+    tnc_version: string;
+    access_token_hash: string;
+    token_expires_at: string;
+  }
+): Promise<boolean> {
+  const db = createServiceClient();
+  const { data, error } = await db
+    .from('interviews')
+    .update({ status: 'in_progress' as InterviewStatus, ...patch })
+    .eq('id', id)
+    .eq('status', 'invited')
+    .select('id');
+  if (error) throw new Error(`claimBegin: ${error.message}`);
+  return !!data && data.length > 0;
+}
+
 /** Atomically claim an in-progress interview for scoring (single-flight). Returns true only
  *  for the caller that flipped status in_progress -> completed; concurrent callers get false. */
 export async function claimForScoring(id: string): Promise<boolean> {

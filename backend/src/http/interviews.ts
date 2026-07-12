@@ -8,7 +8,8 @@ import { enforceRateLimit } from './rate-limit';
 import { hashToken } from '../interview/token';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
-import { recordVoiceTurn, recordProctorSignal } from '../db/interviews';
+import { getById, recordVoiceTurn, recordProctorSignal } from '../db/interviews';
+import { IDLE_PROBE_LINES, validateSpeakText } from './speak-validation';
 import { recordTtsCost } from '../cost/ledger';
 import {
   synthesize,
@@ -21,6 +22,61 @@ import {
 const router = Router();
 
 const MAX_SOURCE_BYTES = 64 * 1024;
+
+// Re-export IDLE_PROBE_LINES so callers can reference the canonical set without importing
+// speak-validation directly (keeps the public surface of this router module consistent).
+export { IDLE_PROBE_LINES };
+
+/**
+ * Resolve the text to synthesise for /speak and /speak-stream.
+ *
+ * When the client supplies a `providedText`, it is accepted ONLY when it exactly matches
+ * (trimmed) one of:
+ *   (a) the latest interviewer transcript turn,
+ *   (b) the latest run-hint intervention text, or
+ *   (c) one of the voice idle-probe lines (voice-only, never persisted).
+ *
+ * This prevents the route from being used as a free TTS oracle (Cartesia credit abuse) and
+ * enforces the server-authoritative invariant that only the server can decide what gets spoken.
+ *
+ * When no `providedText` is supplied, falls back to the server's latest speakable utterance
+ * (original behaviour).
+ *
+ * Throws 409 for cancelled/expired interviews; 422 on a text mismatch.
+ */
+async function resolveSpeakText(
+  id: string,
+  providedText: unknown,
+  source: 'turn' | 'run'
+): Promise<string | null> {
+  if (typeof providedText !== 'string' || !providedText.trim()) {
+    // No client text — fall back to the server-side latest speakable (original behaviour).
+    return orchestrator.latestSpeakable(id, source);
+  }
+
+  const trimmed = providedText.trim();
+
+  // Fetch the interview to verify status and extract the server-authoritative reference texts.
+  const interview = await getById(id);
+  if (!interview) {
+    throw Object.assign(new Error(`Interview ${id} not found`), { status: 404 });
+  }
+
+  const turnText =
+    [...(interview.transcript ?? [])]
+      .reverse()
+      .find((t) => t.role === 'interviewer')
+      ?.text?.trim() ?? null;
+  const runText =
+    [...(interview.code_runs ?? [])]
+      .reverse()
+      .find((r) => r.intervention?.text?.trim())
+      ?.intervention?.text?.trim() ?? null;
+
+  // Throws 409 / 422 on rejection; logs length (never the text itself — candidate-influenced).
+  validateSpeakText(trimmed, interview.status, turnText, runText);
+  return trimmed;
+}
 
 /** Helper: send a structured error response. */
 function sendError(res: Response, err: unknown): void {
@@ -350,13 +406,12 @@ router.post('/:id/speak', async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    // Prefer the exact utterance the turn cue carried (authoritative for THIS turn — and the only
-    // way to voice the voice-service-only idle probe, which is never persisted). Fall back to the
-    // latest interviewer turn / run-hint when no text is supplied (e.g. the run-hint path).
-    const text =
-      typeof providedText === 'string' && providedText.trim()
-        ? providedText.slice(0, 2000)
-        : await orchestrator.latestSpeakable(id, source === 'run' ? 'run' : 'turn');
+    // Resolve + validate the text to speak. `resolveSpeakText` accepts the client-supplied text
+    // only when it exactly matches a server-authoritative utterance (latest transcript turn, run
+    // hint, or a voice idle-probe line); otherwise it falls back to the server's latest speakable.
+    // Throws 409 for cancelled/expired or 422 on a text mismatch — preventing this route from
+    // being used as a free Cartesia TTS oracle.
+    const text = await resolveSpeakText(id, providedText, source === 'run' ? 'run' : 'turn');
     if (!text) {
       res.status(404).json({ error: 'Nothing to speak yet.' });
       return;
@@ -416,13 +471,10 @@ router.post('/:id/speak-stream', async (req: Request, res: Response): Promise<vo
       return;
     }
 
-    // Prefer the exact utterance the turn cue carried (authoritative for THIS turn — and the only
-    // way to voice the voice-service-only idle probe, which is never persisted). Fall back to the
-    // latest interviewer turn / run-hint when no text is supplied.
-    const text =
-      typeof providedText === 'string' && providedText.trim()
-        ? providedText.slice(0, 2000)
-        : await orchestrator.latestSpeakable(id, source === 'run' ? 'run' : 'turn');
+    // Resolve + validate the text to speak — same validation as /speak: accepts client text only
+    // when it matches a server utterance or a voice idle-probe line; falls back to the server's
+    // latest speakable when no text is provided. Throws 409/422 on rejection.
+    const text = await resolveSpeakText(id, providedText, source === 'run' ? 'run' : 'turn');
     if (!text) {
       res.status(404).json({ error: 'Nothing to speak yet.' });
       return;
@@ -490,6 +542,7 @@ router.post('/:id/finish', async (req: Request, res: Response): Promise<void> =>
     const { token } = req.body as { token?: string };
 
     await validateCandidate(id, token ?? '');
+    await enforceRateLimit(`finish:${hashToken(token ?? '')}`, { limit: 10, windowMs: 600_000 });
 
     await orchestrator.finishAndScore(id);
     res.json({ ok: true });

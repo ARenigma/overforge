@@ -59,6 +59,15 @@ jest.mock('../db/interviews', () => {
         row.code_language = language;
       }
     ),
+    claimBegin: jest.fn(async (id: string, patch: Record<string, unknown>) => {
+      const row = store.get(id) as { status?: string } | undefined;
+      if (row && row.status === 'invited') {
+        row.status = 'in_progress';
+        Object.assign(row, patch);
+        return true;
+      }
+      return false;
+    }),
     claimForScoring: jest.fn(async (id: string) => {
       const row = store.get(id) as { status?: string } | undefined;
       if (row && row.status === 'in_progress') {
@@ -171,6 +180,9 @@ describe('orchestrator end-to-end (offline)', () => {
     expect(row.status).toBe('scored');
     expect(row.evaluation_score).toBeTruthy();
     expect(db.__outbox).toContain(id);
+    // FIX 4: fsm_state.phase must equal 'done' after scoring (was diverging from the `phase`
+    // column when finishAndScore only wrote `phase` but not `fsm_state`).
+    expect((row.fsm_state as { phase: string }).phase).toBe('done');
 
     // Events were recorded for replay (transitions, utterances, answers, score).
     const kinds = new Set(
@@ -187,6 +199,10 @@ describe('orchestrator end-to-end (offline)', () => {
       candidateEmail: 'c3@example.com',
     });
     await orch.begin(id, { tncAccepted: true });
+
+    // FIX 3: recordRun now requires phase='coding'. Drive greeting→oral→oral→handoff→coding
+    // with long answers (DeterministicOracle advances without follow-ups at >120 chars).
+    for (let i = 0; i < 4; i++) await orch.submitAnswer(id, longAnswer);
 
     const result = await orch.recordRun(id, { language: 'python', source: 'print(1)\n' });
     expect(result.status).toBe('Accepted');
@@ -343,6 +359,77 @@ describe('orchestrator end-to-end (offline)', () => {
       candidateEmail: 'c2@example.com',
     });
     await expect(orch.begin(id, { tncAccepted: false })).rejects.toThrow(/T&C/);
+  });
+
+  // ── FIX 1: submitAnswer mutex — both concurrent answers land in the transcript ─────────────
+
+  test('submitAnswer: two concurrent calls serialize so both candidate turns land in the final transcript', async () => {
+    const { id } = await orch.createInterview({
+      interviewerId: 'uL1',
+      candidateEmail: 'lock@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true });
+
+    // Fire two concurrent submitAnswer calls with distinct requestIds and answers. Without the
+    // per-interview lock, both would read the same stale interview (greeting phase), and the
+    // second write would overwrite the first caller's candidate turn + FSM transition. With the
+    // lock they serialise: the second reads the updated transcript and both turns persist.
+    const [r1, r2] = await Promise.all([
+      orch.submitAnswer(id, 'answer-one', 'req-lock-1'),
+      orch.submitAnswer(id, 'answer-two', 'req-lock-2'),
+    ]);
+
+    expect(r1.utterance.text).toBeTruthy();
+    expect(r2.utterance.text).toBeTruthy();
+
+    const row = (await db.getById(id)) as { transcript: Array<{ role: string; text: string }> };
+    const candidateTurns = row.transcript.filter((t) => t.role === 'candidate');
+    expect(candidateTurns.some((t) => t.text === 'answer-one')).toBe(true);
+    expect(candidateTurns.some((t) => t.text === 'answer-two')).toBe(true);
+  });
+
+  // ── FIX 2: begin CAS — the race loser gets 409, not a silently stolen session token ────────
+
+  test('begin: claimBegin CAS lets the first caller win; the second gets 409', async () => {
+    const { id } = await orch.createInterview({
+      interviewerId: 'uB1',
+      candidateEmail: 'begin-race@example.com',
+    });
+
+    // Override: first call wins (true), second call loses (false). The order is determined by
+    // which Promise.all branch reaches claimBegin first — both outcomes are tested below.
+    db.claimBegin.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+    const [r1, r2] = await Promise.allSettled([
+      orch.begin(id, { tncAccepted: true }),
+      orch.begin(id, { tncAccepted: true }),
+    ]);
+
+    // Exactly one succeeds and one rejects with 409.
+    const results = [r1, r2];
+    expect(results.filter((r) => r.status === 'fulfilled').length).toBe(1);
+    expect(results.filter((r) => r.status === 'rejected').length).toBe(1);
+    const loser = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect(loser.reason).toMatchObject({ status: 409 });
+  });
+
+  // ── FIX 3: recordRun phase gate — 409 during oral, allowed only in coding ─────────────────
+
+  test('recordRun rejects with 409 when phase is oral (not coding)', async () => {
+    const { id } = await orch.createInterview({
+      interviewerId: 'uR1',
+      candidateEmail: 'run-oral@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true });
+
+    // One longAnswer advances greeting → oral (asks oral Q0). Phase is now 'oral'.
+    const oral = await orch.submitAnswer(id, longAnswer);
+    expect(oral.phase).toBe('oral');
+
+    // recordRun must refuse: code runs are only valid in the coding round.
+    await expect(
+      orch.recordRun(id, { language: 'python', source: 'print(1)' })
+    ).rejects.toMatchObject({ status: 409, message: 'Code runs open in the coding round.' });
   });
 
   test('autonomous intervention: repeated failing runs trigger a bounded hint, never advancing the FSM', async () => {

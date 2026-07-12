@@ -85,8 +85,12 @@ def smart_turn_session():
 @pytest.fixture(scope="session")
 def buckeye_turns():
     log.info("Fetching %d Buckeye turns …", _N_TURNS)
-    turns = fetch_turns(n_turns=_N_TURNS)
-    assert turns, "No Buckeye turns found — check /Users/amit.ranjan/overforge/recordings/"
+    try:
+        turns = fetch_turns(n_turns=_N_TURNS)
+    except FileNotFoundError:
+        pytest.skip("recordings/ not present — local-only bench (add Buckeye audio to run)")
+    if not turns:
+        pytest.skip("recordings/ present but empty — local-only bench")
     log.info("Fetched %d turns.", len(turns))
     return turns
 

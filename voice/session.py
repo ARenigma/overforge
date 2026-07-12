@@ -63,6 +63,7 @@ _MAX_TURN_S = 120.0
 # Idle probe (assemblyai path only). If no speech from the candidate within this window after
 # the mic is armed, the interviewer probes once with a warm canned nudge, then keeps listening.
 _IDLE_PROBE_S = 10.0
+# SYNC: These strings are mirrored in backend/src/http/speak-validation.ts IDLE_PROBE_LINES. Keep both in lockstep.
 _IDLE_PROBE_LINES = (
     "Take your time — would you like me to rephrase the question?",
     "No rush — want me to restate it or give you a moment?",
