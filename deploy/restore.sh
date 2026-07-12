@@ -13,8 +13,9 @@
 # Environment variables:
 #   SUPABASE_DB_URL — required; full libpq connection string from backend.env
 #
-# pg_restore client version note: same constraint as backup.sh — client major
-# must be >= server major (Supabase is PG15+). Install postgresql-client-15+.
+# pg_restore client version note: same constraint as backup.sh — client major must be
+# >= server major. This project is PG17; install postgresql-client-17 from the PGDG apt
+# repo (Ubuntu 24.04 default repos stop at 16). See backup.sh header for the exact commands.
 set -euo pipefail
 
 # Robust env self-load (no `source` — backend.env holds shell metacharacters). Skipped

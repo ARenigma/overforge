@@ -16,11 +16,13 @@
 #   BACKUP_R2_REMOTE — optional rclone remote:path for offsite copy (e.g. r2:overforge-backups)
 #
 # pg_dump client version note:
-#   The client's MAJOR version must be >= the server's MAJOR version, or pg_dump will
-#   refuse with a "server version mismatch" error. Supabase runs PG15+.
-#   Install the right client on the VPS:
-#     Ubuntu/Debian : apt-get install -y postgresql-client-15
-#     Amazon Linux 2: amazon-linux-extras install postgresql15
+#   The client's MAJOR version must be >= the server's MAJOR version, or pg_dump refuses
+#   with "server version mismatch". This Supabase project is PG17 — and Ubuntu 24.04's
+#   default repos only ship postgresql-client-16, so install 17 from the PostgreSQL apt repo:
+#     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+#     echo "deb https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release; echo $VERSION_CODENAME)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+#     sudo apt-get update && sudo apt-get install -y postgresql-client-17
+#   (pg_wrapper then selects 17 for the bare `pg_dump`/`pg_restore` commands.)
 set -euo pipefail
 
 # ── robust env self-load (no `source`) ───────────────────────────────────────
