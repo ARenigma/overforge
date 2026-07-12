@@ -7,8 +7,8 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 /* The hero 3D system — the STATE TURBINE. Five machined rings on one axis, one per interview
  * state (invite → oral → coding → score → end, top to bottom); the active ring is lit ultramarine.
  * The rotor never spins freely: every few seconds it CLICKS 72° to the next detent with a spring
- * settle, and the light steps to the next ring. Each ring is a PENTAGONAL torus (5 flat facets),
- * so one click advances exactly one facet — the five-states motif machined into the geometry.
+ * settle, and the light steps to the next ring. The rings are smooth CIRCLES (lathe-turned, not
+ * faceted); the staggered detent beads are what make each 72° click legible as they sweep.
  * Glossy metal needs an environment; colors read from brand tokens so it tracks both themes. */
 
 function tokenColor(name: string, fallback: string): THREE.Color {
@@ -38,7 +38,7 @@ const RINGS: ReadonlyArray<{ R: number; y: number }> = [
 
 const CLICK_EVERY_MS = 3000;
 const CLICK_MS = 520;
-const STEP = (Math.PI * 2) / 5; // 72° — one facet of the pentagonal ring per click
+const STEP = (Math.PI * 2) / 5; // 72° — one fifth of a revolution per click (five states)
 
 // easeOutBack — fast attack, slight overshoot, decisive settle: the detent CLICK.
 function clickEase(u: number): number {
@@ -85,23 +85,22 @@ export default function HeroGraph3D({ className }: { className?: string }) {
     group.rotation.x = 0.42; // tilt the stack so the rings read as a 3D rotor
     scene.add(group);
 
-    // ── The rings — pentagonal tori (5 tubular segments = 5 flat facets), machined metal. ──
+    // ── The rings — smooth lathe-turned tori, machined metal. ──
     const ringMats: THREE.MeshPhysicalMaterial[] = [];
     const rings: THREE.Mesh[] = [];
     RINGS.forEach(({ R, y }, i) => {
-      const geo = new THREE.TorusGeometry(R, 0.055, 12, 5);
+      const geo = new THREE.TorusGeometry(R, 0.055, 24, 96);
       const mat = new THREE.MeshPhysicalMaterial({
         color: steel.clone(),
         metalness: 0.75,
         roughness: 0.28,
         clearcoat: 0.6,
         clearcoatRoughness: 0.2,
-        flatShading: true,
       });
       ringMats.push(mat);
       const ring = new THREE.Mesh(geo, mat);
       ring.rotation.x = Math.PI / 2; // lay the ring flat on the axis
-      ring.rotation.z = i * 0.22; // stagger the facets per stage, turbine-blade style
+      ring.rotation.z = i * 0.9; // stagger each stage's detent bead around the axis, blade-style
       ring.position.y = y;
       rings.push(ring);
       group.add(ring);
