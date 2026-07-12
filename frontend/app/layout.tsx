@@ -9,6 +9,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { Toaster as SonnerToaster } from 'sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { CommandMenuProvider } from '@/components/providers/command-menu-provider';
+import { SentryInit } from '@/components/sentry-init';
 
 export const metadata: Metadata = {
   metadataBase: new URL(
@@ -70,6 +71,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               }}
             />
             <CommandMenuProvider />
+            <SentryInit />
           </ThemeProvider>
         </body>
       </html>
