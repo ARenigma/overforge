@@ -15,6 +15,9 @@ const nextConfig = {
     // Tree-shake heavy barrel imports so dev doesn't compile the entire set
     // (react-icons ships ~3k icons; importing a few should not bundle them all).
     optimizePackageImports: ['react-icons', 'react-icons/si'],
+    // Enable the instrumentation.ts hook (Next.js 14.0.x — became stable in 14.1).
+    // Required for Sentry initialisation via register(); harmless when DSN is unset.
+    instrumentationHook: true,
   },
   async headers() {
     return [

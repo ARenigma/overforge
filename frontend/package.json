@@ -12,6 +12,7 @@
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@sentry/nextjs": "^8.0.0",
     "@babel/runtime": "latest",
     "@codemirror/lang-cpp": "latest",
     "@codemirror/lang-java": "latest",

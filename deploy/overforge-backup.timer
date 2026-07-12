@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Overforge nightly Postgres backup at 03:30 UTC
+
+[Timer]
+# Daily at 03:30 UTC.
+OnCalendar=*-*-* 03:30:00 UTC
+# If the host was offline when the trigger fired, run as soon as it comes back up.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

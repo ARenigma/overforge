@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Overforge uptime check every 2 minutes
+
+[Timer]
+OnCalendar=*:0/2
+# AccuracySec keeps timer jitter low so checks are close to the 2-min boundary.
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

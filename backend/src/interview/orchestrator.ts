@@ -30,6 +30,7 @@ import {
   getById,
   updateInterview,
   deleteInterview as dbDeleteInterview,
+  deleteInterviewsOlderThan,
   appendEvent,
   appendCodeRun,
   appendCodeRunOnly,
@@ -42,6 +43,7 @@ import {
   makeOutboxStore,
   getProctorSignalsForInterview,
   Interview,
+  InterviewStatus,
 } from '../db/interviews';
 import { createDockerKernel } from '../execution/docker';
 import { RunRequest, RunResult } from '../execution/types';
@@ -1386,4 +1388,37 @@ export async function closeStaleInterviews(): Promise<{ noShow: number; conclude
     }
   }
   return { noShow, concluded };
+}
+
+// ─────────────────────── Data-retention purge ───────────────────────
+
+/**
+ * Terminal statuses eligible for hard-deletion.  'in_progress' and 'invited' are
+ * explicitly excluded — they belong to active or imminent candidate sessions.
+ * 'completed' is a transitional state (in_progress → scored); leaving it out is
+ * a safety net in case a scoring job is mid-flight on a very slow scorer.
+ */
+const PURGEABLE_STATUSES: InterviewStatus[] = ['scored', 'cancelled', 'expired', 'abandoned'];
+
+/**
+ * Hard-delete interviews that are both (a) in a terminal status and (b) older than
+ * retentionDays (measured from created_at, the safe lower-bound timestamp that is
+ * always non-null).
+ *
+ * All child rows are covered by ON DELETE CASCADE (confirmed in migrations 0001,
+ * 0010, 0011): interview_events, notify_outbox, voice_turn_telemetry, and
+ * proctor_signals are all deleted automatically by the single interview DELETE.
+ *
+ * Env vars consumed:
+ *   RETENTION_DAYS — integer number of days to retain (default: 90)
+ *
+ * Called by the scheduled purge job in server.ts; also exported for ad-hoc use.
+ */
+export async function purgeExpiredData(
+  retentionDays = Number(process.env.RETENTION_DAYS ?? 90)
+): Promise<{ interviews: number }> {
+  const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  const cutoffIso = new Date(cutoffMs).toISOString();
+  const interviews = await deleteInterviewsOlderThan(cutoffIso, PURGEABLE_STATUSES);
+  return { interviews };
 }

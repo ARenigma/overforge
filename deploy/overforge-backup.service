@@ -1,0 +1,18 @@
+[Unit]
+Description=Overforge nightly Postgres backup
+Documentation=file:///home/ubuntu/overforge/docs/RUNBOOK.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Adjust WorkingDirectory and EnvironmentFile paths if the repo is cloned
+# to a location other than /home/ubuntu/overforge on the VPS.
+WorkingDirectory=/home/ubuntu/overforge
+EnvironmentFile=/home/ubuntu/overforge/deploy/backend.env
+ExecStart=/bin/bash /home/ubuntu/overforge/deploy/backup.sh
+StandardOutput=journal
+StandardError=journal
+# A non-zero exit from backup.sh (e.g. pg_dump failure, missing env var) causes
+# systemd to record the unit as 'failed', which shows up in `systemctl status`
+# and can be monitored via alerting on unit-failed events.

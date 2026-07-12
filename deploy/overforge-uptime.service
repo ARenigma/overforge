@@ -1,0 +1,19 @@
+[Unit]
+Description=Overforge uptime check (backend /health + frontend)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Adjust paths if the repo lives outside /home/ubuntu/overforge.
+WorkingDirectory=/home/ubuntu/overforge
+# ALERT_WEBHOOK must be set here or appended to backend.env.
+# backend.env is sourced so BACKEND_URL / FRONTEND_URL overrides are also honoured.
+EnvironmentFile=/home/ubuntu/overforge/deploy/backend.env
+# Override defaults if the public endpoint differs from the sslip.io address.
+# Environment=BACKEND_URL=https://140.245.14.50.sslip.io
+# Environment=FRONTEND_URL=https://overforge.vercel.app
+# Environment=ALERT_WEBHOOK=https://hooks.slack.com/services/XXX/YYY/ZZZ
+ExecStart=/bin/bash /home/ubuntu/overforge/deploy/uptime-check.sh
+StandardOutput=journal
+StandardError=journal

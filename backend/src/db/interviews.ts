@@ -166,6 +166,35 @@ export async function deleteInterview(id: string): Promise<void> {
   if (error) throw new Error(`deleteInterview: ${error.message}`);
 }
 
+/**
+ * Hard-delete all interviews whose created_at is before cutoffIso AND whose status
+ * is one of the supplied terminal statuses.
+ *
+ * CASCADE behaviour (confirmed in migrations):
+ *   - interview_events      — ON DELETE CASCADE (migration 0001)
+ *   - notify_outbox         — ON DELETE CASCADE (migration 0001)
+ *   - voice_turn_telemetry  — ON DELETE CASCADE (migration 0010)
+ *   - proctor_signals       — ON DELETE CASCADE (migration 0011)
+ * No explicit child-row cleanup is required; the single interview delete covers all.
+ *
+ * Returns the number of rows deleted.
+ */
+export async function deleteInterviewsOlderThan(
+  cutoffIso: string,
+  statuses: InterviewStatus[]
+): Promise<number> {
+  const db = createServiceClient();
+  const { error, count } = await db
+    .from('interviews')
+    .delete({ count: 'exact' })
+    .lt('created_at', cutoffIso)
+    .in('status', statuses);
+  if (error) throw new Error(`deleteInterviewsOlderThan: ${error.message}`);
+  const deleted = count ?? 0;
+  console.log(`[purge] deleted ${deleted} interview(s) created before ${cutoffIso}`);
+  return deleted;
+}
+
 /** Append one event row with a monotonically increasing seq per interview.
  *  Retries once on unique-seq collision (concurrent writers). */
 export async function appendEvent(

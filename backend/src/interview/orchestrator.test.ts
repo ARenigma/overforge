@@ -106,6 +106,28 @@ jest.mock('../db/interviews', () => {
       markSent: async () => {},
       markFailed: async () => {},
     })),
+    /**
+     * In-memory implementation of deleteInterviewsOlderThan.
+     * Only deletes rows where created_at is a string (tests that need purging set it
+     * explicitly) — rows without created_at are left untouched, which keeps all
+     * pre-existing test fixtures safe from accidental purge.
+     */
+    deleteInterviewsOlderThan: jest.fn(async (cutoffIso: string, statuses: string[]) => {
+      let count = 0;
+      for (const [id, row] of store.entries()) {
+        const r = row as { status?: string; created_at?: string };
+        if (
+          r.status !== undefined &&
+          statuses.includes(r.status) &&
+          typeof r.created_at === 'string' &&
+          r.created_at < cutoffIso
+        ) {
+          store.delete(id);
+          count++;
+        }
+      }
+      return count;
+    }),
   };
 });
 
@@ -430,6 +452,63 @@ describe('orchestrator end-to-end (offline)', () => {
     await expect(
       orch.recordRun(id, { language: 'python', source: 'print(1)' })
     ).rejects.toMatchObject({ status: 409, message: 'Code runs open in the coding round.' });
+  });
+
+  // ── TASK 1: purgeExpiredData — retention purge ────────────────────────────────────────────
+
+  describe('purgeExpiredData', () => {
+    /** Convenience: build an ISO timestamp offset from now. */
+    const daysAgo = (n: number): string =>
+      new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
+    test('hard-deletes a scored interview older than the retention cutoff', async () => {
+      const { id } = await orch.createInterview({
+        interviewerId: 'uPurge1',
+        candidateEmail: 'old-scored@example.com',
+      });
+      const row = (await db.getById(id)) as Record<string, unknown>;
+      row.status = 'scored';
+      row.created_at = daysAgo(91); // 91 days old — past the 90-day default
+
+      const result = await orch.purgeExpiredData(90);
+
+      expect(result.interviews).toBeGreaterThanOrEqual(1);
+      // Row must be gone from the store.
+      expect(await db.getById(id)).toBeNull();
+    });
+
+    test('skips an in_progress interview regardless of age', async () => {
+      const { id } = await orch.createInterview({
+        interviewerId: 'uPurge2',
+        candidateEmail: 'active@example.com',
+      });
+      const row = (await db.getById(id)) as Record<string, unknown>;
+      row.status = 'in_progress';
+      row.created_at = daysAgo(200); // very old but still in_progress
+
+      await orch.purgeExpiredData(90);
+
+      // Must NOT be deleted — in_progress is not a purgeable status.
+      expect(await db.getById(id)).not.toBeNull();
+    });
+
+    test('skips a recently scored interview within the retention window', async () => {
+      const { id } = await orch.createInterview({
+        interviewerId: 'uPurge3',
+        candidateEmail: 'recent-scored@example.com',
+      });
+      const row = (await db.getById(id)) as Record<string, unknown>;
+      row.status = 'scored';
+      row.created_at = daysAgo(30); // 30 days old — inside the 90-day window
+
+      const before = await orch.purgeExpiredData(90);
+      const after = await db.getById(id);
+
+      // The recent-scored row must survive.
+      expect(after).not.toBeNull();
+      // And the purge count for this call must be 0 (no other stale rows have created_at set).
+      expect(before.interviews).toBe(0);
+    });
   });
 
   test('autonomous intervention: repeated failing runs trigger a bounded hint, never advancing the FSM', async () => {

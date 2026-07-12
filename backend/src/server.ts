@@ -2,6 +2,12 @@
 // REST + outbox drain; no WebSockets in M1.
 
 import 'dotenv/config';
+import { initSentry, setupSentryErrorHandler } from './observability/sentry';
+
+// Sentry must be initialised before any other imports so its instrumentation
+// can wrap modules as they are loaded.
+initSentry();
+
 import express from 'express';
 import cors from 'cors';
 import { interviewsRouter } from './http/interviews';
@@ -9,8 +15,9 @@ import { requireInterviewer, isDevEmail } from './http/middleware';
 import { SUPPORTED_LANGUAGES } from './execution/docker';
 import { drainOutbox } from './notify/outbox';
 import { makeOutboxStore } from './db/interviews';
-import { closeStaleInterviews } from './interview/orchestrator';
+import { closeStaleInterviews, purgeExpiredData } from './interview/orchestrator';
 import { createEmailSender } from './notify/resend';
+import { requestLogMiddleware } from './observability/request-log';
 
 const app = express();
 
@@ -97,6 +104,10 @@ app.use(
 );
 app.use(express.json({ limit: '2mb' }));
 
+// Structured per-request logging: assigns/echoes x-request-id, logs {reqId,method,path,status,ms}.
+// Mounted after JSON parsing so headers are normalised; skips /health (high-frequency, low value).
+app.use(requestLogMiddleware);
+
 // ─────────────────────── Health ───────────────────────
 
 app.get('/health', (_req, res) => {
@@ -126,10 +137,16 @@ app.use((_req, res) => {
   res.status(404).json({ error: 'Endpoint not found' });
 });
 
-// ─────────────────────── Outbox drain interval ───────────────────────
+// Sentry error handler — must come AFTER all routes and BEFORE any other error middleware.
+// Captures unhandled route errors and forwards them to Sentry (no-op if DSN is unset).
+setupSentryErrorHandler(app);
+
+// ─────────────────────── Scheduled jobs ───────────────────────
 
 let drainInterval: ReturnType<typeof setInterval> | null = null;
 let sweepInterval: ReturnType<typeof setInterval> | null = null;
+let purgeTimer: ReturnType<typeof setTimeout> | null = null;
+let purgeInterval: ReturnType<typeof setInterval> | null = null;
 
 function startDrainInterval(): void {
   drainInterval = setInterval(() => {
@@ -153,6 +170,29 @@ function startSweepInterval(): void {
   sweepInterval.unref();
 }
 
+function startPurgeJob(): void {
+  // Gate: set RETENTION_ENABLED=false to disable without a deploy.
+  if (process.env.RETENTION_ENABLED === 'false') {
+    console.log('[purge] disabled — RETENTION_ENABLED=false');
+    return;
+  }
+
+  const runPurge = (): void => {
+    purgeExpiredData().catch((err: unknown) => {
+      console.error('[purge] error:', err);
+    });
+  };
+
+  // Run once ~30 s after boot (gives the process time to fully initialise), then daily.
+  purgeTimer = setTimeout(() => {
+    purgeTimer = null;
+    runPurge();
+    purgeInterval = setInterval(runPurge, 24 * 60 * 60 * 1000);
+    purgeInterval.unref();
+  }, 30_000);
+  purgeTimer.unref();
+}
+
 // ─────────────────────── Startup ───────────────────────
 
 const PORT = Number(process.env.PORT ?? 5000);
@@ -161,6 +201,7 @@ const server = app.listen(PORT, () => {
   console.log(`[server] listening on port ${PORT}`);
   startDrainInterval();
   startSweepInterval();
+  startPurgeJob();
 });
 
 // ─────────────────────── Graceful shutdown ───────────────────────
@@ -169,6 +210,8 @@ function shutdown(signal: string): void {
   console.log(`[server] ${signal} received — shutting down`);
   if (drainInterval) clearInterval(drainInterval);
   if (sweepInterval) clearInterval(sweepInterval);
+  if (purgeTimer) clearTimeout(purgeTimer);
+  if (purgeInterval) clearInterval(purgeInterval);
   server.close(() => {
     console.log('[server] closed');
     process.exit(0);

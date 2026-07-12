@@ -11,10 +11,28 @@
 # it builds from ../backend.
 name: overforge
 
+# ── Resource budget (4-core ARM, ~20 GB RAM) ────────────────────────────────
+# The Docker-per-run executor (backend/src/execution/docker.ts) spawns short-lived
+# containers outside this compose stack and has its own per-run limits defined there.
+# The allocations below leave ~12 GB + 1 core free for the OS, Caddy TLS state,
+# executor containers, and kernel buffers.
+#
+#   caddy   : 256 MB / 0.5 CPU  (TLS proxy, low memory steady-state)
+#   backend : 3 GB  / 1.5 CPU  (Node API + LLM proxy + orchestration)
+#   voice   : 4 GB  / 1.5 CPU  (ONNX/ctranslate2/torch CPU models)
+#
+# Limits use top-level service keys (mem_limit / cpus / pids_limit) — valid for
+# plain `docker compose up -d`. Do NOT switch to `deploy.resources`; that syntax
+# is only honoured by `docker stack deploy` (Swarm mode) and is silently ignored
+# by compose up.
+# ────────────────────────────────────────────────────────────────────────────
+
 services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
     ports:
       - '80:80'
       - '443:443'
@@ -31,6 +49,10 @@ services:
     build:
       context: ../backend
     restart: unless-stopped
+    mem_limit: 3g
+    mem_reservation: 512m
+    cpus: 1.5
+    pids_limit: 512
     env_file:
       - ./backend.env
     environment:
@@ -58,6 +80,10 @@ services:
     build:
       context: ../voice
     restart: unless-stopped
+    mem_limit: 4g
+    mem_reservation: 1g
+    cpus: 1.5
+    pids_limit: 512
     env_file:
       - path: ./voice.env
         required: false
