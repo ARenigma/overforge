@@ -6,8 +6,9 @@
 # existing objects before recreating them. Data in the target DB is REPLACED.
 #
 # Usage:
-#   set -a; source /home/ubuntu/overforge/deploy/backend.env; set +a
 #   bash /home/ubuntu/overforge/deploy/restore.sh /var/backups/overforge/overforge-20260101-030000.dump
+# Self-loads SUPABASE_DB_URL from backend.env — do NOT `source` that file (its values
+# contain shell metacharacters and would break the shell).
 #
 # Environment variables:
 #   SUPABASE_DB_URL — required; full libpq connection string from backend.env
@@ -15,6 +16,15 @@
 # pg_restore client version note: same constraint as backup.sh — client major
 # must be >= server major (Supabase is PG15+). Install postgresql-client-15+.
 set -euo pipefail
+
+# Robust env self-load (no `source` — backend.env holds shell metacharacters). Skipped
+# when SUPABASE_DB_URL is already in the environment.
+ENV_FILE="${BACKEND_ENV:-$(cd "$(dirname "$0")" && pwd)/backend.env}"
+if [[ -z "${SUPABASE_DB_URL:-}" && -f "$ENV_FILE" ]]; then
+  while IFS='=' read -r _k _v; do
+    [[ "$_k" == "SUPABASE_DB_URL" ]] && export "$_k=$_v"
+  done < <(grep -E '^SUPABASE_DB_URL=' "$ENV_FILE")
+fi
 
 ts()  { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
 log() { printf '[%s] %s\n' "$(ts)" "$*"; }

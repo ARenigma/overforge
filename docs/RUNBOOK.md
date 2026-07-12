@@ -132,6 +132,22 @@ docker compose -f deploy/docker-compose.yml ps
 
 ## 4. Backup
 
+### ⚠️ Prerequisite — set `SUPABASE_DB_URL` (one-time)
+
+The app connects to Supabase over the PostgREST API (`SUPABASE_URL` + service-role key), so a
+**direct Postgres connection string was never populated** — `SUPABASE_DB_URL` is currently empty in
+`deploy/backend.env`, and `pg_dump` cannot run without it. This is the one value only the project
+owner can supply:
+
+1. Supabase dashboard → **Project Settings → Database → Connection string → URI**. Use the direct
+   (`db.<ref>.supabase.co:5432`) or the pooler URI; it includes the DB password.
+2. Append it to `deploy/backend.env` (VPS-only, gitignored):
+   ```
+   SUPABASE_DB_URL=postgresql://postgres:<db-password>@db.<ref>.supabase.co:5432/postgres
+   ```
+3. Then run the manual backup below and enable the timer (section 6). Until this is set, the nightly
+   backup will exit non-zero and the uptime alert (if wired) will surface the failed timer.
+
 ### How it works
 
 `deploy/backup.sh` runs `pg_dump` in custom format (`-Fc`, already compressed) against `SUPABASE_DB_URL` and writes a timestamped file to `/var/backups/overforge/`. It rotates, keeping the newest `BACKUP_KEEP` dumps (default 14 = two weeks).
@@ -140,7 +156,8 @@ docker compose -f deploy/docker-compose.yml ps
 
 ```bash
 cd /home/ubuntu/overforge
-set -a; source deploy/backend.env; set +a
+# Do NOT `source` backend.env — its values contain shell metacharacters (CORS_PREVIEW_REGEX).
+# backup.sh self-loads the keys it needs from deploy/backend.env.
 bash deploy/backup.sh
 ```
 
@@ -183,7 +200,7 @@ ls -lh /var/backups/overforge/
 
 ```bash
 cd /home/ubuntu/overforge
-set -a; source deploy/backend.env; set +a
+# restore.sh self-loads SUPABASE_DB_URL from deploy/backend.env — do NOT `source` it.
 bash deploy/restore.sh /var/backups/overforge/overforge-<timestamp>.dump
 ```
 
@@ -252,8 +269,8 @@ journalctl -u overforge-uptime.service --since "5 minutes ago"
 ### Cron fallback (if systemd is unavailable)
 
 ```bash
-# Backup — daily at 03:30 UTC
-echo '30 3 * * * ubuntu set -a; source /home/ubuntu/overforge/deploy/backend.env; set +a; bash /home/ubuntu/overforge/deploy/backup.sh >> /var/log/overforge-backup.log 2>&1' \
+# Backup — daily at 03:30 UTC (backup.sh self-loads backend.env; no `source`)
+echo '30 3 * * * ubuntu bash /home/ubuntu/overforge/deploy/backup.sh >> /var/log/overforge-backup.log 2>&1' \
   | sudo tee /etc/cron.d/overforge-backup
 
 # Uptime — every 2 minutes

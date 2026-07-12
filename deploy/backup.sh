@@ -2,11 +2,12 @@
 # Nightly Postgres backup for Overforge (Supabase / PG15+).
 #
 # Usage (manual / cron):
-#   set -a; source /home/ubuntu/overforge/deploy/backend.env; set +a
 #   bash /home/ubuntu/overforge/deploy/backup.sh
+# The script self-loads the keys it needs from backend.env — do NOT `source` that file
+# (its values contain shell metacharacters, e.g. CORS_PREVIEW_REGEX, and would break the shell).
 #
 # When driven by the systemd timer (deploy/overforge-backup.service), the
-# EnvironmentFile= directive sources backend.env automatically — no manual sourcing needed.
+# EnvironmentFile= directive populates the environment directly — the self-load is skipped.
 #
 # Environment variables (from backend.env or the calling shell):
 #   SUPABASE_DB_URL  — required; full libpq connection string to the Supabase Postgres instance
@@ -22,6 +23,18 @@
 #     Amazon Linux 2: amazon-linux-extras install postgresql15
 set -euo pipefail
 
+# ── robust env self-load (no `source`) ───────────────────────────────────────
+# backend.env holds values with shell metacharacters (CORS_PREVIEW_REGEX has ()/$),
+# so `source`-ing it fails. Read ONLY the keys we need, without eval, splitting on the
+# FIRST '=' so values containing '=' survive. Skipped entirely when the environment is
+# already populated (systemd EnvironmentFile, or an explicit export).
+ENV_FILE="${BACKEND_ENV:-$(cd "$(dirname "$0")" && pwd)/backend.env}"
+if [[ -z "${SUPABASE_DB_URL:-}" && -f "$ENV_FILE" ]]; then
+  while IFS='=' read -r _k _v; do
+    [[ -n "$_k" ]] && export "$_k=$_v"
+  done < <(grep -E '^(SUPABASE_DB_URL|BACKUP_DIR|BACKUP_KEEP|BACKUP_R2_REMOTE)=' "$ENV_FILE")
+fi
+
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/overforge}"
 BACKUP_KEEP="${BACKUP_KEEP:-14}"
 
@@ -30,7 +43,11 @@ log() { printf '[%s] %s\n' "$(ts)" "$*"; }
 
 # ── validate environment ─────────────────────────────────────────────────────
 if [[ -z "${SUPABASE_DB_URL:-}" ]]; then
-  log "ERROR: SUPABASE_DB_URL is not set. Source deploy/backend.env first, or check the systemd EnvironmentFile." >&2
+  log "ERROR: SUPABASE_DB_URL is empty/unset." >&2
+  log "  This is the DIRECT Postgres connection URI (with the DB password), NOT SUPABASE_URL." >&2
+  log "  Get it from the Supabase dashboard: Project Settings → Database → Connection string → URI" >&2
+  log "  (use the 'Session'/direct connection or the pooler URI), then set it in deploy/backend.env:" >&2
+  log "    SUPABASE_DB_URL=postgresql://postgres:<db-password>@db.<ref>.supabase.co:5432/postgres" >&2
   exit 1
 fi
 
