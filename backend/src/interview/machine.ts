@@ -18,7 +18,33 @@
 //   scoring   +answer-> done   (the "answer" here is the driver's synthetic
 //                               post-scoring tick; scoring takes no candidate input)
 
-import { InterviewConfig, InterviewContext, InterviewEvent, Effect, DEFAULT_CONFIG } from './types';
+import {
+  InterviewConfig,
+  InterviewContext,
+  InterviewEvent,
+  Effect,
+  Phase,
+  SubmitIntent,
+  DEFAULT_CONFIG,
+  DEFAULT_CODE_MAX_FOLLOWUPS,
+} from './types';
+
+/** The coding follow-up cap, read backward-compat safe (B3): a context persisted before
+ *  `codeMaxFollowUps` existed must still enforce the mandatory counter-question. */
+export function codeFollowUpCap(config: InterviewConfig): number {
+  return config.codeMaxFollowUps ?? DEFAULT_CODE_MAX_FOLLOWUPS;
+}
+
+/** Pure predicate (exported for direct unit + property testing): the mandatory format
+ *  counter-question fires on the FIRST answer of a coding problem submitted via the SUBMIT button.
+ *  Keyed on `followUps === 0` so it fires AT MOST ONCE per problem and can never loop. */
+export function mustFireCounter(
+  phase: Phase,
+  intent: SubmitIntent | undefined,
+  followUps: number
+): boolean {
+  return phase === 'coding' && intent === 'submit' && followUps === 0;
+}
 
 export function initialContext(config: InterviewConfig = DEFAULT_CONFIG): InterviewContext {
   return { phase: 'greeting', oralAsked: 0, codeIndex: 0, followUps: 0, oralFollowUps: 0, config };
@@ -74,23 +100,31 @@ export function advance(ctx: InterviewContext, event: InterviewEvent): StepResul
     }
 
     case 'coding': {
+      // MOVE-ON: a firm, candidate-chosen forward skip. No oracle, no probe — advance immediately.
+      if (event.intent === 'move_on') {
+        return advanceCoding(ctx);
+      }
+
+      const cap = codeFollowUpCap(config);
       const wantsFollowUp = event.decision?.followUp === true;
-      if (wantsFollowUp && ctx.followUps < config.maxFollowUps) {
+      // SUBMIT always earns ONE counter-question (the USP + anti-cheat moat), machine-enforced —
+      // NOT gated on the oracle's followUp, so it survives a 429/timeout. Fires once (followUps===0).
+      const mandatoryProbe = mustFireCounter(ctx.phase, event.intent, ctx.followUps);
+
+      if ((wantsFollowUp || mandatoryProbe) && ctx.followUps < cap) {
         const depth = ctx.followUps + 1;
         return {
           ctx: { ...ctx, followUps: depth },
-          effect: { kind: 'ask_followup', codeIndex: ctx.codeIndex, depth },
+          effect: {
+            kind: 'ask_followup',
+            codeIndex: ctx.codeIndex,
+            depth,
+            mandatory: mandatoryProbe,
+          },
         };
       }
       // No (more) follow-ups: advance to the next core question, or wrap up.
-      if (ctx.codeIndex < config.coreQuestions - 1) {
-        const codeIndex = ctx.codeIndex + 1;
-        return {
-          ctx: { ...ctx, codeIndex, followUps: 0 },
-          effect: { kind: 'ask_code', index: codeIndex },
-        };
-      }
-      return { ctx: { ...ctx, phase: 'wrap_up' }, effect: { kind: 'wrap_up' } };
+      return advanceCoding(ctx);
     }
 
     case 'wrap_up': {
@@ -106,6 +140,21 @@ export function advance(ctx: InterviewContext, event: InterviewEvent): StepResul
       return { ctx: { ...ctx, phase: 'done' }, effect: { kind: 'done' } };
     }
   }
+}
+
+/** Single-source coding advance: next core question, or wrap-up after the last. Used by BOTH the
+ *  no-follow-up path and (Phase 1) the MOVE-ON firm skip, so they can never diverge. Resets
+ *  followUps for the new question. Pure. */
+function advanceCoding(ctx: InterviewContext): StepResult {
+  const { config } = ctx;
+  if (ctx.codeIndex < config.coreQuestions - 1) {
+    const codeIndex = ctx.codeIndex + 1;
+    return {
+      ctx: { ...ctx, codeIndex, followUps: 0 },
+      effect: { kind: 'ask_code', index: codeIndex },
+    };
+  }
+  return { ctx: { ...ctx, phase: 'wrap_up' }, effect: { kind: 'wrap_up' } };
 }
 
 /** True once the interview has reached its terminal state. */

@@ -6,6 +6,7 @@ import { Router, Request, Response } from 'express';
 import { requireInterviewer, validateCandidate, isDevEmail } from './middleware';
 import { enforceRateLimit } from './rate-limit';
 import { hashToken } from '../interview/token';
+import type { SubmitIntent } from '../interview/types';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
 import { getById, recordVoiceTurn, recordProctorSignal } from '../db/interviews';
@@ -263,24 +264,41 @@ router.post('/:id/state', async (req: Request, res: Response): Promise<void> => 
 router.post('/:id/answer', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { token, answer, requestId } = req.body as {
+    const { token, answer, requestId, intent, submittedCode } = req.body as {
       token?: string;
       answer?: string;
       requestId?: string;
+      intent?: string;
+      submittedCode?: string;
     };
 
     await validateCandidate(id, token ?? '');
     await enforceRateLimit(`answer:${hashToken(token ?? '')}`, { limit: 60, windowMs: 600_000 });
 
-    if (typeof answer !== 'string' || answer.trim() === '') {
+    // Validate the coding-control intent. Unknown/absent ⇒ 'answer' (a normal typed/voiced answer).
+    const validIntent: SubmitIntent =
+      intent === 'submit' || intent === 'move_on' ? intent : 'answer';
+    const explicit = validIntent !== 'answer';
+
+    // M4: SUBMIT / MOVE-ON are button actions with no required free-text — accept an empty body (the
+    // orchestrator synthesizes a neutral transcript line + anchors on submittedCode). A normal answer
+    // still requires text.
+    if (!explicit && (typeof answer !== 'string' || answer.trim() === '')) {
       res.status(400).json({ error: 'answer is required' });
       return;
     }
 
+    // Extra rate limit on MOVE-ON so a candidate can't machine-gun-skip every problem.
+    if (validIntent === 'move_on') {
+      await enforceRateLimit(`moveon:${hashToken(token ?? '')}`, { limit: 4, windowMs: 600_000 });
+    }
+
     const result = await orchestrator.submitAnswer(
       id,
-      answer,
-      typeof requestId === 'string' ? requestId : undefined
+      typeof answer === 'string' ? answer : '',
+      typeof requestId === 'string' ? requestId : undefined,
+      validIntent,
+      typeof submittedCode === 'string' ? submittedCode : undefined
     );
     res.json(result);
   } catch (err) {

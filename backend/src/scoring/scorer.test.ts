@@ -66,6 +66,37 @@ describe('buildScoringPrompt level calibration', () => {
     const dflt = buildScoringPrompt({ transcript: [], codeRuns: [] });
     expect(dflt).toContain('MID');
   });
+
+  // M1: a MANDATORY counter-question fires on every SUBMIT as a format step; it must NOT be counted
+  // as interviewer assistance (which the scorer weighs down) — else every submitter is penalized.
+  test('excludes a mandatory counter-question from the ASSISTANCE-GIVEN penalty', () => {
+    const withMandatory = buildScoringPrompt({
+      transcript: [
+        { role: 'candidate', text: 'my solution uses a hash map' },
+        {
+          role: 'interviewer',
+          text: 'What is the complexity of your hash map lookup?',
+          assist: { kind: 'counter_question', strength: 1, mandatory: true },
+        },
+      ],
+      codeRuns: [],
+    });
+    expect(withMandatory).not.toContain('ASSISTANCE GIVEN');
+
+    // A NON-mandatory (oracle-chosen) hint IS still counted as assistance.
+    const withHint = buildScoringPrompt({
+      transcript: [
+        { role: 'candidate', text: 'stuck' },
+        {
+          role: 'interviewer',
+          text: 'Look at your boundary conditions.',
+          assist: { kind: 'hint', strength: 2 },
+        },
+      ],
+      codeRuns: [],
+    });
+    expect(withHint).toContain('ASSISTANCE GIVEN');
+  });
 });
 
 describe('injection fencing in buildScoringPrompt (FIX 2)', () => {

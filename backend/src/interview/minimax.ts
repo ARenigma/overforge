@@ -420,7 +420,12 @@ function buildInterventionPrompt(req: InterventionRequest): string {
       ? 'The candidate has gone quiet on a BLANK editor — they may be thinking or unsure where to start. No code has run and nothing has failed. Give ONE warm, brief check-in that invites them to talk through their approach out loud, or to try a small example by hand. Do NOT mention bugs, tests, or fixes, and do NOT suggest an algorithm.'
       : req.kind === 'nudge' && req.idleMode === 'partial'
         ? 'The candidate wrote some code and then paused for a while without running it. No run has failed. Give ONE warm, brief check-in that invites them to walk you through what they have so far on a small input. Do NOT mention bugs, tests, or fixes, and do NOT suggest the solution.'
-        : KIND_GUIDANCE[req.kind],
+        : req.mandatory
+          ? 'The candidate just SUBMITTED this solution. Ask ONE counter-question that they can only answer if they actually wrote and understand this code — you MUST cite a SPECIFIC element of their submitted code (a data structure, a loop, a function name, an algorithm choice). Pick the highest-signal angle: time/space complexity, an edge case (empty/duplicate/single/large input), a trade-off vs an alternative, a scaling/streaming constraint, or an approach-vs-implementation mismatch. A generic "explain your approach" is FORBIDDEN — it must reference their concrete code. Do not reveal or grade correctness; do not give the answer.'
+          : KIND_GUIDANCE[req.kind],
+    req.mandatory && req.probeHints && req.probeHints.length
+      ? `Grounding angles for this problem (pick or adapt ONE, still citing their code):\n${req.probeHints.map((h) => `- ${h}`).join('\n')}`
+      : '',
     req.code ? `Candidate's current code:\n${req.code.slice(0, 1500)}` : '',
     runs ? `Recent run results (oldest→newest):\n${runs}` : '',
     req.testSummary ? `Latest run outcome: ${req.testSummary}` : '',

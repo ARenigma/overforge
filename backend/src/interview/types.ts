@@ -9,15 +9,25 @@ export interface InterviewConfig {
   oralQuestions: number;
   /** Number of core coding questions (spec: 2). */
   coreQuestions: number;
-  /** Max adaptive follow-ups per coding question (spec: ≤3). */
+  /** Max adaptive follow-ups per ORAL question path (spec: ≤3). */
   maxFollowUps: number;
+  /** Max follow-ups per CODING question: 1 mandatory counter-question (fired on every SUBMIT) +
+   *  oracle-driven depth. Optional for backward-compat with contexts persisted before this field —
+   *  ALWAYS read it as `config.codeMaxFollowUps ?? 2`, never bare (a legacy `undefined` would make
+   *  `followUps < undefined` false and silently disable the mandatory counter-question). */
+  codeMaxFollowUps?: number;
 }
 
 export const DEFAULT_CONFIG: InterviewConfig = {
   oralQuestions: 2,
   coreQuestions: 2,
   maxFollowUps: 3,
+  codeMaxFollowUps: 2,
 };
+
+/** Fallback used everywhere `config.codeMaxFollowUps` is read, so a legacy persisted context
+ *  (field absent) still enforces the mandatory counter-question. See B3 in docs/CODING_ROUND_REDESIGN.md. */
+export const DEFAULT_CODE_MAX_FOLLOWUPS = 2;
 
 /** Serializable machine context — persisted verbatim to `interviews.fsm_state`. */
 export interface InterviewContext {
@@ -59,7 +69,7 @@ export type Effect =
   | { kind: 'ask_oral_followup'; index: number } // re-probe the same oral question (max 1 per question)
   | { kind: 'handoff' }
   | { kind: 'ask_code'; index: number } // 0-based core question
-  | { kind: 'ask_followup'; codeIndex: number; depth: number } // depth 1..maxFollowUps
+  | { kind: 'ask_followup'; codeIndex: number; depth: number; mandatory?: boolean } // depth 1..codeMaxFollowUps; mandatory=the format counter-question fired on SUBMIT
   | { kind: 'wrap_up' }
   | { kind: 'score' }
   | { kind: 'done' };
@@ -76,8 +86,15 @@ export interface OracleDecision {
   kind?: InterventionKind;
 }
 
-/** Events the driver feeds the machine. `decision` is only consulted in the coding phase. */
-export type InterviewEvent = { type: 'start' } | { type: 'answer'; decision?: OracleDecision };
+/** How a coding-phase answer was submitted. Absent ⇒ `'answer'` (voice transcripts, oral answers,
+ *  and legacy callers are safe by default — only an explicit UI button tap sets submit/move_on). */
+export type SubmitIntent = 'answer' | 'submit' | 'move_on';
+
+/** Events the driver feeds the machine. `decision` is only consulted in the coding phase.
+ *  `intent` (coding only) drives the SUBMIT mandatory-counter-question and the MOVE-ON firm skip. */
+export type InterviewEvent =
+  | { type: 'start' }
+  | { type: 'answer'; decision?: OracleDecision; intent?: SubmitIntent };
 
 // ─────────────────────── Coding problems (curated bank) ───────────────────────
 
@@ -108,6 +125,10 @@ export interface CodingProblem {
   statement: string;
   examples: CodingProblemExample[];
   constraints: string;
+  /** Optional expert-authored grounding hints per counter-question family (complexity, edge_case,
+   *  trade_off, constraint_change, conceptual_ownership) — server-side ONLY, seed the mandatory
+   *  counter-question so it stays code-anchored. Stripped by toPublicProblem(). */
+  probeHints?: string[];
   /** Hidden tests — server-side only, drive grading + correctness-aware hints. */
   hiddenTests: CodingProblemTest[];
   /** A correct python3 reference (stdin→stdout) used ONLY for offline test verification. Server-side. */

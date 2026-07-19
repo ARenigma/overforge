@@ -9,7 +9,7 @@ export interface TranscriptTurn {
   text: string;
   /** Set on interviewer turns produced by the autonomous intervention engine (USP) — lets the
    *  scorer discount a hinted solve and the room style hints distinctly from normal questions. */
-  assist?: { kind: InterventionKind; strength: number };
+  assist?: { kind: InterventionKind; strength: number; mandatory?: boolean };
 }
 
 export interface UtteranceRequest {
@@ -40,6 +40,34 @@ export interface EvaluateRequest {
 
 /** Request to word an autonomous intervention (USP). The policy has already decided IF and WHICH
  *  kind; the oracle only produces the short, balanced-senior-interviewer utterance. */
+/** Deterministic, CODE-ANCHORED counter-question for the mandatory-CQ fallback (B5). Extracts a
+ *  salient construct from the submitted code and asks about it, so even with the LLM down the
+ *  question cites something the candidate actually wrote — an overlay tool that only heard the
+ *  problem statement cannot answer it. Wording is derived from the code (no RNG) for testability. */
+export function codeAnchoredProbe(code?: string): string {
+  const src = (code ?? '').trim();
+  if (!src) {
+    return 'Before we move on — walk me through your overall approach and its time complexity, step by step.';
+  }
+  const fn = src.match(/\b(?:def|function|func|fn)\s+([A-Za-z_]\w*)/);
+  const nestedLoop = /(for|while)[\s\S]*?\b(for|while)\b/.test(src);
+  const usesDict = /(\{\s*\}|dict\(|defaultdict|new Map\b|HashMap|\{[^}\n]*:[^}\n]*\})/.test(src);
+  const usesSet = /(\bset\(|new Set\b|HashSet)/.test(src);
+  const usesSort = /(\.sort\(|\bsorted\(|Arrays\.sort)/.test(src);
+  let anchor = 'your solution';
+  if (nestedLoop) anchor = 'the nested loop in your solution';
+  else if (usesDict) anchor = 'the hash map / dictionary you used';
+  else if (usesSet) anchor = 'the set you used';
+  else if (usesSort) anchor = 'the sort step in your solution';
+  else if (fn) anchor = `your \`${fn[1]}\` function`;
+  const templates = [
+    `Looking at ${anchor} — what's its time and space complexity, and could you do better?`,
+    `Walk me through ${anchor}: what happens on an empty input, or the largest input the constraints allow?`,
+    `About ${anchor} — why did you choose it over the alternatives, and what's the trade-off?`,
+  ];
+  return templates[src.length % templates.length];
+}
+
 export interface InterventionRequest {
   kind: InterventionKind;
   ctx: InterviewContext;
@@ -64,6 +92,14 @@ export interface InterventionRequest {
    *  = they wrote some code and paused (invite a walk-through of their own code on a small input).
    *  The wording must stay CONTENT-FREE — never reference bugs, tests, or fixes, because nothing failed. */
   idleMode?: 'blank' | 'partial';
+  /** Set for the mandatory counter-question fired on SUBMIT. The utterance MUST cite a concrete
+   *  element of the submitted `code` (a data structure, loop, function, or algorithm choice) — a
+   *  generic "explain your approach" is answerable by an overlay tool and defeats the anti-cheat
+   *  moat. The deterministic fallback uses this to stay code-anchored even without the LLM (B5). */
+  mandatory?: boolean;
+  /** Expert-authored per-family grounding hints for the current problem (server-only), used to seed
+   *  a code-anchored counter-question. */
+  probeHints?: string[] | null;
 }
 
 /** A candidate utterance whose intent (a clarifying QUESTION vs an ANSWER) is not yet known. */
@@ -169,6 +205,11 @@ export class DeterministicOracle implements Oracle {
           ? "No rush at all — want to talk me through how you're thinking about this, or try a small example by hand?"
           : "Take your time — want to walk me through what you've got so far on a small input?";
       return { text: idle, expects: 'code' };
+    }
+    // B5: the mandatory counter-question must stay CODE-ANCHORED even without the LLM (429/timeout),
+    // else it degrades to a generic "explain your approach" that an overlay tool can answer.
+    if (req.mandatory) {
+      return { text: codeAnchoredProbe(req.code), expects: 'code' };
     }
     const canned: Record<InterventionKind, string> = {
       counter_question: 'Before we move on — what makes you confident that approach is correct?',

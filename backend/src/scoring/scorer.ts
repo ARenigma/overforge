@@ -127,8 +127,11 @@ export function buildScoringPrompt(input: ScoringInput): string {
   // arrive at the solution must NOT score as highly as one who got there independently — so the
   // grader is told exactly what help was provided. Two sources: typed follow-ups live on the
   // transcript; run-triggered hints live on the code runs that triggered them.
+  // Exclude MANDATORY counter-questions: they fire on every SUBMIT as a standard format step, not
+  // because the candidate was stuck. Penalizing them would deflate every submitter's score (M1). A
+  // candidate's ANSWER to a counter-question is still in the transcript and scored on its own merits.
   const transcriptAssists = input.transcript
-    .filter((t) => t.assist)
+    .filter((t) => t.assist && !t.assist.mandatory)
     .map((t) => `- [${t.assist?.kind ?? 'assist'}] ${t.text.slice(0, 160)}`);
   const runAssists = input.codeRuns
     .filter((r) => r.intervention)

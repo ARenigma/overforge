@@ -57,7 +57,7 @@ describe('interview machine', () => {
     expect(isTerminal(ctx)).toBe(true);
   });
 
-  test('follow-ups are capped at maxFollowUps (3) even if the oracle keeps asking', () => {
+  test('coding follow-ups are capped at codeMaxFollowUps (default 2) even if the oracle keeps asking', () => {
     const { effects } = run([
       { type: 'start' },
       answer(), // ask_oral(0)
@@ -66,12 +66,11 @@ describe('interview machine', () => {
       answer(), // ask_code(0)
       answer(true), // ask_followup depth 1
       answer(true), // ask_followup depth 2
-      answer(true), // ask_followup depth 3
-      answer(true), // CAP: must advance to ask_code(1), not a 4th follow-up
+      answer(true), // CAP (codeMaxFollowUps=2): must advance to ask_code(1), not a 3rd follow-up
     ]);
     const followups = effects.filter((e) => e.kind === 'ask_followup');
-    expect(followups).toHaveLength(3);
-    expect(followups.map((e) => (e as { depth: number }).depth)).toEqual([1, 2, 3]);
+    expect(followups).toHaveLength(2);
+    expect(followups.map((e) => (e as { depth: number }).depth)).toEqual([1, 2]);
     // The event after the cap advances to the second coding question.
     expect(effects[effects.length - 1]).toEqual({ kind: 'ask_code', index: 1 });
   });
@@ -214,5 +213,146 @@ describe('interview machine', () => {
     expect(turns).toBeLessThan(50); // bounded — no infinite loop
     expect(seen).toContain('ask_followup');
     expect(seen[seen.length - 1]).toBe('done');
+  });
+});
+
+// ─────────────────────── SUBMIT mandatory counter-question + MOVE-ON ───────────────────────
+
+import { mustFireCounter } from './machine';
+import { SubmitIntent } from './types';
+
+const submit = (followUp?: boolean): InterviewEvent => ({
+  type: 'answer',
+  intent: 'submit',
+  ...(followUp === undefined ? {} : { decision: { followUp, reason: '', signal: 0 } }),
+});
+const moveOn = (): InterviewEvent => ({ type: 'answer', intent: 'move_on' });
+const codeAnswer = (followUp: boolean): InterviewEvent => ({
+  type: 'answer', // intent absent ⇒ 'answer'
+  decision: { followUp, reason: '', signal: 0 },
+});
+
+/** Drive to the coding phase with the first problem asked (ctx: phase='coding', codeIndex=0,
+ *  followUps=0), ready for the first coding submit. */
+function toCoding(config = undefined as never): InterviewContext {
+  let ctx = initialContext(config);
+  for (const ev of [
+    { type: 'start' } as InterviewEvent,
+    answer(), // greeting -> ask_oral(0)
+    answer(), // oral -> ask_oral(1)
+    answer(), // oral -> handoff
+    answer(), // handoff -> ask_code(0)
+  ]) {
+    ctx = advance(ctx, ev).ctx;
+  }
+  return ctx;
+}
+
+describe('coding: SUBMIT mandatory counter-question', () => {
+  test('SUBMIT fires exactly one mandatory counter-question, does NOT advance the problem', () => {
+    const ctx = toCoding();
+    const { ctx: next, effect } = advance(ctx, submit(false));
+    expect(effect).toEqual({ kind: 'ask_followup', codeIndex: 0, depth: 1, mandatory: true });
+    expect(next.codeIndex).toBe(0); // stayed on the same problem
+    expect(next.followUps).toBe(1);
+  });
+
+  test('SUBMIT fires the counter-question EVEN when the oracle declines (survives 429/timeout)', () => {
+    // decision.followUp:false simulates an oracle failure/short answer — the machine still probes.
+    const { effect } = advance(toCoding(), submit(false));
+    expect(effect.kind).toBe('ask_followup');
+    expect((effect as { mandatory: boolean }).mandatory).toBe(true);
+  });
+
+  test('SUBMIT with no decision at all (oracle threw) still fires the mandatory counter-question', () => {
+    const { effect } = advance(toCoding(), { type: 'answer', intent: 'submit' });
+    expect(effect.kind).toBe('ask_followup');
+    expect((effect as { mandatory: boolean }).mandatory).toBe(true);
+  });
+
+  test('after the mandatory CQ is answered (no further follow-up) → advances to the next problem', () => {
+    let ctx = toCoding();
+    ctx = advance(ctx, submit(false)).ctx; // mandatory CQ, followUps=1
+    const { ctx: next, effect } = advance(ctx, codeAnswer(false)); // answer the CQ
+    expect(effect).toEqual({ kind: 'ask_code', index: 1 });
+    expect(next.codeIndex).toBe(1);
+    expect(next.followUps).toBe(0);
+  });
+
+  test('a plain coding answer (intent absent) does NOT trigger the mandate', () => {
+    const { effect } = advance(toCoding(), codeAnswer(false));
+    expect(effect).toEqual({ kind: 'ask_code', index: 1 }); // straight advance, no counter-question
+  });
+
+  test('coding follow-ups cap at codeMaxFollowUps (default 2): mandatory + 1 oracle, then advance', () => {
+    let ctx = toCoding();
+    const kinds: string[] = [];
+    ctx = (() => {
+      const r = advance(ctx, submit(true));
+      kinds.push(r.effect.kind);
+      return r.ctx;
+    })(); // depth 1 (mandatory)
+    const r2 = advance(ctx, codeAnswer(true));
+    kinds.push(r2.effect.kind); // depth 2 (oracle)
+    const r3 = advance(r2.ctx, codeAnswer(true));
+    kinds.push(r3.effect.kind); // CAP → advance
+    expect(kinds).toEqual(['ask_followup', 'ask_followup', 'ask_code']);
+    expect(r3.effect).toEqual({ kind: 'ask_code', index: 1 });
+  });
+
+  test('B3 backward-compat: a config WITHOUT codeMaxFollowUps still fires the mandatory CQ', () => {
+    // Legacy shape — the field did not exist when this context was persisted.
+    const legacy = { oralQuestions: 2, coreQuestions: 2, maxFollowUps: 3 };
+    const { effect } = advance(toCoding(legacy as never), submit(false));
+    expect(effect.kind).toBe('ask_followup');
+    expect((effect as { mandatory: boolean }).mandatory).toBe(true);
+  });
+
+  test('double-SUBMIT does not double-advance or double-fire (2nd submit has followUps>0)', () => {
+    let ctx = toCoding();
+    ctx = advance(ctx, submit(false)).ctx; // followUps=1 (mandatory fired)
+    const { effect } = advance(ctx, submit(false)); // followUps=1 → not mandatory; no oracle followup → advance once
+    expect(effect).toEqual({ kind: 'ask_code', index: 1 });
+  });
+});
+
+describe('coding: MOVE-ON firm skip', () => {
+  test('MOVE-ON advances immediately with NO counter-question', () => {
+    const { ctx: next, effect } = advance(toCoding(), moveOn());
+    expect(effect).toEqual({ kind: 'ask_code', index: 1 });
+    expect(next.codeIndex).toBe(1);
+  });
+
+  test('MOVE-ON on the LAST problem goes to wrap_up, never a follow-up', () => {
+    let ctx = toCoding();
+    ctx = advance(ctx, moveOn()).ctx; // -> ask_code(1)
+    const { effect } = advance(ctx, moveOn()); // last problem -> wrap_up
+    expect(effect).toEqual({ kind: 'wrap_up' });
+  });
+
+  test('MOVE-ON ignores any oracle decision (never probes)', () => {
+    const { effect } = advance(toCoding(), {
+      type: 'answer',
+      intent: 'move_on',
+      decision: { followUp: true, reason: '', signal: 0 },
+    });
+    expect(effect.kind).toBe('ask_code');
+  });
+});
+
+describe('mustFireCounter predicate', () => {
+  const cases: [string, SubmitIntent | undefined, number, boolean][] = [
+    ['submit, first answer', 'submit', 0, true],
+    ['submit, already probed', 'submit', 1, false],
+    ['move_on never', 'move_on', 0, false],
+    ['plain answer never', 'answer', 0, false],
+    ['undefined intent never', undefined, 0, false],
+  ];
+  test.each(cases)('coding + %s → %s', (_label, intent, followUps, expected) => {
+    expect(mustFireCounter('coding', intent, followUps)).toBe(expected);
+  });
+  test('never fires outside the coding phase', () => {
+    expect(mustFireCounter('oral', 'submit', 0)).toBe(false);
+    expect(mustFireCounter('wrap_up', 'submit', 0)).toBe(false);
   });
 });

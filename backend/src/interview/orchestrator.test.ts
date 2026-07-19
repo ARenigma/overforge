@@ -579,3 +579,79 @@ describe('orchestrator end-to-end (offline)', () => {
     mockRun.result = accepted; // reset for any later tests
   });
 });
+
+// ─────────────── Coding: SUBMIT mandatory counter-question + MOVE-ON (orchestrator layer) ───────────────
+// The critique's #1 test gap: the pure-machine property tests can't catch the B1/B2/B4/M1 defects,
+// which all live HERE (orchestrator/http). These drive the real submitAnswer with the in-memory DB.
+
+describe('coding submit/move-on (orchestrator)', () => {
+  async function toCoding(): Promise<string> {
+    const { id } = await orch.createInterview({
+      interviewerId: 'u-sub',
+      candidateEmail: 'sub@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true });
+    for (let i = 0; i < 4; i++) await orch.submitAnswer(id, longAnswer); // → coding, problem 0
+    return id;
+  }
+
+  test('SUBMIT fires a mandatory, code-anchored counter-question and does NOT advance the problem', async () => {
+    const id = await toCoding();
+    // No dict/loop/set/sort → the deterministic anchor falls through to the function name.
+    const code = 'def solve_xyz(nums):\n    return nums[0]';
+    const res = await orch.submitAnswer(id, '', undefined, 'submit', code);
+    expect(res.assist?.kind).toBe('counter_question');
+    expect(res.assist?.mandatory).toBe(true); // M1: flagged so the scorer excludes it from the penalty
+    expect(res.state.codeIndex).toBe(0); // stayed on the same problem
+    expect(res.state.followUps).toBe(1);
+    expect(res.phase).toBe('coding');
+    // B1/B5: the deterministic fallback anchors on the SUBMITTED code (cites the function name).
+    expect(res.utterance.text).toContain('solve_xyz');
+  });
+
+  test('B1: a type-then-submit (no prior /run) persists the submitted code as the snapshot', async () => {
+    const id = await toCoding();
+    const code = 'def unique_marker_42():\n    return 1';
+    await orch.submitAnswer(id, '', undefined, 'submit', code);
+    const st = await orch.getCandidateState(id);
+    expect(st.codeSnapshot).toBe(code);
+  });
+
+  test('B4: submitted code containing a ternary/“?” still fires the mandatory CQ (clarify path skipped)', async () => {
+    const id = await toCoding();
+    const code = 'def f(a, b, cond):\n    return a if cond else b  # is it a?b';
+    const res = await orch.submitAnswer(id, '', undefined, 'submit', code);
+    expect(res.assist?.kind).toBe('counter_question');
+    expect(res.state.codeIndex).toBe(0); // did NOT get misread as a clarifying question + skipped
+  });
+
+  test('after answering the mandatory CQ (no further follow-up) → advances to the next problem', async () => {
+    const id = await toCoding();
+    await orch.submitAnswer(id, '', undefined, 'submit', 'def a():\n    return 1'); // mandatory CQ
+    const res = await orch.submitAnswer(id, longAnswer); // answer the CQ substantively → advance
+    expect(res.state.codeIndex).toBe(1);
+    expect(res.state.followUps).toBe(0);
+  });
+
+  test('MOVE-ON advances to the next problem with NO counter-question', async () => {
+    const id = await toCoding();
+    const res = await orch.submitAnswer(id, '', undefined, 'move_on');
+    expect(res.assist).toBeUndefined();
+    expect(res.state.codeIndex).toBe(1);
+    expect(res.phase).toBe('coding');
+  });
+
+  test('B2: a SUBMIT inside the reserve window is refused (409) — steer to Move on', async () => {
+    const id = await toCoding();
+    // Manipulate the persisted start time so only ~10s remain of the 60-min cap.
+    const db = require('../db/interviews');
+    const row = await db.getById(id);
+    row.tnc_accepted_at = new Date(Date.now() - (60 * 60 * 1000 - 10_000)).toISOString();
+    await expect(
+      orch.submitAnswer(id, '', undefined, 'submit', 'def a():\n    return 1')
+    ).rejects.toMatchObject({ status: 409 });
+    // The problem did not advance and no CQ was recorded.
+    const st = await orch.getCandidateState(id);
+    expect(st.phase).toBe('coding');
+  });
+});
