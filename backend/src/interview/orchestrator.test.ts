@@ -643,8 +643,8 @@ describe('coding submit/move-on (orchestrator)', () => {
 
   test('B2: a SUBMIT inside the reserve window is refused (409) — steer to Move on', async () => {
     const id = await toCoding();
-    // Manipulate the persisted start time so only ~10s remain of the 60-min cap.
-    const db = require('../db/interviews');
+    // Manipulate the persisted start time so only ~10s remain of the 60-min cap. Uses the
+    // module-scope `db` mock (declared at the top of this file).
     const row = await db.getById(id);
     row.tnc_accepted_at = new Date(Date.now() - (60 * 60 * 1000 - 10_000)).toISOString();
     await expect(
