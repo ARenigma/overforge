@@ -55,6 +55,34 @@ test.describe('coding controls: Run / Submit / Move-on', () => {
     expect(await room.isDone()).toBe(false);
   });
 
+  test('run-path activity does not suppress the SUBMIT counter-question (independence)', async ({
+    page,
+  }) => {
+    const interview = await createInterview({ language: 'python', level: 'mid' });
+    createdId = interview.id;
+    const room = new CandidateRoom(page);
+    await room.enter(interview.link);
+    await room.waitForSettled();
+    await room.advanceThroughOral(ORAL);
+    await room.waitForCoding(60_000);
+
+    // A wrong-but-clean run or two exercises the run-path (probe/hint) ladder BEFORE the submit.
+    await room.typeCode('print("definitely wrong")\n');
+    await room.run();
+    await room.typeCode('print("still wrong")\n');
+    await room.run();
+
+    // The mandate is independent of the run ladder: SUBMIT still earns a counter-question because
+    // followUps===0 (run-path interventions ride on the run row, never on fsm_state.followUps).
+    const cqBefore = await room.assistCount('counter_question');
+    await room.submitSolution(SOLUTION);
+    expect(
+      await room.assistCount('counter_question'),
+      'SUBMIT fires a counter-question even after run-path hints'
+    ).toBe(cqBefore + 1);
+    await room.assertNoHiddenTestLeak();
+  });
+
   test('MOVE-ON advances with no counter-question', async ({ page }) => {
     const interview = await createInterview({ language: 'python', level: 'mid' });
     createdId = interview.id;

@@ -65,6 +65,7 @@ import {
   Volume2,
   type LucideIcon,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
 import { ProblemDock } from '@/components/interview/problem-dock';
@@ -629,6 +630,22 @@ export default function InterviewPage() {
       setCodingProblem(null);
     }
   }, [phase, messages.length, refetchProblem]);
+
+  // Per-problem soft pacing nudge: one non-blocking toast when this problem crosses the ~15-min
+  // budget. It NEVER auto-submits or advances — only the overall cap is hard. Fires once per
+  // problem (keyed on codeIndex), and only in coding.
+  const nudgedProblemRef = useRef(-1);
+  useEffect(() => {
+    if (phase !== 'coding') return;
+    const overBudget = elapsed - problemStartElapsedRef.current > PROBLEM_SOFT_BUDGET_S;
+    if (overBudget && nudgedProblemRef.current !== problemCodeIndexRef.current) {
+      nudgedProblemRef.current = problemCodeIndexRef.current;
+      toast('Heads-up on time', {
+        description:
+          "You've spent about 15 minutes on this problem — no hard stop, but wrap up when ready, or use Submit / Move on.",
+      });
+    }
+  }, [elapsed, phase]);
 
   // Slide the auto-collapsed chat back open the moment the interviewer says anything mid-coding —
   // the composer lives in the chat panel, so a probe/hint the candidate must read (and answer)
@@ -1784,7 +1801,13 @@ export default function InterviewPage() {
                         </Alert>
                       )}
                       {runResult ? (
-                        <div className="space-y-1" data-testid="run-output">
+                        <div
+                          className="space-y-1"
+                          data-testid="run-output"
+                          role="status"
+                          aria-live="polite"
+                          aria-atomic="true"
+                        >
                           <div className="flex items-center gap-3 text-muted-foreground text-[10px] uppercase tracking-wider font-mono">
                             <span
                               data-testid="run-status"
@@ -1972,10 +1995,15 @@ export default function InterviewPage() {
                 })}
 
                 {aiThinking && (
-                  <div className="flex justify-start" data-testid="ai-thinking">
+                  <div
+                    className="flex justify-start"
+                    data-testid="ai-thinking"
+                    role="status"
+                    aria-live="polite"
+                  >
                     <div className="flex items-center gap-2 bg-card px-4 py-2.5 text-[13px] font-medium italic text-muted-foreground">
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                      Thinking…
+                      <span>Interviewer is thinking…</span>
                     </div>
                   </div>
                 )}
