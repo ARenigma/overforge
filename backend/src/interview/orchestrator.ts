@@ -1019,11 +1019,14 @@ export function stripHiddenTests(run: RunResult): RunResult {
  *  room fetches this to render the problem panel; null outside coding / for legacy interviews. */
 export async function currentCodingProblem(
   interviewId: string
-): Promise<{ codeIndex: number; problem: PublicProblem | null }> {
+): Promise<{ codeIndex: number; total: number; problem: PublicProblem | null }> {
   const interview = requireInterview(await getById(interviewId), interviewId);
   const ctx = interview.fsm_state as InterviewContext;
   const p = assignedProblem(interview, ctx.codeIndex);
-  return { codeIndex: ctx.codeIndex, problem: p ? toPublicProblem(p) : null };
+  // Total coding problems this candidate will see (assigned bank size, or the machine's target) —
+  // powers the "Problem N of M" indicator + the forward-only framing.
+  const total = interview.coding_problem_ids?.length || ctx.config.coreQuestions;
+  return { codeIndex: ctx.codeIndex, total, problem: p ? toPublicProblem(p) : null };
 }
 
 /**

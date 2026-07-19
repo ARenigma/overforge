@@ -37,6 +37,11 @@ test.describe('coding controls: Run / Submit / Move-on', () => {
     await room.advanceThroughOral(ORAL);
     await room.waitForCoding(60_000);
 
+    // The forward-only "Problem N of M" indicator is present and reads as problem 1 of the set.
+    expect(await room.problemCounter(), 'problem dock shows the N-of-M indicator').toMatch(
+      /^Problem 1 of \d+$/
+    );
+
     const cqBefore = await room.assistCount('counter_question');
     await room.submitSolution(SOLUTION);
 

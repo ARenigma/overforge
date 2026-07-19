@@ -419,7 +419,7 @@ export interface PublicProblem {
 export async function fetchCodingProblem(
   id: string,
   token: string
-): Promise<{ codeIndex: number; problem: PublicProblem | null } | null> {
+): Promise<{ codeIndex: number; total: number; problem: PublicProblem | null } | null> {
   try {
     const res = await fetch(`${BASE_URL}/api/interviews/${id}/coding-problem`, {
       method: 'POST',
@@ -427,7 +427,11 @@ export async function fetchCodingProblem(
       body: JSON.stringify({ token }),
     });
     if (!res.ok) return null;
-    return (await res.json()) as { codeIndex: number; problem: PublicProblem | null };
+    return (await res.json()) as {
+      codeIndex: number;
+      total: number;
+      problem: PublicProblem | null;
+    };
   } catch {
     return null;
   }

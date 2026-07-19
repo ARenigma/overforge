@@ -133,6 +133,13 @@ export class CandidateRoom {
     return (await t.innerText()).trim();
   }
 
+  /** The "Problem N of M" indicator text from the problem dock header. */
+  async problemCounter(timeout = 30_000): Promise<string> {
+    const c = this.page.getByTestId('problem-counter');
+    await c.waitFor({ state: 'visible', timeout });
+    return (await c.innerText()).trim();
+  }
+
   /** Replace the editor contents. Uses the real paste path (devMode allows it → verbatim insert,
    *  so Python indentation survives), with an execCommand('insertText') fallback. */
   async typeCode(source: string): Promise<void> {

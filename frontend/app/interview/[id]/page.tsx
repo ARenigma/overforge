@@ -398,6 +398,11 @@ export default function InterviewPage() {
   // room's problem panel during the coding phase. Fetched server-side; re-fetched as the question
   // advances (codeIndex) so the panel always shows the problem in play.
   const [codingProblem, setCodingProblem] = useState<PublicProblem | null>(null);
+  // 0-based index + total of coding problems, for the "Problem N of M" indicator (forward-only).
+  const [codingMeta, setCodingMeta] = useState<{ index: number; total: number }>({
+    index: 0,
+    total: 0,
+  });
   const [problemOpen, setProblemOpen] = useState(true);
   const [messages, setMessages] = useState<Message[]>([]);
   const [aiThinking, setAiThinking] = useState(false);
@@ -616,6 +621,7 @@ export default function InterviewPage() {
       problemCodeIndexRef.current = res.codeIndex;
       problemStartElapsedRef.current = elapsedRef.current; // reset the per-problem soft clock
       setCodingProblem(res.problem);
+      setCodingMeta({ index: res.codeIndex, total: res.total });
       // The question just landed in the dock — auto-collapse the chat so problem + editor get the
       // full width. Anything conversational slides it back (see the expand effects below), and the
       // top-bar button stays live for manual reopen.
@@ -1664,6 +1670,8 @@ export default function InterviewPage() {
                     >
                       <ProblemDock
                         problem={codingProblem}
+                        index={codingMeta.index}
+                        total={codingMeta.total}
                         clock={formatTime(Math.max(0, elapsed - problemStartElapsedRef.current))}
                         overBudget={
                           elapsed - problemStartElapsedRef.current > PROBLEM_SOFT_BUDGET_S
@@ -1703,17 +1711,20 @@ export default function InterviewPage() {
 
                     {/* Terminal output — fixed-height console strip */}
                     <div className="shrink-0 h-[23.6%] min-h-[150px] border-t border-border bg-surface-deep overflow-auto p-3 font-mono text-[11px]">
-                      {/* Console header — Run + language live here so the editor keeps a single top bar. */}
-                      <div className="mb-2 flex items-center gap-2">
+                      {/* Console header — Run + language live here so the editor keeps a single top bar.
+                          On mobile (<md) the controls go icon-only and flex-wrap so they never clip in
+                          the short console strip. */}
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
                         <Button
                           size="sm"
                           onClick={handleRunCode}
                           loading={running}
                           variant="outline"
-                          className="h-6 gap-1 rounded-md border border-success/40 bg-success/10 px-3 font-mono text-[10px] text-success transition-colors hover:bg-success/20 focus-visible:ring-ring"
+                          aria-label="Run code"
+                          className="h-6 gap-1 rounded-md border border-success/40 bg-success/10 px-2 font-mono text-[10px] text-success transition-colors hover:bg-success/20 focus-visible:ring-ring md:px-3"
                         >
                           {!running && <Play className="h-3 w-3 fill-current" />}
-                          RUN
+                          <span className="hidden md:inline">RUN</span>
                         </Button>
                         {lockedLanguage ? (
                           <div
@@ -1759,11 +1770,12 @@ export default function InterviewPage() {
                               loading={submitting}
                               disabled={running || submitting || aiThinking || !code.trim()}
                               data-testid="submit-code"
+                              aria-label="Submit solution"
                               title="Submit your solution — the interviewer will follow up on it"
-                              className="h-6 gap-1 rounded-md bg-primary px-3 font-mono text-[10px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-ring"
+                              className="h-6 gap-1 rounded-md bg-primary px-2 font-mono text-[10px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-ring md:px-3"
                             >
                               {!submitting && <Check className="h-3 w-3" />}
-                              SUBMIT
+                              <span className="hidden md:inline">SUBMIT</span>
                             </Button>
                             <Button
                               size="sm"
@@ -1771,15 +1783,16 @@ export default function InterviewPage() {
                               onClick={() => setMoveOnOpen(true)}
                               disabled={running || submitting || aiThinking}
                               data-testid="move-on"
+                              aria-label="Move on to the next problem"
                               title="Move on to the next problem — you can't return"
-                              className="h-6 gap-1 rounded-md border-border px-3 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-ring"
+                              className="h-6 gap-1 rounded-md border-border px-2 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-ring md:px-3"
                             >
                               <ArrowRight className="h-3 w-3" />
-                              MOVE ON
+                              <span className="hidden md:inline">MOVE ON</span>
                             </Button>
                           </>
                         )}
-                        <span className="ml-auto text-[9px] font-mono uppercase tracking-wider text-muted-foreground">
+                        <span className="ml-auto hidden text-[9px] font-mono uppercase tracking-wider text-muted-foreground md:inline">
                           OUTPUT
                         </span>
                         {running && <Loader2 className="w-3 h-3 animate-spin text-primary" />}

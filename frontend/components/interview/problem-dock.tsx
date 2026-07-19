@@ -12,6 +12,10 @@ import type { PublicProblem } from '@/lib/api';
  */
 interface ProblemDockProps {
   problem: PublicProblem;
+  /** 0-based index of the current coding problem (for the "Problem N of M" indicator). */
+  index: number;
+  /** Total coding problems this candidate will see (forward-only). */
+  total: number;
   /** Elapsed MM:SS on this problem (soft pacing clock — only the interview cap hard-stops). */
   clock: string;
   /** True once the soft per-problem budget is exceeded — the clock shifts to the accent color. */
@@ -19,13 +23,26 @@ interface ProblemDockProps {
   onCollapseAction: () => void;
 }
 
-export function ProblemDock({ problem, clock, overBudget, onCollapseAction }: ProblemDockProps) {
+export function ProblemDock({
+  problem,
+  index,
+  total,
+  clock,
+  overBudget,
+  onCollapseAction,
+}: ProblemDockProps) {
+  // "Problem N of M" — 1-based for humans. Falls back to a bare "Problem" if the total is unknown
+  // (e.g. a legacy interview with no assigned bank), so the label never reads "Problem 1 of 0".
+  const counter = total > 0 ? `Problem ${index + 1} of ${total}` : 'Problem';
   return (
     <div className="flex h-full flex-col overflow-hidden bg-card" data-testid="problem-panel">
       {/* Header — mirrors the chat pane's h-10 header so the two docks read as siblings. */}
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
-        <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider text-primary">
-          Problem
+        <span
+          data-testid="problem-counter"
+          className="shrink-0 whitespace-nowrap font-mono text-[10px] uppercase tracking-wider text-primary"
+        >
+          {counter}
         </span>
         <span
           data-testid="problem-title"
