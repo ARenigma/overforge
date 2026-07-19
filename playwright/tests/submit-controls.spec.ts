@@ -38,8 +38,9 @@ test.describe('coding controls: Run / Submit / Move-on', () => {
     await room.waitForCoding(60_000);
 
     // The forward-only "Problem N of M" indicator is present and reads as problem 1 of the set.
+    // Case-insensitive: the dock header renders text-transform:uppercase, which innerText applies.
     expect(await room.problemCounter(), 'problem dock shows the N-of-M indicator').toMatch(
-      /^Problem 1 of \d+$/
+      /^Problem 1 of \d+$/i
     );
 
     const cqBefore = await room.assistCount('counter_question');
