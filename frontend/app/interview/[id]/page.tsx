@@ -1036,7 +1036,11 @@ export default function InterviewPage() {
   // code so the question anchors on it (B1); MOVE-ON is a firm forward skip. Both drive the same
   // /answer FSM as a typed answer, just with an explicit intent — the machine owns the outcome.
   async function sendCodingIntent(intent: 'submit' | 'move_on') {
-    if (!activeToken || submitting || aiThinking || running || voiceSpeakingRef.current) return;
+    // NOTE: do NOT gate on voiceSpeakingRef here — SUBMIT/MOVE-ON are deliberate controls and must
+    // always act. If the interviewer is mid-utterance, the new turn's speak() supersedes it
+    // (speakSeqRef), so the intro audio yields to the counter-question. Gating on it silently
+    // no-ops the click while the coding intro is still playing.
+    if (!activeToken || submitting || aiThinking || running) return;
     const requestId = crypto.randomUUID();
     setSubmitting(true);
     setAnswerError(null);
