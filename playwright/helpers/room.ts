@@ -227,6 +227,32 @@ export class CandidateRoom {
     return (await els.nth(n - 1).innerText()).trim();
   }
 
+  /** Click SUBMIT (coding phase), optionally typing `code` first, and wait for the interviewer's
+   *  reply (the mandatory counter-question). */
+  async submitSolution(code?: string): Promise<void> {
+    if (code !== undefined) await this.typeCode(code);
+    const before = await this.aiCount();
+    await this.page.getByTestId('submit-code').click();
+    await this.page
+      .waitForFunction(
+        (n) => document.querySelectorAll('[data-testid="ai-message"]').length > n,
+        before,
+        { timeout: 60_000 }
+      )
+      .catch(() => undefined);
+    await this.waitForSettled(60_000);
+  }
+
+  /** Click MOVE ON and confirm the forward-only dialog. */
+  async moveOn(): Promise<void> {
+    await this.page.getByTestId('move-on').click();
+    await this.page
+      .getByRole('alertdialog')
+      .getByRole('button', { name: /^move on$/i })
+      .click();
+    await this.waitForSettled(60_000);
+  }
+
   async isDone(): Promise<boolean> {
     return (await this.page.getByTestId('interview-done').count()) > 0;
   }

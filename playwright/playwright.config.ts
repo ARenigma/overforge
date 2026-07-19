@@ -48,7 +48,7 @@ export default defineConfig({
   projects: [
     {
       name: 'mimic',
-      testMatch: /mimic-full-e2e\.spec\.ts/,
+      testMatch: /(mimic-full-e2e|submit-controls)\.spec\.ts/,
       // Silent mic: the mimic types its answers; a silent stream keeps the voice STT path quiet so
       // it can't race the text composer. Falls back to the default fake device if silence.wav is
       // absent (a low-level tone, still harmless for a text-driven run).

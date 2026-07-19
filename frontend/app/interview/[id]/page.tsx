@@ -47,8 +47,10 @@ import {
 } from '@/lib/api';
 import {
   AlertCircle,
+  ArrowRight,
   ArrowUp,
   Camera,
+  Check,
   CheckCircle,
   Clock,
   Loader2,
@@ -411,6 +413,10 @@ export default function InterviewPage() {
   const [code, setCode] = useState('');
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<RunResult | null>(null);
+  // Distinct from aiThinking: a SUBMIT / MOVE-ON is in flight (disables the coding controls without
+  // freezing the whole room). Move-on confirmation dialog visibility.
+  const [submitting, setSubmitting] = useState(false);
+  const [moveOnOpen, setMoveOnOpen] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   // Voice (P1): the interviewer speaks its turns (always audible — the candidate can't mute it).
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -1026,6 +1032,56 @@ export default function InterviewPage() {
     }
   }
 
+  // Coding controls. SUBMIT fires the mandatory counter-question (the USP) and carries the editor
+  // code so the question anchors on it (B1); MOVE-ON is a firm forward skip. Both drive the same
+  // /answer FSM as a typed answer, just with an explicit intent — the machine owns the outcome.
+  async function sendCodingIntent(intent: 'submit' | 'move_on') {
+    if (!activeToken || submitting || aiThinking || running || voiceSpeakingRef.current) return;
+    const requestId = crypto.randomUUID();
+    setSubmitting(true);
+    setAnswerError(null);
+    if (intent === 'submit') {
+      setMessages((prev) => [...prev, { role: 'candidate', text: 'Submitted my solution.' }]);
+    }
+    setAiThinking(true);
+    try {
+      const res = await answerInterview(
+        id,
+        activeToken,
+        '',
+        requestId,
+        intent,
+        intent === 'submit' ? code : undefined
+      );
+      setPhase(res.phase);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          text: res.utterance.text,
+          ...(res.assist ? { assist: res.assist.kind } : {}),
+        },
+      ]);
+      void speak('turn');
+      if (res.phase === 'done') setStage('done');
+    } catch (err: unknown) {
+      // Roll back the optimistic submit bubble; surface the reason (incl. the B2 "not enough time —
+      // use Move On" 409) inline so the candidate knows what to do next.
+      if (intent === 'submit') setMessages((prev) => prev.slice(0, -1));
+      setAnswerError(
+        err instanceof Error ? err.message : 'Something went wrong. Please try again.'
+      );
+    } finally {
+      setAiThinking(false);
+      setSubmitting(false);
+    }
+  }
+  const handleSubmitCode = () => void sendCodingIntent('submit');
+  const handleMoveOn = () => {
+    setMoveOnOpen(false);
+    void sendCodingIntent('move_on');
+  };
+
   // Flash a brief "Pasting is disabled" hint when a paste/drop is blocked.
   const handlePasteBlocked = useCallback(() => {
     setPasteBlocked(true);
@@ -1490,6 +1546,23 @@ export default function InterviewPage() {
         )}
       </header>
 
+      {/* MOVE-ON confirmation (controlled) — forward-only, so make the one-way step explicit. */}
+      <AlertDialog open={moveOnOpen} onOpenChange={setMoveOnOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Move to the next problem?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your current code is saved as your answer to this problem. Finite runs forward only —
+              you won&apos;t be able to come back to it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Stay on this problem</AlertDialogCancel>
+            <AlertDialogAction onClick={handleMoveOn}>Move on</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Phase progress — fills as the interview advances greeting → done */}
       <div className="h-0.5 shrink-0 bg-border" aria-hidden="true">
         <div
@@ -1654,11 +1727,50 @@ export default function InterviewPage() {
                             </SelectContent>
                           </Select>
                         )}
+                        {/* SUBMIT (mandatory counter-question) + MOVE ON (firm forward skip) — the
+                            two coding-phase controls beside RUN. RUN tests; SUBMIT locks + is probed;
+                            MOVE ON skips. Only shown during coding. */}
+                        {phase === 'coding' && (
+                          <>
+                            <Button
+                              size="sm"
+                              onClick={handleSubmitCode}
+                              loading={submitting}
+                              disabled={running || submitting || aiThinking || !code.trim()}
+                              data-testid="submit-code"
+                              title="Submit your solution — the interviewer will follow up on it"
+                              className="h-6 gap-1 rounded-md bg-primary px-3 font-mono text-[10px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-ring"
+                            >
+                              {!submitting && <Check className="h-3 w-3" />}
+                              SUBMIT
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setMoveOnOpen(true)}
+                              disabled={running || submitting || aiThinking}
+                              data-testid="move-on"
+                              title="Move on to the next problem — you can't return"
+                              className="h-6 gap-1 rounded-md border-border px-3 font-mono text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-ring"
+                            >
+                              <ArrowRight className="h-3 w-3" />
+                              MOVE ON
+                            </Button>
+                          </>
+                        )}
                         <span className="ml-auto text-[9px] font-mono uppercase tracking-wider text-muted-foreground">
                           OUTPUT
                         </span>
                         {running && <Loader2 className="w-3 h-3 animate-spin text-primary" />}
                       </div>
+
+                      {/* No auto-advance on all-tests-pass (research: every platform requires an
+                          explicit submit). A clean sample run nudges toward SUBMIT without moving on. */}
+                      {phase === 'coding' && runResult && runResult.exitCode === 0 && !running && (
+                        <p className="mb-2 font-mono text-[10px] text-success">
+                          Sample run passed — press SUBMIT when you're ready to move on.
+                        </p>
+                      )}
 
                       {runError && (
                         <Alert className="mb-2 border-destructive/40 bg-destructive/10 py-2 px-3">

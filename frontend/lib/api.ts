@@ -246,14 +246,27 @@ export async function getInterviewState(id: string, token: string): Promise<Inte
  * POST /api/interviews/:id/answer
  * Submits a candidate answer and returns the next AI utterance.
  */
+/** Coding-phase control intent (mirrors the backend SubmitIntent). 'submit' locks the code and
+ *  triggers the mandatory counter-question; 'move_on' is a firm forward skip; 'answer' (default) is
+ *  a normal typed/voiced answer. */
+export type SubmitIntent = 'answer' | 'submit' | 'move_on';
+
 export async function answerInterview(
   id: string,
   token: string,
   answer: string,
-  requestId?: string
+  requestId?: string,
+  intent: SubmitIntent = 'answer',
+  submittedCode?: string
 ): Promise<AnswerResponse> {
   return apiFetch<AnswerResponse>(`/api/interviews/${id}/answer`, {
-    body: { token, answer, ...(requestId ? { requestId } : {}) },
+    body: {
+      token,
+      answer,
+      ...(requestId ? { requestId } : {}),
+      ...(intent !== 'answer' ? { intent } : {}),
+      ...(submittedCode !== undefined ? { submittedCode } : {}),
+    },
   });
 }
 
