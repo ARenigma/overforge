@@ -98,6 +98,23 @@ jest.mock('../db/interviews', () => {
       }
       return false;
     }),
+    // Task 4: stuck-completed sweep helpers.
+    findStuckCompleted: jest.fn(async (_cutoff: string) =>
+      [...store.values()].filter((r) => (r as { status?: string }).status === 'completed')
+    ),
+    claimCompletedForRescore: jest.fn(async (id: string) => {
+      const row = store.get(id) as { status?: string } | undefined;
+      if (row && row.status === 'completed') {
+        row.status = 'in_progress';
+        return true;
+      }
+      return false;
+    }),
+    // appendCodeRunOnly: used by nudgeInterview for idle markers.
+    appendCodeRunOnly: jest.fn(async (id: string, run: Record<string, unknown>) => {
+      const row = store.get(id) as { code_runs?: unknown[] } | undefined;
+      if (row) row.code_runs = [...(row.code_runs ?? []), run];
+    }),
     insertOutbox: jest.fn(async (id: string) => {
       outbox.push(id);
     }),

@@ -44,7 +44,7 @@ export interface EvaluateRequest {
  *  salient construct from the submitted code and asks about it, so even with the LLM down the
  *  question cites something the candidate actually wrote — an overlay tool that only heard the
  *  problem statement cannot answer it. Wording is derived from the code (no RNG) for testability. */
-export function codeAnchoredProbe(code?: string): string {
+function codeAnchoredProbe(code?: string): string {
   const src = (code ?? '').trim();
   if (!src) {
     return 'Before we move on — walk me through your overall approach and its time complexity, step by step.';

@@ -146,6 +146,7 @@ export async function synthesize(
     throw new Error('Cartesia not configured: set CARTESIA_API_KEY and CARTESIA_VOICE_ID.');
   }
   const res = await fetch('https://api.cartesia.ai/tts/bytes', {
+    signal: AbortSignal.timeout(30_000),
     method: 'POST',
     headers: authHeaders(cfg),
     body: JSON.stringify({

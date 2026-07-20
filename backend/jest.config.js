@@ -14,8 +14,9 @@ module.exports = {
   setupFiles: ['<rootDir>/jest.setup.js'],
   testPathIgnorePatterns: ['/node_modules/', '/dist/'],
   clearMocks: true,
-  // Imported service modules open sockets/timers at load that aren't torn down,
-  // so Jest lingers after tests pass. Force exit keeps the hook + CI prompt.
-  // TODO(test-hardening): close these handles and drop forceExit.
+  // Imported service modules (notably the Supabase realtime WebSocket client) open handles
+  // that are not torn down after tests complete, causing Jest to linger indefinitely.
+  // forceExit is the current working mitigation; the proper fix is a global afterAll() hook
+  // that explicitly closes each open handle (WS connection, setInterval timers, etc.).
   forceExit: true,
 };

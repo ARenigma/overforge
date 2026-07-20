@@ -2,7 +2,12 @@
 // REST + outbox drain; no WebSockets in M1.
 
 import 'dotenv/config';
-import { initSentry, setupSentryErrorHandler } from './observability/sentry';
+import {
+  initSentry,
+  setupSentryErrorHandler,
+  captureException,
+  flushSentry,
+} from './observability/sentry';
 
 // Sentry must be initialised before any other imports so its instrumentation
 // can wrap modules as they are loaded.
@@ -10,11 +15,13 @@ initSentry();
 
 import express from 'express';
 import cors from 'cors';
+import { execFile } from 'child_process';
 import { interviewsRouter } from './http/interviews';
 import { requireInterviewer, isDevEmail } from './http/middleware';
 import { SUPPORTED_LANGUAGES } from './execution/docker';
 import { drainOutbox } from './notify/outbox';
 import { makeOutboxStore } from './db/interviews';
+import { createServiceClient } from './db/supabase';
 import { closeStaleInterviews, purgeExpiredData } from './interview/orchestrator';
 import { createEmailSender } from './notify/resend';
 import { requestLogMiddleware } from './observability/request-log';
@@ -114,6 +121,70 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', ts: new Date().toISOString() });
 });
 
+// ─────────────────────── Deep health check ───────────────────────
+// GET /health/deep — checks DB reachability and Docker socket liveness.
+// Cached for 10 s so hammering it cannot DOS the DB or Docker daemon.
+// Returns 200 {status:'ok', checks:{db:'ok', docker:'ok'}} or
+//         503 {status:'degraded', checks:{db:..., docker:...}} with failing component detail.
+
+interface DeepCheckResult {
+  db: string;
+  docker: string;
+}
+interface DeepHealthCache {
+  result: DeepCheckResult;
+  ts: number;
+}
+let deepHealthCache: DeepHealthCache | null = null;
+const DEEP_HEALTH_CACHE_MS = 10_000;
+const DEEP_HEALTH_PROBE_TIMEOUT_MS = 2500;
+
+async function checkDb(): Promise<string> {
+  const db = createServiceClient();
+  const race = new Promise<string>((_, reject) =>
+    setTimeout(() => reject(new Error('DB probe timed out')), DEEP_HEALTH_PROBE_TIMEOUT_MS)
+  );
+  try {
+    await Promise.race([db.from('interviews').select('id').limit(1), race]);
+    return 'ok';
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
+async function checkDocker(): Promise<string> {
+  const race = new Promise<string>((_, reject) =>
+    setTimeout(() => reject(new Error('Docker probe timed out')), DEEP_HEALTH_PROBE_TIMEOUT_MS)
+  );
+  const probe = new Promise<string>((resolve, reject) => {
+    execFile('docker', ['version', '--format', '{{.Server.Version}}'], { timeout: 2400 }, (err) => {
+      if (err) reject(err);
+      else resolve('ok');
+    });
+  });
+  try {
+    return await Promise.race([probe, race]);
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
+app.get('/health/deep', async (_req, res) => {
+  const now = Date.now();
+  if (deepHealthCache && now - deepHealthCache.ts < DEEP_HEALTH_CACHE_MS) {
+    const { result } = deepHealthCache;
+    const allOk = result.db === 'ok' && result.docker === 'ok';
+    res.status(allOk ? 200 : 503).json({ status: allOk ? 'ok' : 'degraded', checks: result });
+    return;
+  }
+
+  const [db, docker] = await Promise.all([checkDb(), checkDocker()]);
+  const result: DeepCheckResult = { db, docker };
+  deepHealthCache = { result, ts: now };
+  const allOk = db === 'ok' && docker === 'ok';
+  res.status(allOk ? 200 : 503).json({ status: allOk ? 'ok' : 'degraded', checks: result });
+});
+
 // ─────────────────────── Languages ───────────────────────
 
 app.get('/api/languages', (_req, res) => {
@@ -141,6 +212,25 @@ app.use((_req, res) => {
 // Captures unhandled route errors and forwards them to Sentry (no-op if DSN is unset).
 setupSentryErrorHandler(app);
 
+// ─────────────────────── Process-level error handlers ───────────────────────
+
+// Unhandled promise rejections: log + capture to Sentry; do NOT exit — a single async hiccup
+// (e.g. a failed background DB write) must not take down the server.
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandledRejection:', reason);
+  captureException(reason);
+});
+
+// Uncaught synchronous exceptions: capture to Sentry, flush (best-effort), then exit.
+// These leave the process in an unknown state so exit(1) is mandatory.
+process.on('uncaughtException', (err) => {
+  console.error('[server] uncaughtException:', err);
+  captureException(err);
+  flushSentry(2000)
+    .catch(() => undefined)
+    .finally(() => process.exit(1));
+});
+
 // ─────────────────────── Scheduled jobs ───────────────────────
 
 let drainInterval: ReturnType<typeof setInterval> | null = null;
@@ -152,6 +242,7 @@ function startDrainInterval(): void {
   drainInterval = setInterval(() => {
     drainOutbox(makeOutboxStore(), createEmailSender()).catch((err: unknown) => {
       console.error('[outbox] drain error:', err);
+      captureException(err);
     });
   }, 60_000);
   // Don't prevent graceful shutdown.
@@ -165,6 +256,7 @@ function startSweepInterval(): void {
   sweepInterval = setInterval(() => {
     closeStaleInterviews().catch((err: unknown) => {
       console.error('[sweep] close-stale error:', err);
+      captureException(err);
     });
   }, 300_000);
   sweepInterval.unref();
@@ -180,6 +272,7 @@ function startPurgeJob(): void {
   const runPurge = (): void => {
     purgeExpiredData().catch((err: unknown) => {
       console.error('[purge] error:', err);
+      captureException(err);
     });
   };
 
@@ -221,4 +314,6 @@ function shutdown(signal: string): void {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
-export { app };
+// server.ts intentionally exports nothing — app and all orchestrator functions are accessed
+// through their own modules. External tests that need a running Express instance should import
+// the router/orchestrator directly, not this entrypoint.

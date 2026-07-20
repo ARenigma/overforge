@@ -24,10 +24,6 @@ describe('validateSpeakText', () => {
     }
   });
 
-  test('accepts when interview is scored (closing line spoken after status flips)', () => {
-    expect(() => validateSpeakText(turnText, 'scored', turnText, null)).not.toThrow();
-  });
-
   // ── Rejection paths ───────────────────────────────────────────────────────────────────────────
 
   test('rejects arbitrary client text that matches nothing server-side → 422', () => {
@@ -44,6 +40,18 @@ describe('validateSpeakText', () => {
 
   test('rejects when interview is expired → 409', () => {
     expect(() => validateSpeakText(turnText, 'expired', turnText, null)).toThrow(
+      expect.objectContaining({ status: 409 })
+    );
+  });
+
+  test('rejects when interview is scored → 409 (interview over; no more TTS)', () => {
+    expect(() => validateSpeakText(turnText, 'scored', turnText, null)).toThrow(
+      expect.objectContaining({ status: 409 })
+    );
+  });
+
+  test('rejects when interview is completed → 409 (transitional scoring state; room is done)', () => {
+    expect(() => validateSpeakText(turnText, 'completed', turnText, null)).toThrow(
       expect.objectContaining({ status: 409 })
     );
   });

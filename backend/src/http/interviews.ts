@@ -9,8 +9,9 @@ import { hashToken } from '../interview/token';
 import type { SubmitIntent } from '../interview/types';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
-import { getById, recordVoiceTurn, recordProctorSignal } from '../db/interviews';
-import { IDLE_PROBE_LINES, validateSpeakText } from './speak-validation';
+import { getById, recordVoiceTurn, recordProctorSignal, updateInterview } from '../db/interviews';
+import { validateSpeakText } from './speak-validation';
+import { captureException } from '../observability/sentry';
 import { recordTtsCost } from '../cost/ledger';
 import {
   synthesize,
@@ -19,14 +20,20 @@ import {
   splitSentences,
   STREAM_SAMPLE_RATE,
 } from '../voice/cartesia';
+import type { RunResult } from '../execution/types';
 
 const router = Router();
 
 const MAX_SOURCE_BYTES = 64 * 1024;
 
-// Re-export IDLE_PROBE_LINES so callers can reference the canonical set without importing
-// speak-validation directly (keeps the public surface of this router module consistent).
-export { IDLE_PROBE_LINES };
+// Maximum code size for the snapshot route (generous; typical submissions are well under 64 KB).
+const MAX_SNAPSHOT_BYTES = 100_000;
+
+// Module-level LRU cache for /run deduplication. Maps interviewId → {requestId, result} so
+// a client retry (lost response) gets the exact same run result without re-executing. Capped
+// at 1000 entries; oldest entry is evicted when the cap is reached.
+const runDedupeCache = new Map<string, { requestId: string; result: RunResult }>();
+const RUN_DEDUPE_MAX = 1000;
 
 /**
  * Resolve the text to synthesise for /speak and /speak-stream.
@@ -87,9 +94,11 @@ function sendError(res: Response, err: unknown): void {
   // Only surface messages from errors we constructed deliberately (they carry a `status` and a safe
   // message). For unexpected, status-less throws — e.g. an upstream Cartesia error whose message
   // embeds the vendor name + raw response body — log the real error and return a generic message, so
-  // infrastructure/vendor detail never leaks to the candidate's browser.
+  // infrastructure/vendor detail never leaks to the candidate's browser. Capture to Sentry so these
+  // unexpected errors are observable even when DSN is unset (captureException is a no-op then).
   if (e?.status === undefined) {
     console.error('[interviews] unexpected error:', err);
+    captureException(err);
   }
   const message = e?.status !== undefined && e?.message ? e.message : 'Internal server error';
   res.status(status).json({ error: message });
@@ -167,6 +176,7 @@ router.post(
   requireInterviewer,
   async (req: Request, res: Response): Promise<void> => {
     try {
+      await enforceRateLimit(`regen:${req.userId}`, { limit: 10, windowMs: 3_600_000 });
       const result = await orchestrator.regenerateInvite(req.params.id, req.userId!);
       res.json({
         id: result.id,
@@ -188,6 +198,7 @@ router.post(
   requireInterviewer,
   async (req: Request, res: Response): Promise<void> => {
     try {
+      await enforceRateLimit(`cancel:${req.userId}`, { limit: 30, windowMs: 3_600_000 });
       await orchestrator.cancelInterview(req.params.id, req.userId!);
       res.json({ ok: true });
     } catch (err) {
@@ -201,6 +212,7 @@ router.post(
 
 router.delete('/:id', requireInterviewer, async (req: Request, res: Response): Promise<void> => {
   try {
+    await enforceRateLimit(`delete:${req.userId}`, { limit: 30, windowMs: 3_600_000 });
     await orchestrator.deleteInterview(req.params.id, req.userId!);
     res.json({ ok: true });
   } catch (err) {
@@ -216,6 +228,7 @@ router.post(
   requireInterviewer,
   async (req: Request, res: Response): Promise<void> => {
     try {
+      await enforceRateLimit(`rescore:${req.userId}`, { limit: 10, windowMs: 3_600_000 });
       await orchestrator.rescore(req.params.id, req.userId!);
       res.json({ ok: true });
     } catch (err) {
@@ -311,11 +324,12 @@ router.post('/:id/answer', async (req: Request, res: Response): Promise<void> =>
 router.post('/:id/run', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { token, language, source, stdin } = req.body as {
+    const { token, language, source, stdin, requestId } = req.body as {
       token?: string;
       language?: string;
       source?: string;
       stdin?: string;
+      requestId?: string;
     };
 
     await validateCandidate(id, token ?? '');
@@ -335,10 +349,91 @@ router.post('/:id/run', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Idempotency: if this exact requestId was already processed (lost response + client retry),
+    // return the cached result without re-executing. Single-slot per interviewId; safe for the
+    // single-process backend. The cache is module-level, not interview-locked, because a
+    // duplicate /run never changes DB state — it's purely a response-replay.
+    if (typeof requestId === 'string' && requestId) {
+      const cached = runDedupeCache.get(id);
+      if (cached?.requestId === requestId) {
+        res.json(orchestrator.stripHiddenTests(cached.result));
+        return;
+      }
+    }
+
     const result = await orchestrator.recordRun(id, { language, source, stdin });
+
+    // Cache the result for dedup. Evict the oldest entry when the cap is reached.
+    if (typeof requestId === 'string' && requestId) {
+      if (runDedupeCache.size >= RUN_DEDUPE_MAX) {
+        const firstKey = runDedupeCache.keys().next().value;
+        if (firstKey !== undefined) runDedupeCache.delete(firstKey);
+      }
+      runDedupeCache.set(id, { requestId, result });
+    }
+
     // Never leak hidden-test correctness to the candidate live — they see only their own
     // stdout/stderr + any interviewer hint. testResults is persisted server-side for grading + hints.
     res.json(orchestrator.stripHiddenTests(result));
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ─────────────────────── POST /api/interviews/:id/snapshot ───────────────────────
+// Candidate keepalive — persists the current editor code (and optionally language) without
+// triggering a code run or touching the FSM. Used by the room to save in-progress code so
+// a reload doesn't lose work. Auth: validateCandidate. Rate-limited (30/min per interview).
+// Only open during an in_progress interview in the coding phase. Responds 204 on success.
+// Accepts normal JSON (also works for beacon/keepalive — no custom headers required).
+
+router.post('/:id/snapshot', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { token, code, language } = req.body as {
+      token?: string;
+      code?: unknown;
+      language?: unknown;
+    };
+
+    await validateCandidate(id, token ?? '');
+    await enforceRateLimit(`snapshot:${id}`, { limit: 30, windowMs: 60_000 });
+
+    // Validate `code` — required, must be a string, and within the size limit.
+    if (typeof code !== 'string') {
+      res.status(400).json({ error: 'code is required and must be a string' });
+      return;
+    }
+    if (code.length > MAX_SNAPSHOT_BYTES) {
+      res.status(413).json({ error: 'code is too large (max 100 KB).' });
+      return;
+    }
+
+    // Guard: only open during an active in_progress interview in the coding phase.
+    const interview = await getById(id);
+    if (!interview) {
+      res.status(404).json({ error: 'Interview not found' });
+      return;
+    }
+    if (interview.status !== 'in_progress') {
+      res.status(409).json({ error: 'Interview is not in progress' });
+      return;
+    }
+    const ctx = interview.fsm_state as { phase?: string };
+    if (ctx.phase !== 'coding') {
+      res.status(409).json({ error: 'Code snapshots are only accepted during the coding phase' });
+      return;
+    }
+
+    // Persist — same column /run uses (code_snapshot). Language is optional; only written when
+    // provided and is a string (no migration needed — code_language already exists).
+    const patch: Parameters<typeof updateInterview>[1] = { code_snapshot: code };
+    if (typeof language === 'string' && language) {
+      patch.code_language = language;
+    }
+    await updateInterview(id, patch);
+
+    res.status(204).end();
   } catch (err) {
     sendError(res, err);
   }
@@ -557,12 +652,34 @@ router.post('/:id/speak-stream', async (req: Request, res: Response): Promise<vo
 router.post('/:id/finish', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { token } = req.body as { token?: string };
+    const { token, finalCode, finalLanguage } = req.body as {
+      token?: string;
+      finalCode?: unknown;
+      finalLanguage?: unknown;
+    };
 
     await validateCandidate(id, token ?? '');
     await enforceRateLimit(`finish:${hashToken(token ?? '')}`, { limit: 10, windowMs: 600_000 });
 
-    await orchestrator.finishAndScore(id);
+    // Optional final code snapshot — persisted before scoring so the scorer and dashboard see
+    // the candidate's terminal code (not a potentially stale /run snapshot).
+    let validatedCode: string | undefined;
+    let validatedLanguage: string | undefined;
+    if (typeof finalCode === 'string' && finalCode.length > 0) {
+      if (finalCode.length > MAX_SNAPSHOT_BYTES) {
+        res.status(413).json({ error: 'finalCode is too large (max 100 KB).' });
+        return;
+      }
+      validatedCode = finalCode;
+    }
+    if (typeof finalLanguage === 'string' && finalLanguage) {
+      validatedLanguage = finalLanguage;
+    }
+
+    await orchestrator.finishAndScore(id, {
+      ...(validatedCode !== undefined ? { finalCode: validatedCode } : {}),
+      ...(validatedLanguage !== undefined ? { finalLanguage: validatedLanguage } : {}),
+    });
     res.json({ ok: true });
   } catch (err) {
     sendError(res, err);

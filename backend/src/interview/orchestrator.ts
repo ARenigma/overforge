@@ -46,6 +46,8 @@ import {
   claimExpire,
   findStaleInvited,
   findInProgressPastDuration,
+  findStuckCompleted,
+  claimCompletedForRescore,
   insertOutbox,
   makeOutboxStore,
   getProctorSignalsForInterview,
@@ -109,17 +111,40 @@ function getExecutionKernel() {
 
 // ─────────────────────── Scoring client factory ───────────────────────
 
-/** The pinned grader client, or a stub that forces scorer's safe fallback when Minimax isn't
- *  configured. Shared by finishAndScore and closeStaleInterviews. */
+/**
+ * Failover grader client for finishAndScore. Mirrors the oracle's provider chain so a single
+ * 429 or transient outage doesn't permanently produce a fallback scorecard. Chain: MiniMax
+ * (reasoning model, preferred for deep grading) → Groq models (if configured, as backups).
+ * When nothing is configured, returns a stub that forces scorer.ts' safe fallbackScorecard path.
+ * The SCORING maxTokens caps (2048/4096 in scorer.ts) are applied per-call by scoreInterview,
+ * not here — they pass through the client's complete() opts unchanged.
+ */
 function getScoringClient(): MinimaxClient {
+  const entries: { name: string; client: MinimaxClient }[] = [];
+
   if (process.env.MINIMAX_API_KEY) {
-    return createMinimaxClient(minimaxConfigFromEnv());
+    entries.push({ name: 'minimax', client: createMinimaxClient(minimaxConfigFromEnv()) });
   }
-  return {
-    complete: async (): Promise<string> => {
-      throw new Error('Minimax not configured');
-    },
-  } as MinimaxClient;
+
+  if (process.env.GROQ_API_KEY) {
+    const groqConfigs = groqChainConfigs();
+    for (let i = 0; i < groqConfigs.length; i++) {
+      entries.push({
+        name: i === 0 ? 'groq:primary' : `groq:${groqConfigs[i].model}`,
+        client: createMinimaxClient(groqConfigs[i]),
+      });
+    }
+  }
+
+  if (entries.length === 0) {
+    return {
+      complete: async (): Promise<string> => {
+        throw new Error('No LLM configured for scoring');
+      },
+    } as MinimaxClient;
+  }
+
+  return createFailoverClient(entries);
 }
 
 // ─────────────────────── Token TTL ───────────────────────
@@ -1325,26 +1350,60 @@ async function attachRunIntervention(
 
 export async function finishAndScore(
   interviewId: string,
-  opts: { rescore?: boolean } = {}
+  opts: { rescore?: boolean; finalCode?: string; finalLanguage?: string } = {}
 ): Promise<boolean> {
-  // Single-flight idempotency: only the caller that atomically flips in_progress -> completed
-  // proceeds to score. claimForScoring matches WHERE status = 'in_progress', so a
-  // scored/completed/expired/abandoned/cancelled interview yields claimed=false here — the
-  // background (post-answer) path and the explicit /finish route can race; exactly one wins,
-  // so there's no double-score / double-email. Returns false on the no-op (lost-claim) path.
-  const claimed = await claimForScoring(interviewId);
-  if (!claimed) return false;
+  // ── Phase 1: claim + capture snapshot (under lock) ──────────────────────────────────────────
+  // withInterviewLock serialises this against concurrent submitAnswer calls so a late /answer
+  // cannot observe a stale fsm_state while we are committing the scoring transition.
+  // The lock is held only for the cheap DB round-trips; the slow LLM scoring call runs outside.
+  type SetupData = {
+    interview: Interview;
+    timedOut: boolean;
+    engaged: boolean;
+    priorTimeLimited: boolean;
+  };
 
-  // Re-fetch AFTER claiming so scoring sees every code run that landed before the claim — a
-  // concurrent /run's atomic append could otherwise slip in between an earlier read and the
-  // claim and be missed.
-  const interview = requireInterview(await getById(interviewId), interviewId);
+  const setup = await withInterviewLock(interviewId, async (): Promise<SetupData | null> => {
+    // Single-flight idempotency: only the caller that atomically flips in_progress -> completed
+    // proceeds to score. claimForScoring matches WHERE status = 'in_progress', so a
+    // scored/completed/expired/abandoned/cancelled interview yields claimed=false here — the
+    // background (post-answer) path and the explicit /finish route can race; exactly one wins,
+    // so there's no double-score / double-email. Returns null on the no-op (lost-claim) path.
+    const claimed = await claimForScoring(interviewId);
+    if (!claimed) return null;
 
-  // Capture the time-limit verdict NOW, before the (slow) scoring call — otherwise a finish in
-  // the last few seconds could be mislabeled when the LLM call pushes the clock past the cap.
-  const timedOut = durationExceeded(interview);
-  const engaged = (interview.transcript ?? []).some((t) => t.role === 'candidate');
-  const priorTimeLimited = interview.evaluation_score?.timeLimited === true;
+    // Persist the candidate's final code snapshot BEFORE scoring so the scorer and dashboard
+    // see the code as it was at the moment of finish (not a stale /run snapshot).
+    if (typeof opts.finalCode === 'string' && opts.finalCode.length > 0) {
+      const patch: Parameters<typeof updateInterview>[1] = {
+        code_snapshot: opts.finalCode,
+        ...(typeof opts.finalLanguage === 'string' && opts.finalLanguage
+          ? { code_language: opts.finalLanguage }
+          : {}),
+      };
+      await updateInterview(interviewId, patch);
+    }
+
+    // Re-fetch AFTER claiming (and after persisting finalCode) so scoring sees every code run
+    // that landed before the claim — a concurrent /run's atomic append could otherwise slip in
+    // between an earlier read and the claim and be missed.
+    const interview = requireInterview(await getById(interviewId), interviewId);
+
+    // Capture the time-limit verdict NOW, before the (slow) scoring call — otherwise a finish
+    // in the last few seconds could be mislabeled when the LLM call pushes the clock past cap.
+    const timedOut = durationExceeded(interview);
+    const engaged = (interview.transcript ?? []).some((t) => t.role === 'candidate');
+    const priorTimeLimited = interview.evaluation_score?.timeLimited === true;
+
+    return { interview, timedOut, engaged, priorTimeLimited };
+  });
+
+  if (!setup) return false;
+
+  const { interview, timedOut, engaged, priorTimeLimited } = setup;
+
+  // ── Phase 2: score OUTSIDE the lock (long LLM call) ─────────────────────────────────────────
+  // A slow scorer must not starve concurrent /answer calls for the same interview.
 
   const minimaxClient = getScoringClient();
 
@@ -1398,17 +1457,19 @@ export async function finishAndScore(
     scorecard.timeLimited = true;
   }
 
-  await updateInterview(interviewId, {
-    evaluation_score: scorecard,
-    status: 'scored',
-    phase: 'done',
-    // Keep fsm_state.phase in sync with the `phase` column. Without this, every scored
-    // interview permanently has phase='done' in the column but phase='scoring' in fsm_state,
-    // causing the two sources of truth to diverge for every reader that inspects fsm_state.
-    fsm_state: { ...(interview.fsm_state as InterviewContext), phase: 'done' },
+  // ── Phase 3: persist results (under lock) ───────────────────────────────────────────────────
+  await withInterviewLock(interviewId, async () => {
+    await updateInterview(interviewId, {
+      evaluation_score: scorecard,
+      status: 'scored',
+      phase: 'done',
+      // Keep fsm_state.phase in sync with the `phase` column. Without this, every scored
+      // interview permanently has phase='done' in the column but phase='scoring' in fsm_state,
+      // causing the two sources of truth to diverge for every reader that inspects fsm_state.
+      fsm_state: { ...(interview.fsm_state as InterviewContext), phase: 'done' },
+    });
+    await appendEvent(interviewId, 'score', { scorecard });
   });
-
-  await appendEvent(interviewId, 'score', { scorecard });
 
   // Roll up cost + metrics now that every cost_event (incl. the scorer's own) is recorded.
   // Best-effort inside — never blocks scorecard delivery.
@@ -1444,12 +1505,18 @@ function noShowScorecard(): Scorecard {
  *  - time-up (in_progress past the 60-min cap)    -> conclude + score via finishAndScore (which
  *      flags timeLimited / incomplete and emails). An actively-answering candidate is held out by
  *      the grace window and concludes itself client-side at 0:00; this catches the absent ones.
+ *  - stuck-completed (status='completed' > 30 min) -> scoring process crashed; re-run scoring.
  * CAS claims (claimExpire / claimForScoring inside finishAndScore) make it single-flight, so it
  * never double-sends and never races a candidate finishing at the wire.
  */
-export async function closeStaleInterviews(): Promise<{ noShow: number; concluded: number }> {
+export async function closeStaleInterviews(): Promise<{
+  noShow: number;
+  concluded: number;
+  rescored: number;
+}> {
   let noShow = 0;
   let concluded = 0;
+  let rescored = 0;
 
   // Per-row try/catch: one failed row (a DB hiccup) must not abort the rest of the sweep.
   for (const iv of await findStaleInvited()) {
@@ -1483,6 +1550,21 @@ export async function closeStaleInterviews(): Promise<{ noShow: number; conclude
     }
   }
 
+  // Recover interviews stranded at status='completed' (claimForScoring flipped in_progress →
+  // completed but the scoring process crashed before writing the scorecard). A row stuck here
+  // for >30 minutes is safe to re-score: CAS flips it back to in_progress so finishAndScore's
+  // normal claimForScoring path proceeds, and scoreInterview's fallbackScorecard guarantees
+  // termination even on repeated LLM failures.
+  const stuckCutoff = new Date(Date.now() - 30 * 60_000).toISOString();
+  for (const iv of await findStuckCompleted(stuckCutoff)) {
+    try {
+      if (!(await claimCompletedForRescore(iv.id))) continue; // another sweep already claimed it
+      if (await finishAndScore(iv.id)) rescored++;
+    } catch (err) {
+      console.error(`[sweep] stuck-completed rescore failed for ${iv.id}:`, err);
+    }
+  }
+
   // finishAndScore drains its own outbox; only the no-show rows need a drain here.
   if (noShow > 0) {
     try {
@@ -1491,7 +1573,7 @@ export async function closeStaleInterviews(): Promise<{ noShow: number; conclude
       // Non-fatal; the scheduled drain retries.
     }
   }
-  return { noShow, concluded };
+  return { noShow, concluded, rescored };
 }
 
 // ─────────────────────── Data-retention purge ───────────────────────
@@ -1502,7 +1584,16 @@ export async function closeStaleInterviews(): Promise<{ noShow: number; conclude
  * 'completed' is a transitional state (in_progress → scored); leaving it out is
  * a safety net in case a scoring job is mid-flight on a very slow scorer.
  */
-const PURGEABLE_STATUSES: InterviewStatus[] = ['scored', 'cancelled', 'expired', 'abandoned'];
+const PURGEABLE_STATUSES: InterviewStatus[] = [
+  'scored',
+  'cancelled',
+  'expired',
+  'abandoned',
+  // 'completed' is a transitional state (in_progress → scored); the 30-min sweep re-scores any
+  // row that has been stuck here, so by the time retention runs a 'completed' row is a stale
+  // artefact from an old crash and safe to purge.
+  'completed',
+];
 
 /**
  * Hard-delete interviews that are both (a) in a terminal status and (b) older than

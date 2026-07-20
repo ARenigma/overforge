@@ -29,7 +29,8 @@ const IDLE_PROBE_SET = new Set<string>(IDLE_PROBE_LINES);
  *   (b) `runText`   — the latest run-hint intervention text, or
  *   (c) one of the IDLE_PROBE_LINES (voice-only, never persisted).
  *
- * Throws 409 when the interview is cancelled or expired (no synthesis permitted).
+ * Throws 409 when the interview is cancelled, expired, completed, or scored (no synthesis
+ * permitted once the interview has ended or is in terminal scoring state).
  * Throws 422 when none of the above conditions match (text does not match a server utterance).
  *
  * @param trimmedText - Client-supplied text, already `.trim()`-ed by the caller.
@@ -43,8 +44,13 @@ export function validateSpeakText(
   turnText: string | null,
   runText: string | null
 ): void {
-  // Cancelled / expired: no TTS synthesis is permitted regardless of text content.
-  if (status === 'cancelled' || status === 'expired') {
+  // Terminal or post-scoring statuses: no TTS synthesis is permitted.
+  if (
+    status === 'cancelled' ||
+    status === 'expired' ||
+    status === 'completed' ||
+    status === 'scored'
+  ) {
     throw Object.assign(new Error('Interview is not active.'), { status: 409 });
   }
 

@@ -19,8 +19,8 @@ import { OracleDecision, InterventionKind, Effect } from './types';
 import { recordLlmUsage } from '../cost/ledger';
 
 // NOTE: MinimaxConfig + createMinimaxClient are OpenAI-compatible (Bearer auth, request shape, and
-// {choices:[{message:{content}}]} response) — so the SAME client backs Groq (see groqConfigFromEnv);
-// only the base URL / model / key (and an optional reasoning_effort) differ.
+// {choices:[{message:{content}}]} response) — so the SAME client backs Groq (see groqChainConfigs)
+// and Cerebras; only the base URL / model / key (and an optional reasoning_effort) differ.
 export interface MinimaxConfig {
   apiKey: string;
   model: string; // pinned, e.g. process.env.MINIMAX_LLM_MODEL
@@ -88,23 +88,6 @@ export function cerebrasConfig(): MinimaxConfig {
 }
 
 /**
- * Groq-backed FAST-oracle config (OpenAI-compatible → reuses createMinimaxClient). Groq's LPU serves
- * GPT-OSS at ~0.5s TTFT — ~10x faster than MiniMax's reasoning model for real-time conversational
- * turns (measured: gpt-oss-120b ~0.55s TTFT, same as 20b). GROQ_MODEL is swappable (default
- * gpt-oss-120b; 'openai/gpt-oss-20b' as a lighter fallback) so models can be A/B'd from prod
- * voice.turn telemetry. reasoning_effort=low minimizes TTFT. The final scorecard grading stays on
- * MiniMax (see orchestrator getScoringClient) — split-brain: fast turns, deep async scoring.
- */
-export function groqConfigFromEnv(): MinimaxConfig {
-  return {
-    apiKey: process.env.GROQ_API_KEY ?? '',
-    model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
-    baseUrl: GROQ_BASE_URL,
-    reasoningEffort: process.env.GROQ_REASONING_EFFORT || 'low',
-  };
-}
-
-/**
  * Ordered Groq failover chain. Groq rate-limits are PER-MODEL, so each entry is a distinct model
  * with its OWN untouched bucket — cascading on a 429 is free extra capacity, not limit-dodging
  * (single key, legit calls). Each carries its VERIFIED reasoning_effort — a wrong value 400s the
@@ -145,11 +128,20 @@ export function groqChainConfigs(): MinimaxConfig[] {
   }));
 }
 
+// Aggregate wall-clock budget across the entire failover chain. When this is exceeded no further
+// providers are attempted, regardless of how many remain. Per-provider timeout (LLM_TIMEOUT_MS,
+// default 30s) still applies to each individual call; this caps the TOTAL latency of the chain
+// so a cascade of slow-but-not-timeout providers can't stall a route indefinitely.
+const CHAIN_DEADLINE_MS = 90_000;
+
 /**
  * Chains clients so a rate-limited / down primary transparently fails over to the next. Advances to
  * the next client ONLY on a retryable failure (HTTP 429, any 5xx, or a network error with no status)
  * — a 4xx config error is rethrown immediately (another model won't fix a malformed request). The
  * caller keeps its own last-resort (DeterministicOracle) for when every client in the chain fails.
+ *
+ * Aggregate deadline: if the total elapsed time across all attempts reaches CHAIN_DEADLINE_MS
+ * (90s), no further providers are tried and the last error is rethrown immediately.
  */
 export function createFailoverClient(
   entries: { name: string; client: MinimaxClient }[]
@@ -157,8 +149,14 @@ export function createFailoverClient(
   if (entries.length === 0) throw new Error('createFailoverClient: no clients');
   return {
     async complete(messages: ChatMessage[], opts: CompleteOptions = {}): Promise<string> {
+      const deadline = Date.now() + CHAIN_DEADLINE_MS;
       let lastErr: unknown;
       for (let i = 0; i < entries.length; i++) {
+        if (Date.now() >= deadline) {
+          throw Object.assign(new Error('LLM chain deadline exceeded (90s total budget)'), {
+            status: 503,
+          });
+        }
         const { name, client } = entries[i];
         try {
           return await client.complete(messages, opts);

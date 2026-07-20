@@ -388,6 +388,31 @@ export function claimExpire(id: string): Promise<boolean> {
   return claimStatus(id, 'invited', 'expired');
 }
 
+/**
+ * Find interviews stranded in 'completed' (claimForScoring flipped in_progress→completed but
+ * the scoring process crashed before it could write the scorecard). Rows older than
+ * staleCutoffIso are eligible for a re-score sweep.
+ */
+export async function findStuckCompleted(staleCutoffIso: string): Promise<Interview[]> {
+  const db = createServiceClient();
+  const { data, error } = await db
+    .from('interviews')
+    .select('*')
+    .eq('status', 'completed')
+    .lt('updated_at', staleCutoffIso);
+  if (error) throw new Error(`findStuckCompleted: ${error.message}`);
+  return (data ?? []) as Interview[];
+}
+
+/**
+ * CAS: flip a stranded 'completed' row back to 'in_progress' so finishAndScore can
+ * re-claim it via the normal claimForScoring path. Returns true only for the caller
+ * that performed the flip (single-flight guarantee).
+ */
+export function claimCompletedForRescore(id: string): Promise<boolean> {
+  return claimStatus(id, 'completed', 'in_progress');
+}
+
 // ─────────────────────── Voice turn telemetry ───────────────────────
 
 export interface VoiceTurnRecord {
@@ -555,7 +580,7 @@ export async function insertOutbox(interviewId: string): Promise<void> {
 }
 
 /** Cap on delivery attempts before an outbox row is permanently marked failed. */
-const MAX_OUTBOX_ATTEMPTS = 5;
+const MAX_OUTBOX_ATTEMPTS = 8;
 
 /** Returns an OutboxStore implementation backed by the live DB. */
 export function makeOutboxStore(): OutboxStore {
@@ -565,7 +590,7 @@ export function makeOutboxStore(): OutboxStore {
 
       const { data: rows, error } = await db
         .from('notify_outbox')
-        .select('id, interview_id, attempts')
+        .select('id, interview_id, attempts, updated_at')
         .eq('status', 'pending')
         .order('created_at', { ascending: true })
         .limit(limit);
@@ -575,7 +600,22 @@ export function makeOutboxStore(): OutboxStore {
 
       const items: ScorecardOutboxItem[] = [];
 
-      for (const row of rows as Array<{ id: number; interview_id: string; attempts: number }>) {
+      for (const row of rows as Array<{
+        id: number;
+        interview_id: string;
+        attempts: number;
+        updated_at: string | null;
+      }>) {
+        // Exponential backoff: next_eligible = updated_at + min(60s × 2^attempts, 1h).
+        // Attempts=0 rows are freshly inserted and always eligible immediately (delay=60s but
+        // they were just written so updated_at is now; actual first-try happens on next drain
+        // cycle — acceptable). Rows that have failed and been returned to 'pending' wait.
+        if (row.attempts > 0 && row.updated_at) {
+          const delayMs = Math.min(60_000 * Math.pow(2, row.attempts), 3_600_000);
+          const eligibleAt = new Date(row.updated_at).getTime() + delayMs;
+          if (Date.now() < eligibleAt) continue; // not yet eligible — skip this drain cycle
+        }
+
         // Give up after too many tries so a permanently-failing row can't loop forever.
         if (row.attempts >= MAX_OUTBOX_ATTEMPTS) {
           await db.from('notify_outbox').update({ status: 'failed' }).eq('id', row.id);
