@@ -44,16 +44,15 @@ the code-run channel (race-free; excluded from run signals, the assist budget, a
   the nudged candidate then acted, false positives on genuine thinking) and tune the windows +
   consider a wall-clock stagnation backstop.
 
-## 3. Mid-speech active-listening backchannels (held — V1.1-adjacent)
+## 3. ~~Mid-speech active-listening backchannels~~ **✗ REJECTED 2026-07-20 ("we don't need backchannel")**
 
 Lightweight audio backchannels ("mm-hmm", "right") injected *during* a long candidate answer (not just
 post-EOT). The old post-EOT "thinking filler" infrastructure (`backend/src/voice/fillers.ts` +
 `fillerCache.ts` + `frontend/lib/voice/play-filler.ts`) was **removed as slop 2026-07-04** — the
-thinking filler was killed (it bled into the mic → self-echo), so its code was dead. This feature
-would be **rebuilt from spec** if authorized; it stays adjacent to the V1.1 proactive hold and
-**requires explicit authorization**.
+thinking filler was killed (it bled into the mic → self-echo), so its code was dead.
 
-- **Revisit trigger:** explicit go from Amit (bundled with, or after, the V1.1 decision).
+- **Decision:** Amit explicitly rejected the feature 2026-07-20. Do not build. Voice quality effort
+  goes to voice *selection* (more natural Cartesia voice IDs) instead.
 
 ## 4. Audio "second-voice" detection — anti-cheat Phase 2 (gated 2026-06-30)
 
