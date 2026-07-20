@@ -79,23 +79,11 @@ export interface ServerClosing {
 /** Discriminated union of all server→client JSON cues. */
 export type VoiceCue = ServerReady | ServerThinking | ServerTurnReady | ServerError | ServerClosing;
 
-// ── WebSocket close codes (4xxx = application-defined, mirrors ws_protocol.py) ─
-
-export const WS_CLOSE = {
-  BAD_PROTOCOL: 4400,
-  UNAUTHORIZED: 4401,
-  ORIGIN_DENIED: 4403,
-  HANDSHAKE_TIMEOUT: 4408,
-  NOT_IN_PROGRESS: 4409,
-  AT_CAPACITY: 4503,
-} as const;
-
-// ── Audio frame constants (must match ws_protocol.py exactly) ────────────────
-
-export const AUDIO = {
-  SAMPLE_RATE: 16_000,
-  FRAME_SAMPLES: 512,
-  BYTES_PER_SAMPLE: 2,
-  /** MUST be exactly 1024 bytes — server hard-rejects any other size. */
-  FRAME_BYTES: 1024,
-} as const;
+// ── Protocol constants (consumers hardcode these values — kept here for reference only) ──
+// WebSocket close codes (4xxx = application-defined, mirrors ws_protocol.py):
+//   BAD_PROTOCOL=4400, UNAUTHORIZED=4401, ORIGIN_DENIED=4403,
+//   HANDSHAKE_TIMEOUT=4408, NOT_IN_PROGRESS=4409, AT_CAPACITY=4503
+//
+// Audio frame constants (must match ws_protocol.py exactly):
+//   SAMPLE_RATE=16000, FRAME_SAMPLES=512, BYTES_PER_SAMPLE=2, FRAME_BYTES=1024
+//   FRAME_BYTES MUST be exactly 1024 bytes — server hard-rejects any other size.

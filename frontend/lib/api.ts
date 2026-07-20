@@ -110,10 +110,12 @@ interface FetchOptions {
   method?: string;
   body?: unknown;
   accessToken?: string;
+  /** Per-call timeout in ms. Defaults to 30 s; increase for slow backend routes. */
+  timeoutMs?: number;
 }
 
 async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T> {
-  const { method = 'POST', body, accessToken } = options;
+  const { method = 'POST', body, accessToken, timeoutMs = 30_000 } = options;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -122,24 +124,40 @@ async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T>
     headers['Authorization'] = `Bearer ${accessToken}`;
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  // Per-call timeout: an AbortController fires after `timeoutMs` so a blackholed
+  // connection never leaves the room stuck forever with the composer disabled.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
-  if (!res.ok) {
-    let message = `Request failed: ${res.status}`;
-    try {
-      const json = (await res.json()) as { error?: string };
-      if (json.error) message = json.error;
-    } catch {
-      // ignore parse error; use the status-based message above
+  try {
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    });
+
+    if (!res.ok) {
+      let message = `Request failed: ${res.status}`;
+      try {
+        const json = (await res.json()) as { error?: string };
+        if (json.error) message = json.error;
+      } catch {
+        // ignore parse error; use the status-based message above
+      }
+      throw new Error(message);
     }
-    throw new Error(message);
-  }
 
-  return res.json() as Promise<T>;
+    return res.json() as Promise<T>;
+  } catch (err: unknown) {
+    // Surface a readable message so existing catch paths show their error UI.
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('Request timed out — please try again.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 // ── Interviewer endpoints ─────────────────────────────────────────────────────
@@ -267,6 +285,8 @@ export async function answerInterview(
       ...(intent !== 'answer' ? { intent } : {}),
       ...(submittedCode !== undefined ? { submittedCode } : {}),
     },
+    // LLM turns legitimately take up to ~60-90 s; a 30 s default would timeout real turns.
+    timeoutMs: 90_000,
   });
 }
 
@@ -283,6 +303,8 @@ export async function runCode(
 ): Promise<RunResult> {
   return apiFetch<RunResult>(`/api/interviews/${id}/run`, {
     body: { token, language, source, ...(stdin !== undefined ? { stdin } : {}) },
+    // Docker cold-starts can take ~30 s; give the executor a generous budget.
+    timeoutMs: 60_000,
   });
 }
 
@@ -311,11 +333,38 @@ export async function nudgeCandidate(
 /**
  * POST /api/interviews/:id/finish
  * Marks the interview as complete. Idempotent.
+ * `finalCode`/`finalLanguage` carry the last editor state so the backend can persist
+ * it even if the candidate never hit Run or Submit (covers reload/crash/End/time-up).
  */
-export async function finishInterview(id: string, token: string): Promise<{ ok: boolean }> {
+export async function finishInterview(
+  id: string,
+  token: string,
+  finalCode?: string,
+  finalLanguage?: string
+): Promise<{ ok: boolean }> {
   return apiFetch<{ ok: boolean }>(`/api/interviews/${id}/finish`, {
-    body: { token },
+    body: {
+      token,
+      ...(finalCode !== undefined ? { finalCode } : {}),
+      ...(finalLanguage !== undefined ? { finalLanguage } : {}),
+    },
+    timeoutMs: 60_000,
   });
+}
+
+/**
+ * POST /api/interviews/:id/snapshot
+ * Persists the current editor code as a lightweight autosave checkpoint.
+ * Fire-and-forget (204 expected). Uses keepalive:true so in-flight requests survive
+ * page unload (beforeunload / pagehide flush).
+ */
+export function snapshotCode(id: string, token: string, code: string, language: string): void {
+  fetch(`${BASE_URL}/api/interviews/${id}/snapshot`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, code, language }),
+    keepalive: true,
+  }).catch(() => undefined);
 }
 
 /**

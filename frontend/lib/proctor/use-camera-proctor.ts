@@ -236,6 +236,21 @@ export function useCameraProctor({
 
     streamRef.current = stream;
 
+    // Detect camera revocation mid-interview (OS/browser withdraws permission).
+    // Flipping to 'denied' turns the header DeviceIndicator off-green so the candidate
+    // (and the interviewer reviewing signals) sees that proctoring has lapsed.
+    // The deliberate stop() path also fires 'ended' (track.stop() is synchronous), but
+    // stop() calls setCameraState('idle') afterward in the same React batch, so the net
+    // committed state stays 'idle' — no false 'denied' flash on intentional stop.
+    const videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.addEventListener('ended', () => {
+        setCameraState('denied');
+        // Flush any pending window so the backend records the signal gap.
+        if (accumRef.current.samples > 0) flushWindow();
+      });
+    }
+
     // 2. Attach stream to a hidden but DOM-CONNECTED video element. A detached (not-in-DOM)
     // video does NOT reliably decode frames in Chrome — readyState stays < 2 and drawImage
     // captures nothing, so no frame ever reaches the worker (this produced zero signals in the

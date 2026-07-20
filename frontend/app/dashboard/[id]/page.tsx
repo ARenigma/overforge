@@ -19,7 +19,10 @@ export default async function InterviewDetailPage({ params }: { params: { id: st
     .eq('id', params.id)
     .single();
 
-  if (error || !data) notFound();
+  // A Supabase error means a DB/network problem — throw so the error boundary renders.
+  // Only call notFound() when the query succeeded but returned no row (genuinely missing).
+  if (error) throw new Error(`Failed to load interview: ${error.message}`);
+  if (!data) notFound();
   const iv = data as unknown as InterviewDetail;
 
   return (

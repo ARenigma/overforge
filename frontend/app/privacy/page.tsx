@@ -93,16 +93,40 @@ export default function PrivacyPage() {
               primary database (PostgreSQL, hosted on AWS)
             </li>
             <li>
+              <span className="font-medium text-foreground">Vercel</span> — frontend hosting and
+              edge functions
+            </li>
+            <li>
+              <span className="font-medium text-foreground">AssemblyAI</span> — real-time
+              speech-to-text transcription of candidate audio
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Soniox</span> — secondary speech-to-text
+              used for transcription-quality evaluation
+            </li>
+            <li>
               <span className="font-medium text-foreground">Cartesia</span> — text-to-speech for the
               AI interviewer voice
             </li>
             <li>
               <span className="font-medium text-foreground">MiniMax</span> — large language model
-              for question generation and scoring
+              inference on interview responses
             </li>
             <li>
-              <span className="font-medium text-foreground">Vercel</span> — frontend hosting and
-              edge functions
+              <span className="font-medium text-foreground">Groq</span> — large language model
+              inference on interview responses
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Cerebras</span> — large language model
+              inference (fallback)
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Resend</span> — transactional email
+              delivery of candidate result notifications
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Sentry</span> — error monitoring; may
+              process request metadata
             </li>
           </ul>
           <p className="mt-3">
@@ -132,8 +156,7 @@ export default function PrivacyPage() {
             </li>
             <li>
               <span className="font-medium text-foreground">Scorecards and transcripts:</span>{' '}
-              Retained for the duration of your subscription plus 90 days, unless earlier deletion
-              is requested.
+              Retained for 90 days after the interview, then permanently deleted.
             </li>
             <li>
               <span className="font-medium text-foreground">Account data:</span> Retained until

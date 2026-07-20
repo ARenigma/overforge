@@ -41,6 +41,7 @@ import {
   fetchCodingProblem,
   finishInterview,
   getInterviewState,
+  snapshotCode,
   type InterviewPhase,
   type RunResult,
   type PublicProblem,
@@ -607,6 +608,16 @@ export default function InterviewPage() {
   useEffect(() => {
     devModeRef.current = devMode;
   }, [devMode]);
+  // Live mirror for the current editor language — needed in autosave/finish closures that must
+  // read the latest language without re-creating stable callbacks.
+  const langRef = useRef<Language>(language);
+  useEffect(() => {
+    langRef.current = language;
+  }, [language]);
+  // Autosave bookkeeping: the string most recently persisted to the backend, and the pending
+  // debounce timer. Both are refs so they never cause re-renders.
+  const lastSnapshotRef = useRef('');
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Conversation is activity too: a candidate asking a clarifying question (or reading the
   // interviewer's reply) is engaged, not stalled — any new message resets the idle clock so the
   // detector can never nudge into the middle of an exchange.
@@ -829,7 +840,12 @@ export default function InterviewPage() {
       setStage('done');
       if (activeToken) {
         concludeCalledRef.current = true;
-        finishInterview(id, activeToken).catch(() => undefined);
+        finishInterview(
+          id,
+          activeToken,
+          codeRef.current.trim() ? codeRef.current : undefined,
+          codeRef.current.trim() ? langRef.current : undefined
+        ).catch(() => undefined);
       }
     }
   }, [elapsed, durationSec, stage, activeToken, id]);
@@ -838,11 +854,72 @@ export default function InterviewPage() {
   useEffect(() => {
     if (phase === 'done' && !concludeCalledRef.current && activeToken) {
       concludeCalledRef.current = true;
-      finishInterview(id, activeToken).catch(() => {
+      finishInterview(
+        id,
+        activeToken,
+        codeRef.current.trim() ? codeRef.current : undefined,
+        codeRef.current.trim() ? langRef.current : undefined
+      ).catch(() => {
         // Idempotent — ignore errors silently
       });
     }
   }, [phase, id, activeToken]);
+
+  // ── Autosave: flush code snapshot on tab-hide or page unload ─────────────────
+  // The debounced save in handleCodeChange fires 3 s after the last keystroke; this
+  // effect covers the gap — it fires a final snapshot when the candidate hides the
+  // tab or the browser starts unloading the page, so code is never silently lost to
+  // a crash, reload, or End-button with no prior run/submit. All state is read via
+  // live refs so stale closure is not a risk. Cleanup also cancels the debounce timer.
+  useEffect(() => {
+    if (stage !== 'interview') return;
+
+    const doFlush = () => {
+      const tok = activeTokenRef.current;
+      const currentCode = codeRef.current;
+      if (phaseRef.current !== 'coding' || !currentCode.trim() || !tok) return;
+      if (currentCode === lastSnapshotRef.current) return;
+      lastSnapshotRef.current = currentCode;
+      snapshotCode(id, tok, currentCode, langRef.current);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') doFlush();
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pagehide', doFlush);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pagehide', doFlush);
+      if (autosaveTimerRef.current !== null) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+  }, [stage, id]);
+
+  // ── Beforeunload guard ────────────────────────────────────────────────────────
+  // While the candidate is coding AND has unsaved changes, trigger the browser's
+  // native "Leave site?" dialog and fire a final keepalive snapshot so the code
+  // survives even if they confirm the leave. The handler reads live refs; no
+  // re-register needed when phase/code change.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (phaseRef.current !== 'coding') return;
+      const currentCode = codeRef.current;
+      if (!currentCode.trim() || currentCode === lastSnapshotRef.current) return;
+      const tok = activeTokenRef.current;
+      if (tok) snapshotCode(id, tok, currentCode, langRef.current);
+      e.preventDefault();
+      // Legacy browsers require returnValue (modern browsers ignore the string value).
+      e.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [id]);
 
   // Decide the entry stage: a saved session (reload / new tab) must RE-CONSENT before re-entering the
   // room (reloading must not bypass proctoring), so it shows the consent screen too — not an
@@ -1004,7 +1081,12 @@ export default function InterviewPage() {
     concludeCalledRef.current = true;
     setStage('done');
     try {
-      await finishInterview(id, activeToken);
+      await finishInterview(
+        id,
+        activeToken,
+        codeRef.current.trim() ? codeRef.current : undefined,
+        codeRef.current.trim() ? langRef.current : undefined
+      );
     } catch {
       // Idempotent server-side — ignore.
     }
@@ -1261,6 +1343,18 @@ export default function InterviewPage() {
   const handleCodeChange = useCallback((value: string) => {
     lastKeystrokeRef.current = Date.now();
     setCode(value);
+    // Debounce autosave: schedule a keepalive snapshot 3 s after the last keystroke.
+    // All state is read from live refs so this closure is safe with empty deps.
+    if (autosaveTimerRef.current !== null) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      autosaveTimerRef.current = null;
+      const tok = activeTokenRef.current;
+      if (phaseRef.current !== 'coding' || !value.trim() || !tok) return;
+      if (value === lastSnapshotRef.current) return;
+      lastSnapshotRef.current = value;
+      snapshotCode(id, tok, value, langRef.current);
+    }, 3_000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleRunCode = useCallback(async () => {
@@ -1398,8 +1492,13 @@ export default function InterviewPage() {
                 Face presence and additional people in the room are analyzed{' '}
                 <strong className="text-foreground">entirely in your browser</strong> — no video is
                 recorded or uploaded. Your microphone is used to transcribe your spoken answers;
-                audio is streamed for speech-to-text and is not stored. Only anonymized session
-                flags and transcripts are sent.
+                audio is streamed for speech-to-text and is not stored. Your answers, code, and
+                session signals are recorded and processed by the AI interviewer and the service
+                providers listed in our{' '}
+                <a href="/privacy" className="underline underline-offset-2 hover:text-foreground">
+                  Privacy Policy
+                </a>
+                .
               </li>
             </ul>
             <p>
@@ -1963,7 +2062,12 @@ export default function InterviewPage() {
 
               {/* Transcript scroll area. (The coding problem no longer lives here — it's the
                   ProblemDock split beside the editor, in the left pane.) */}
-              <div className="flex-1 space-y-4 overflow-y-auto p-4">
+              <div
+                role="log"
+                aria-live="polite"
+                aria-label="Interview transcript"
+                className="flex-1 space-y-4 overflow-y-auto p-4"
+              >
                 {messages.map((msg, idx) => {
                   const isCandidate = msg.role === 'candidate';
                   return (
@@ -2067,6 +2171,7 @@ export default function InterviewPage() {
                       }
                     }}
                     disabled={aiThinking}
+                    aria-label="Your answer"
                     placeholder="Type your answer…"
                     rows={1}
                     spellCheck={false}

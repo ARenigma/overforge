@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,6 +13,20 @@ import { Wordmark } from '@/components/marketing/wordmark';
 import { Reveal } from '@/components/marketing/reveal';
 import { cn } from '@/lib/utils';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
+
+// Reads ?error= from OAuth callback redirects and surfaces it via a callback.
+// Isolated in its own component so it can be wrapped in Suspense — required by
+// Next.js 14 when useSearchParams is used in a statically-prerendered segment.
+function SearchParamReader({ onError }: { onError: (msg: string) => void }) {
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const urlErr = searchParams.get('error');
+    if (urlErr) onError(urlErr);
+    // Run once on mount only — auth page is not a live param-reactive view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
+}
 
 type AuthMode = 'signin' | 'signup';
 
@@ -185,6 +200,9 @@ export default function AuthPage() {
 
   return (
     <div className="relative min-h-screen bg-background flex flex-col items-center justify-center px-4">
+      <Suspense>
+        <SearchParamReader onError={setError} />
+      </Suspense>
       <Link
         href="/"
         aria-label="Overforge — home"

@@ -255,7 +255,11 @@ export function InterviewTable({
                     className="px-2 py-3.5 align-middle text-right"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <InterviewRowActions id={interview.id} status={interview.status} />
+                    <InterviewRowActions
+                      id={interview.id}
+                      status={interview.status}
+                      candidateEmail={interview.candidate_email ?? undefined}
+                    />
                   </td>
                 </motion.tr>
               ))}

@@ -58,7 +58,6 @@ interface EnhancedCodeMirrorEditorProps {
   value: string;
   onCodeChangeAction: (value: string) => void;
   language?: string;
-  searchQuery?: string;
   tabSize?: number;
   onCursorPositionChangeAction?: (line: number, col: number) => void;
   onExecuteAction?: () => void;
@@ -73,7 +72,6 @@ export function EnhancedCodeMirrorEditor({
   value,
   onCodeChangeAction,
   language = 'python',
-  searchQuery = '',
   tabSize = 4,
   onCursorPositionChangeAction,
   onExecuteAction,
@@ -84,7 +82,6 @@ export function EnhancedCodeMirrorEditor({
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const isRecreatingRef = useRef(false); // Track when editor is being recreated
-  const lastValueRef = useRef<string>(value); // Track last value
   // Bumped when the app's light/dark class flips, so the editor rebuilds with the matching theme
   // (the syntax HighlightStyle is static and can't track a token live).
   const [themeVersion, setThemeVersion] = useState(0);

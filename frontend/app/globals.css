@@ -82,21 +82,12 @@
        light mode (a light amber/green on white disappears). */
     --ring: var(--primary);
     --success: 152 58% 35%;
-    --chart-1: var(--primary);
-    --sidebar-primary: var(--primary);
-    --sidebar-ring: var(--primary);
 
     /* Chart palette — equal-ish L/C, hues only (trace 232 · cyan 205 · violet 288 · amber 40 · green 152). */
     --chart-2: 205 78% 46%;
     --chart-3: 288 52% 52%;
     --chart-4: 40 88% 44%;
     --chart-5: 152 55% 40%;
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 0 0% 32%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 95%;
-    --sidebar-accent-foreground: 0 0% 15%;
-    --sidebar-border: 0 0% 90%;
   }
 
   .dark {
@@ -138,20 +129,11 @@
 
     --ring: var(--primary);
     --success: 152 55% 56%;
-    --chart-1: var(--primary);
-    --sidebar-primary: var(--primary);
-    --sidebar-ring: var(--primary);
 
     --chart-2: 205 82% 66%;
     --chart-3: 288 60% 72%;
     --chart-4: 42 88% 64%;
     --chart-5: 152 55% 58%;
-    --sidebar-background: 0 0% 8%;
-    --sidebar-foreground: 0 0% 74%;
-    --sidebar-primary-foreground: 230 45% 9%;
-    --sidebar-accent: 0 0% 13%;
-    --sidebar-accent-foreground: 0 0% 93%;
-    --sidebar-border: 0 0% 13%;
   }
 }
 

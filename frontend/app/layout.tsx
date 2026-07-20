@@ -5,7 +5,6 @@ import { GeistSans } from 'geist/font/sans';
 import { GeistMono } from 'geist/font/mono';
 import './globals.css';
 import { ThemeProvider } from '@/components/theme-provider';
-import { Toaster } from '@/components/ui/toaster';
 import { Toaster as SonnerToaster } from 'sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { CommandMenuProvider } from '@/components/providers/command-menu-provider';
@@ -54,7 +53,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             storageKey="overforge-theme"
           >
             <TooltipProvider delayDuration={300}>{children}</TooltipProvider>
-            <Toaster />
             <SonnerToaster
               position="bottom-right"
               toastOptions={{
