@@ -40,6 +40,11 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '5'
     depends_on:
       - backend
       - voice
@@ -55,9 +60,16 @@ services:
     pids_limit: 512
     env_file:
       - ./backend.env
+      - path: ./release.env
+        required: false
     environment:
       NODE_ENV: production
       PORT: '5001'
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '5'
     expose:
       - '5001'
     # Docker-out-of-Docker: the (trusted) backend drives the host daemon to run
@@ -97,6 +109,11 @@ services:
       # never overlaps oral speech, so the old cap of 2 just throttled STT (~4-6s → ~2-3s at 4
       # threads; whisper-small is ~1s unthrottled). Concurrency still bounded by STT_CONCURRENCY.
       OMP_NUM_THREADS: '4'
+    logging:
+      driver: json-file
+      options:
+        max-size: '20m'
+        max-file: '5'
     expose:
       - '5002'
     depends_on:

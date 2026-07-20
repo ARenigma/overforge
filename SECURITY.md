@@ -39,6 +39,6 @@ The git history rewrite only removes the secrets from this repository. The actua
 - **No secrets in code, ever.** All runtime secrets come from environment variables loaded from `.env` files. `.env` is git-ignored. `.env.example` files document the shape of required env vars without values.
 - **No conversation dumps in VCS.** `.specstory/history/` and the root-level `specstory.md` are git-ignored. Specstory transcripts stay local to the developer who generated them.
 - **No test fixtures with real keys.** `ai_module/simple_api_test.py` and similar files must use mocked providers, not live API calls.
-- **Pre-commit gates.** Husky `pre-commit` runs prettier + gitleaks on staged files. `pre-push` runs a `.env` leak check across the working tree.
-- **CI gates.** GitHub Actions runs `gitleaks` on every PR and push to `main`, with `fetch-depth: 0` so the full history is scanned. A leak fails the build.
+- **Pre-commit gates.** Husky `pre-commit` runs lint-staged/prettier on staged files. Gitleaks does NOT run in the pre-commit hook. `pre-push` runs a `.env` leak check across the working tree.
+- **CI gates.** GitLab CI runs `gitleaks` on every merge request and push to `main` (the `gitleaks` job in `.gitlab-ci.yml`, with `GIT_DEPTH: 0` for full-history scanning). The `.github/workflows/gitleaks.yml` GitHub Actions file exists historically but GitHub Actions is disabled for this repository — the active CI gate is GitLab.
 - **Quarterly review.** The repo owner reviews `git log -p` for any new secret-shaped strings (long opaque tokens, JWTs, `sk-…` API keys) as a manual sanity check.

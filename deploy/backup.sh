@@ -11,6 +11,7 @@
 #
 # Environment variables (from backend.env or the calling shell):
 #   SUPABASE_DB_URL  — required; full libpq connection string to the Supabase Postgres instance
+#   BACKUP_ENC_KEY   — required; 64-hex-char AES-256 encryption key (openssl rand -hex 32)
 #   BACKUP_DIR       — directory for dump files (default: /var/backups/overforge)
 #   BACKUP_KEEP      — number of newest dumps to retain before rotating (default: 14)
 #   BACKUP_R2_REMOTE — optional rclone remote:path for offsite copy (e.g. r2:overforge-backups)
@@ -34,7 +35,7 @@ ENV_FILE="${BACKEND_ENV:-$(cd "$(dirname "$0")" && pwd)/backend.env}"
 if [[ -z "${SUPABASE_DB_URL:-}" && -f "$ENV_FILE" ]]; then
   while IFS='=' read -r _k _v; do
     [[ -n "$_k" ]] && export "$_k=$_v"
-  done < <(grep -E '^(SUPABASE_DB_URL|BACKUP_DIR|BACKUP_KEEP|BACKUP_R2_REMOTE)=' "$ENV_FILE")
+  done < <(grep -E '^(SUPABASE_DB_URL|BACKUP_DIR|BACKUP_KEEP|BACKUP_R2_REMOTE|BACKUP_ENC_KEY)=' "$ENV_FILE")
 fi
 
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/overforge}"
@@ -53,6 +54,13 @@ if [[ -z "${SUPABASE_DB_URL:-}" ]]; then
   exit 1
 fi
 
+if [[ -z "${BACKUP_ENC_KEY:-}" ]]; then
+  log "ERROR: BACKUP_ENC_KEY is empty/unset." >&2
+  log "  All dumps are encrypted at rest. Generate and append the key once:" >&2
+  log "    openssl rand -hex 32 | sed 's/^/BACKUP_ENC_KEY=/' >> /home/ubuntu/overforge/deploy/backend.env" >&2
+  exit 1
+fi
+
 # ── ensure backup directory exists ──────────────────────────────────────────
 mkdir -p "$BACKUP_DIR"
 log "Backup directory: $BACKUP_DIR"
@@ -62,6 +70,7 @@ log "Backup directory: $BACKUP_DIR"
 # --no-owner / --no-privileges: dump is portable across Supabase project restores.
 FILENAME="overforge-$(date -u '+%Y%m%d-%H%M%S').dump"
 DEST="$BACKUP_DIR/$FILENAME"
+ENC_DEST="${DEST}.enc"
 
 log "Starting pg_dump → $DEST"
 pg_dump "$SUPABASE_DB_URL" \
@@ -72,11 +81,22 @@ pg_dump "$SUPABASE_DB_URL" \
 
 log "pg_dump complete: $(du -sh "$DEST" | cut -f1) written."
 
-# ── rotate: keep newest BACKUP_KEEP dumps ───────────────────────────────────
-# Filenames are timestamped (overforge-YYYYMMDD-HHMMSS.dump), so lexicographic
+# ── encrypt: AES-256-CBC, PBKDF2-derived key, 200 000 iterations ─────────────
+# -pass env:BACKUP_ENC_KEY reads the key from the environment (never from argv or a file),
+# so it does not appear in `ps` output or shell history.
+log "Encrypting → $ENC_DEST"
+openssl enc -aes-256-cbc -pbkdf2 -iter 200000 \
+  -pass "env:BACKUP_ENC_KEY" \
+  -in "$DEST" -out "$ENC_DEST"
+chmod 600 "$ENC_DEST"
+rm -f "$DEST"
+log "Encryption complete: $(du -sh "$ENC_DEST" | cut -f1)"
+
+# ── rotate: keep newest BACKUP_KEEP encrypted dumps ─────────────────────────
+# Filenames are timestamped (overforge-YYYYMMDD-HHMMSS.dump.enc), so lexicographic
 # reverse sort equals newest-first.
 log "Rotating: keeping newest $BACKUP_KEEP dumps in $BACKUP_DIR"
-find "$BACKUP_DIR" -maxdepth 1 -name 'overforge-*.dump' -type f \
+find "$BACKUP_DIR" -maxdepth 1 -name 'overforge-*.dump.enc' -type f \
   | sort --reverse \
   | tail -n "+$((BACKUP_KEEP + 1))" \
   | xargs -r rm -v --
@@ -84,8 +104,8 @@ find "$BACKUP_DIR" -maxdepth 1 -name 'overforge-*.dump' -type f \
 # ── optional offsite copy via rclone ────────────────────────────────────────
 if [[ -n "${BACKUP_R2_REMOTE:-}" ]]; then
   if command -v rclone &>/dev/null; then
-    log "Copying $FILENAME to offsite: $BACKUP_R2_REMOTE"
-    rclone copy "$DEST" "$BACKUP_R2_REMOTE"
+    log "Copying ${FILENAME}.enc to offsite: $BACKUP_R2_REMOTE"
+    rclone copy "$ENC_DEST" "$BACKUP_R2_REMOTE"
     log "Offsite copy complete."
   else
     log "WARNING: BACKUP_R2_REMOTE is set but 'rclone' is not installed — skipping offsite copy."
@@ -93,10 +113,11 @@ if [[ -n "${BACKUP_R2_REMOTE:-}" ]]; then
   fi
 else
   log "NOTICE: BACKUP_R2_REMOTE is not set."
-  log "        Dumps are LOCAL-ONLY on this host (/var/backups/overforge)."
+  log "        Encrypted dumps are LOCAL-ONLY on this host (/var/backups/overforge)."
   log "        If this host fails, all local dumps are lost."
-  log "        Recommended: set BACKUP_R2_REMOTE=<remote>:<bucket> in backend.env"
-  log "        and install rclone to enable offsite copy (Cloudflare R2, S3, GCS, etc.)."
+  log "        To enable offsite copy: set BACKUP_R2_REMOTE=<remote>:<bucket> in backend.env,"
+  log "        install rclone (https://rclone.org/install/), and run: rclone config"
+  log "        See RUNBOOK.md §4 for step-by-step instructions."
 fi
 
-log "Backup finished: $DEST"
+log "Backup finished: $ENC_DEST"

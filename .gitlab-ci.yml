@@ -77,25 +77,13 @@ lint-node:
 test-backend:
   extends: .node
   stage: test
-  services:
-    - name: postgres:16-alpine
-      alias: postgres
   variables:
     npm_config_cache: '$CI_PROJECT_DIR/.npm'
-    POSTGRES_USER: postgres
-    POSTGRES_PASSWORD: postgres
-    POSTGRES_DB: overforge_test
     NODE_ENV: test
     PORT: '5001'
     SUPABASE_URL: 'https://test.supabase.co'
     SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key'
     SUPABASE_ANON_KEY: 'test-anon-key'
-    DB_HOST: postgres
-    DB_PORT: '5432'
-    DB_USER: postgres
-    DB_PASSWORD: postgres
-    DB_NAME: overforge_test
-    JWT_SECRET: 'ci-test-secret'
   script:
     - npm test --workspace=backend -- --ci --coverage --maxWorkers=2
   coverage: '/All files[^|]*\|[^|]*\s+([\d.]+)/'
@@ -107,7 +95,6 @@ build-frontend:
   variables:
     npm_config_cache: '$CI_PROJECT_DIR/.npm'
     NEXT_PUBLIC_API_URL: 'http://localhost:5001'
-    NEXT_PUBLIC_SOCKET_URL: 'http://localhost:5001'
     NEXT_PUBLIC_SUPABASE_URL: 'https://test.supabase.co'
     NEXT_PUBLIC_SUPABASE_ANON_KEY: 'test-anon-key'
   script:
@@ -242,6 +229,7 @@ deploy-frontend:
 deploy-backend:
   stage: deploy
   image: alpine:3.20
+  interruptible: false # a half-built image is worse than a queued one; never cancel mid-deploy
   # Serialize every job that runs `docker compose` against beef's shared project: concurrent
   # invocations race on container reconciliation (one recreates a service the other holds a stale
   # id for → "No such container"). resource_group is a GitLab mutex across the whole project.
@@ -257,15 +245,23 @@ deploy-backend:
     - rsync -az --delete --exclude node_modules --exclude '.env*' backend/ beef:overforge/backend/
     # backend.env AND voice.env are host-only secrets files — every deploy/ rsync must exclude both.
     - rsync -az --exclude backend.env --exclude voice.env deploy/ beef:overforge/deploy/
+    # Stamp the commit SHA into a non-secrets env file so the backend can report its Sentry release.
+    # Written to release.env (never backend.env) so CI never rewrites the secrets file.
+    - ssh beef "printf 'SENTRY_RELEASE=%s\n' '${CI_COMMIT_SHORT_SHA}' > ~/overforge/deploy/release.env"
+    # Preserve the current :latest as :prev before rebuilding, enabling an immediate image-swap
+    # rollback: `BACKEND_IMAGE=overforge-backend:prev docker compose up -d --no-build --no-deps backend`
+    - ssh beef 'docker image inspect overforge-backend:latest >/dev/null 2>&1 && docker tag overforge-backend:latest overforge-backend:prev || true'
     # Ensure every language image the kernel runs is present on the host (--pull never at run
     # time means a missing image hard-fails). Idempotent; pulls only what's new.
     - ssh beef 'cd ~/overforge && bash deploy/pull-runtimes.sh'
     # Pre-warm the persistent Go build cache (idempotent) before the backend serves, so the
     # first Go /run isn't a cold ~10s stdlib compile. See deploy/warm-caches.sh.
     - ssh beef 'cd ~/overforge && bash deploy/warm-caches.sh'
-    - ssh beef 'cd ~/overforge && docker compose -f deploy/docker-compose.yml up -d --build --no-deps backend && sleep 4 && docker compose -f deploy/docker-compose.yml ps'
-    - ssh beef 'curl -fsS --resolve 140.245.14.50.sslip.io:443:127.0.0.1 https://140.245.14.50.sslip.io/health'
+    - ssh beef 'cd ~/overforge && docker compose -f deploy/docker-compose.yml up -d --build --no-deps backend && docker compose -f deploy/docker-compose.yml ps'
+    # Retry loop: up to 12 × 5 s (60 s total) — mirrors deploy-voice's retry pattern.
+    - ssh beef 'ok=0; for i in $(seq 1 12); do if curl -fsS --resolve 140.245.14.50.sslip.io:443:127.0.0.1 https://140.245.14.50.sslip.io/health; then ok=1; break; fi; sleep 5; done; [ "$ok" = 1 ]'
     # keep beef's disk bounded: drop dangling images + cap build cache (native rebuilds accumulate otherwise)
+    # docker image prune -f only removes dangling/untagged images — :prev is safe.
     - ssh beef 'docker image prune -f >/dev/null; docker builder prune -f --keep-storage=5GB >/dev/null; echo pruned'
   environment:
     name: backend-beef

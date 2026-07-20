@@ -6,12 +6,14 @@
 # existing objects before recreating them. Data in the target DB is REPLACED.
 #
 # Usage:
-#   bash /home/ubuntu/overforge/deploy/restore.sh /var/backups/overforge/overforge-20260101-030000.dump
-# Self-loads SUPABASE_DB_URL from backend.env — do NOT `source` that file (its values
-# contain shell metacharacters and would break the shell).
+#   bash /home/ubuntu/overforge/deploy/restore.sh /var/backups/overforge/overforge-20260101-030000.dump.enc
+#   bash /home/ubuntu/overforge/deploy/restore.sh /var/backups/overforge/overforge-20260101-030000.dump  # legacy unencrypted
+# Self-loads SUPABASE_DB_URL and BACKUP_ENC_KEY from backend.env — do NOT `source` that
+# file (its values contain shell metacharacters and would break the shell).
 #
 # Environment variables:
-#   SUPABASE_DB_URL — required; full libpq connection string from backend.env
+#   SUPABASE_DB_URL  — required; full libpq connection string from backend.env
+#   BACKUP_ENC_KEY   — required for .dump.enc files; 64-hex-char AES-256 key from backend.env
 #
 # pg_restore client version note: same constraint as backup.sh — client major must be
 # >= server major. This project is PG17; install postgresql-client-17 from the PGDG apt
@@ -23,8 +25,8 @@ set -euo pipefail
 ENV_FILE="${BACKEND_ENV:-$(cd "$(dirname "$0")" && pwd)/backend.env}"
 if [[ -z "${SUPABASE_DB_URL:-}" && -f "$ENV_FILE" ]]; then
   while IFS='=' read -r _k _v; do
-    [[ "$_k" == "SUPABASE_DB_URL" ]] && export "$_k=$_v"
-  done < <(grep -E '^SUPABASE_DB_URL=' "$ENV_FILE")
+    [[ "$_k" == "SUPABASE_DB_URL" || "$_k" == "BACKUP_ENC_KEY" ]] && export "$_k=$_v"
+  done < <(grep -E '^(SUPABASE_DB_URL|BACKUP_ENC_KEY)=' "$ENV_FILE")
 fi
 
 ts()  { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
@@ -32,7 +34,7 @@ log() { printf '[%s] %s\n' "$(ts)" "$*"; }
 
 # ── argument check ───────────────────────────────────────────────────────────
 if [[ $# -lt 1 ]]; then
-  log "Usage: $0 <path-to-dump-file>" >&2
+  log "Usage: $0 <path-to-dump-file-or-enc-file>" >&2
   exit 1
 fi
 DUMPFILE="$1"
@@ -49,6 +51,31 @@ fi
 
 # Strip any query-string (?sslmode=...) from the URL for safe display.
 DISPLAY_DB="${SUPABASE_DB_URL%%\?*}"
+
+# ── decrypt if needed ────────────────────────────────────────────────────────
+# Encrypted dumps have a .dump.enc extension (produced by backup.sh >= 2026-07-21).
+# Legacy plain dumps (.dump) are accepted for restoring the pre-encryption history.
+RESTORE_FILE="$DUMPFILE"
+TMP_DUMP=""
+
+if [[ "$DUMPFILE" == *.dump.enc ]]; then
+  if [[ -z "${BACKUP_ENC_KEY:-}" ]]; then
+    log "ERROR: BACKUP_ENC_KEY is required to decrypt $DUMPFILE but is not set." >&2
+    log "  Load it from deploy/backend.env before calling this script." >&2
+    exit 1
+  fi
+  TMP_DUMP=$(mktemp --suffix=.dump)
+  # Remove temp file on any exit (success, error, or signal).
+  trap 'rm -f "$TMP_DUMP"' EXIT
+  log "Decrypting $DUMPFILE → (temp)"
+  openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+    -pass "env:BACKUP_ENC_KEY" \
+    -in "$DUMPFILE" -out "$TMP_DUMP"
+  log "Decryption complete."
+  RESTORE_FILE="$TMP_DUMP"
+else
+  log "NOTICE: Restoring from unencrypted legacy dump: $DUMPFILE"
+fi
 
 # ── loud confirmation ────────────────────────────────────────────────────────
 cat >&2 <<'WARN'
@@ -77,14 +104,14 @@ if [[ "$CONFIRM" != "yes" ]]; then
 fi
 
 # ── restore ──────────────────────────────────────────────────────────────────
-log "Starting pg_restore from: $DUMPFILE"
+log "Starting pg_restore from: $RESTORE_FILE"
 pg_restore \
   --clean \
   --if-exists \
   --no-owner \
   --no-privileges \
   -d "$SUPABASE_DB_URL" \
-  "$DUMPFILE"
+  "$RESTORE_FILE"
 
 log "pg_restore complete."
 log "Next steps:"

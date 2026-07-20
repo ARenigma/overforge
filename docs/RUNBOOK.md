@@ -17,6 +17,7 @@
 7. [Disk pressure response](#7-disk-pressure-response)
 8. [RTO / RPO statement](#8-rto--rpo-statement)
 9. [On-call triage — interview broke at 2 am](#9-on-call-triage)
+10. [Scheduled maintenance — kernel updates / reboot](#10-scheduled-maintenance--kernel-updates--reboot)
 
 ---
 
@@ -24,16 +25,20 @@
 
 | File | Lives on | Purpose |
 |---|---|---|
-| `deploy/backend.env` | VPS only — gitignored | All backend secrets: `SUPABASE_DB_URL`, `OPENAI_API_KEY`, `JWT_SECRET`, `DEV_EMAILS`, etc. |
+| `deploy/backend.env` | VPS only — gitignored | All backend secrets: `SUPABASE_DB_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `MINIMAX_API_KEY`, `CARTESIA_API_KEY`, `RESEND_API_KEY`, `SENTRY_DSN`, `DEV_EMAILS`, `BACKUP_ENC_KEY` |
 | `deploy/voice.env` | VPS only — gitignored | STT secrets: `ASSEMBLYAI_API_KEY`, `STT_PROVIDER`, `STT_KEYTERMS`, etc. (optional — service boots without it) |
 
 **Never commit either file.** Both are in `.gitignore`. To add a new secret, edit the file on the VPS directly and restart the affected service (`docker compose restart backend`).
 
-To add `ALERT_WEBHOOK` for uptime alerting, append it to `backend.env`:
+To enable uptime alerting, two steps are required (the only missing piece is the webhook URL from Amit):
 
 ```bash
+# 1. Append the Slack (or any Slack-compatible) incoming-webhook URL to backend.env:
 echo 'ALERT_WEBHOOK=https://hooks.slack.com/services/XXX/YYY/ZZZ' \
   >> /home/ubuntu/overforge/deploy/backend.env
+
+# 2. Restart the uptime timer so it picks up the new env value:
+sudo systemctl restart overforge-uptime.timer
 ```
 
 ---
@@ -111,7 +116,26 @@ docker compose -f deploy/docker-compose.yml up -d voice
 
 Compose's `restart: unless-stopped` means the old container is stopped and replaced atomically; Caddy continues serving during the switchover (keep-alive connections drain).
 
-### Manual rollback (no registry tags yet)
+### Immediate rollback with :prev (fastest — no rebuild needed)
+
+Every CI deploy saves the previous image as `overforge-backend:prev` before building the new one.
+If the new build is unhealthy or needs to be reverted before the next CI run:
+
+```bash
+cd /home/ubuntu/overforge
+# Roll back by running the :prev image (BACKEND_IMAGE overrides the compose default :latest):
+BACKEND_IMAGE=overforge-backend:prev \
+  docker compose -f deploy/docker-compose.yml up -d --no-build --no-deps backend
+
+# Confirm the service came back:
+curl -sf https://140.245.14.50.sslip.io/health | jq .
+docker compose -f deploy/docker-compose.yml ps
+```
+
+The `:prev` tag persists until the next deploy overwrites it. `docker image prune -f` (run at the
+end of every CI deploy) only removes dangling/untagged images — `:prev` is safe.
+
+### Manual rollback (no registry tags and no :prev — rebuild from source)
 
 ```bash
 cd /home/ubuntu/overforge
@@ -150,7 +174,9 @@ owner can supply:
 
 ### How it works
 
-`deploy/backup.sh` runs `pg_dump` in custom format (`-Fc`, already compressed) against `SUPABASE_DB_URL` and writes a timestamped file to `/var/backups/overforge/`. It rotates, keeping the newest `BACKUP_KEEP` dumps (default 14 = two weeks).
+`deploy/backup.sh` runs `pg_dump` in custom format (`-Fc`, already compressed) against `SUPABASE_DB_URL`, immediately encrypts the dump with AES-256-CBC (key from `BACKUP_ENC_KEY` in backend.env), writes a timestamped `.dump.enc` file to `/var/backups/overforge/` with permissions 600, and deletes the plaintext. It rotates, keeping the newest `BACKUP_KEEP` encrypted dumps (default 14 = two weeks).
+
+**Note on offsite copy:** `BACKUP_R2_REMOTE` must be set in `backend.env` and `rclone` must be installed to enable offsite backup. Until these are configured, dumps are local-only (a host failure loses all local backups). See "Enable offsite copy" below.
 
 ### Run a backup manually
 
@@ -164,17 +190,27 @@ bash deploy/backup.sh
 Expected output (last two lines):
 
 ```
-[2026-01-01T03:30:05Z] pg_dump complete: 42M written.
-[2026-01-01T03:30:06Z] Backup finished: /var/backups/overforge/overforge-20260101-033005.dump
+[2026-01-01T03:30:05Z] Encryption complete: 42M
+[2026-01-01T03:30:06Z] Backup finished: /var/backups/overforge/overforge-20260101-033005.dump.enc
 ```
 
 ### Verify the dump is readable
 
+Dumps are encrypted (`.dump.enc`). Decrypt to a temp file first, then inspect:
+
 ```bash
-pg_restore --list /var/backups/overforge/overforge-<timestamp>.dump | head -20
+tmp=$(mktemp --suffix=.dump)
+BACKUP_ENC_KEY=$(grep -E '^BACKUP_ENC_KEY=' /home/ubuntu/overforge/deploy/backend.env | cut -d= -f2-)
+export BACKUP_ENC_KEY
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+  -pass env:BACKUP_ENC_KEY \
+  -in /var/backups/overforge/overforge-<timestamp>.dump.enc \
+  -out "$tmp"
+pg_restore --list "$tmp" | head -20
+rm -f "$tmp"
 ```
 
-This lists the table-of-contents without touching any live database. If it prints table names, the dump is intact.
+If it prints table names, the dump is intact and the key is correct.
 
 ### Check what's on disk
 
@@ -438,3 +474,32 @@ If none of the above resolves the issue in 15 minutes:
 - Take a snapshot of `docker compose logs` for all services (save to a file).
 - Note the exact error the candidate sees.
 - Page Amit with the log snippet and the output of `docker compose ps` + `df -h`.
+
+---
+
+## 10. Scheduled Maintenance — Kernel Updates / Reboot
+
+> **Current state (2026-07-21):** The VPS has a pending kernel update (`/var/run/reboot-required` present, ~42-day uptime). Do NOT reboot while candidate interviews may be in progress. Use the drain procedure below.
+
+### Drain-and-reboot procedure
+
+```bash
+# 1. SSH into the VPS:
+ssh ubuntu@140.245.14.50
+
+# 2. Confirm no interviews are currently in progress (must return 0):
+SUPABASE_DB_URL=$(grep -E '^SUPABASE_DB_URL=' /home/ubuntu/overforge/deploy/backend.env | cut -d= -f2-)
+psql "$SUPABASE_DB_URL" -c "SELECT COUNT(*) FROM interviews WHERE status = 'in_progress';"
+# If count > 0, wait and recheck before proceeding.
+
+# 3. Reboot:
+sudo reboot
+
+# 4. After reconnecting (allow ~2 min for boot), verify services came back:
+docker compose -f /home/ubuntu/overforge/deploy/docker-compose.yml ps
+
+# 5. Confirm /health:
+curl -sf https://140.245.14.50.sslip.io/health | jq .
+```
+
+Docker Compose services have `restart: unless-stopped`, so they start automatically after a reboot. If a service shows `Exited`, restart it manually (see section 9 step 2).
