@@ -1,125 +1,99 @@
-# Overforge P2-B Voice Pipeline — Candidate Talk-Back Core
+# Overforge Voice Service
 
-This directory contains the validated real-time **silence-gated end-of-turn (EOT) detector**
-and **STT wrapper** that form the core of the P2-B candidate talk-back loop.
+Python WebSocket service that handles real-time speech in the interview room. One asyncio
+process; one event loop; one active connection per interview session.
 
 ## Architecture
 
 ```
-Mic → 32 ms PCM frames
-         │
-         ▼
-  SilenceGatedEndpointer (endpointing.py)
-    ├── Silero VAD (per-frame, 32 ms, stateful)
-    │     • is_speech?  →  track trailing-silence duration
-    ├── Smart Turn v3.2 ONNX (pipecat-ai)
-    │     • probe ONCE when trailing silence first reaches hold_s (0.8 s)
-    │     • P(complete) ≥ 0.5 → fire EOT ("smartturn")
-    └── Backstop
-          • trailing silence ≥ backstop_s (3.0 s) → fire EOT regardless ("backstop")
-         │
-         ▼
-  EotEvent(cursor_s, kind, prob, silence_onset_s)
-         │
-         ├─→ WhisperSTT.transcribe(committed_audio)  →  text  (off hot-path)
-         │       faster-whisper small, CPU, int8 — 0.12× real-time
-         └─→ [next phases below]
+Browser mic (PCM16 mono, 16 kHz)
+  │  binary WebSocket frames (32 ms / 512 samples)
+  ▼
+ws_app.py  (FastAPI + WebSockets, port 5002)
+  │
+  ├─ STT_PROVIDER=assemblyai (primary, default)
+  │     stt_assemblyai.py — AssemblyAI Universal-3-5-pro real-time stream
+  │     Semantic turn detection built in; transcript arrives with end-of-turn event
+  │
+  ├─ STT_SHADOW=soniox (optional, log-only A/B shadow)
+  │     stt_soniox.py — Soniox stt-rt-v5 observer on the same audio
+  │     Never drives turn detection; swallows all errors silently
+  │
+  └─ local fallback (STT_PROVIDER=whisper or on AssemblyAI permanent failure)
+        endpointing.py — SilenceGatedEndpointer
+          ├─ adapters/silero_vad.py   — Silero VAD v5 per-frame gate (32 ms, stateful)
+          ├─ adapters/smart_turn_v3.py — Smart Turn v3.2 ONNX (pipecat-ai), one probe
+          │                              per silence onset at 0.8 s hold
+          └─ backstop: 3.0 s trailing silence fires EOT unconditionally
+        stt.py — faster-whisper small (CPU, int8) transcribes committed audio off hot-path
+
+session.py  — VoiceSession turn orchestrator; forwards committed text to the FSM backend
+              via POST /api/interviews/{id}/answer (brain_client.py)
+contracts.py — shared dataclasses + Protocols (BrainClient, TtsSink, STT, endpointer)
 ```
 
-## Validated Parameters
+Note: **Cartesia TTS lives in the backend** (`backend/src/voice/`), not here. The voice
+service is receive-only (mic → text → FSM); TTS audio is streamed from the backend directly
+to the browser.
 
-| Parameter | Value | Why |
-|---|---|---|
-| `hold_s` | 0.8 s | Offline sweep (replay_gated.py) showed 0.8 s drops FCR from 70% to ~10% on Buckeye monologues. Clause-boundary pauses are shorter than this; true EOT silences are not. |
-| `smart_turn_threshold` | 0.5 | Balanced: best operating point in the offline sweep. Raising to 0.7–0.9 trades away EOT recall at similar FCR. |
-| `backstop_s` | 3.0 s | Catches the ~10% of turns where Smart Turn never clears the threshold (long deliberate pauses or low confidence). |
-| `vad_threshold` | 0.5 | Silero VAD v5 default; production-tuned. |
+## Environment variables
 
-**Source:** `eval/voice-turn-bakeoff/replay_gated.py` + `RESULTS_replay_stream.md`.
+| Variable | Purpose |
+|---|---|
+| `OVERFORGE_API_URL` | Backend origin (internal compose address in prod) |
+| `FRONTEND_URL` | Allowed WebSocket Origin |
+| `PORT` | Listen port (default 5002) |
+| `STT_PROVIDER` | `assemblyai` (default) or `whisper` |
+| `ASSEMBLYAI_API_KEY` | Required when `STT_PROVIDER=assemblyai` |
+| `STT_SHADOW` | Set to `soniox` to enable shadow A/B logging |
+| `SONIOX_API_KEY` | Required when `STT_SHADOW=soniox` |
+| `MAX_CONNECTIONS` | Concurrent WS connection cap |
+| `STT_CONCURRENCY` | Threading semaphore for local Whisper (default 4) |
 
-## Key Design Decisions
+## Running locally
 
-### Why silence HOLD beats threshold tuning
-Smart Turn fires high (0.9+) at clause-boundary pauses AND at real turn-ends — no threshold
-cleanly separates them. The hold gate sidesteps this: clause pauses are short (< 0.5 s) and the
-speaker resumes before the hold is reached; only a true turn-end produces silence that persists
-past 0.8 s.
+```bash
+cd voice
+uv sync
+uv run uvicorn ws_app:app --host 0.0.0.0 --port 5002 --workers 1
+```
 
-### Why one probe per silence onset
-Calling the ONNX model every frame during silence wastes CPU and can cause double-firing at the
-same silence onset. The `hold_probed` flag ensures exactly one Smart Turn call per qualifying
-silence run.
+## Tests
 
-### Why a ring buffer
-Smart Turn v3.2 always judges the trailing 8 s of audio (`_WINDOW_SAMPLES = 128 000`). Keeping a
-ring buffer avoids O(n) copying of the full audio on every probe — the window is a simple
-circular-buffer read.
+```bash
+cd voice
+uv run pytest -x -q
+```
 
-## How Next Phases Plug In
+## Load testing
 
-### P2-B.2 — Backend FSM wiring ✅ (implemented)
-`VoiceSession` (session.py) is the transport- and TTS-agnostic turn orchestrator. Per turn:
-1. `feed_frame(frame)` appends each 512-sample frame to its OWN full-turn accumulator (the
-   endpointer's ring only holds the trailing 8 s — never feed that to STT) and forwards it to the
-   endpointer.
-2. On `EotEvent` (or a 120 s max-turn safety cap), it snapshots the audio and runs
-   `WhisperSTT.transcribe(...)` via `asyncio.to_thread` (off the event loop).
-3. An empty transcript (false-fire EOT) short-circuits — re-arm, never submit a blank answer.
-4. Otherwise it submits to the brain over the EXISTING one-shot route
-   `POST /api/interviews/{id}/answer` `{token, answer, requestId}` via `RestBrainClient`
-   (brain_client.py) — same verified, idempotent path the typed room uses.
-5. The returned `Utterance` is voiced through the injected `TtsSink` (B.2 ships `NoopTtsSink`),
-   then the caller calls `arm_next_turn()` after TTS finishes (which resets the endpointer) or
-   `close()` on a terminal turn (`phase == 'done'` / HTTP 409 / 403).
+`load_ws.py` is a standalone WebSocket load-test harness — it opens multiple concurrent
+connections and streams synthetic PCM frames to stress the service end-to-end.
 
-Contracts (`Utterance`, `AnswerResult`, `TurnResult`, `TerminalError`, `BrainTransientError`,
-and the `BrainClient` / `TtsSink` / endpointer / STT Protocols) live in contracts.py so B.3/B.4
-depend on stable types, not `VoiceSession` internals. Idempotency: one `requestId` per turn, reused
-on the in-turn retry (server replays — no double-submit), preserved on transient failure, fresh on
-the next turn. Fail-open: STT/TTS/transport faults re-arm the session rather than strand it.
+```bash
+cd voice
+uv run python load_ws.py --help
+```
 
-### P2-B.3 — Cartesia TTS + filler backchannel
-- On `EotEvent`, immediately play a ~200 ms acknowledgement sound ("uh-huh", "right") via
-  Cartesia's streaming TTS to fill the STT + round-trip latency gap.
-- Then stream the oracle utterance as TTS audio to the candidate.
-
-### P2-B.4 — WebSocket transport + browser mic
-- Browser `MediaRecorder` at 16 kHz mono sends binary WebSocket frames (32 ms / 512 samples).
-- Server-side WebSocket handler calls `ep.feed_frame(frame)` on each incoming chunk.
-- On `EotEvent` → trigger the P2-B.2 flow above.
-- After oracle TTS completes → call `ep.reset()` to arm for the next turn.
-
-## File Structure
+## Files
 
 ```
 voice/
-├── endpointing.py        — SilenceGatedEndpointer (P2-B.1)
-├── stt.py                — WhisperSTT (faster-whisper small, CPU int8)
-├── contracts.py          — shared dataclasses + Protocols (P2-B.2)
-├── brain_client.py       — RestBrainClient over POST /api/interviews/:id/answer (P2-B.2)
-├── session.py            — VoiceSession turn orchestrator (P2-B.2)
-├── test_endpointing.py   — streaming replay test against Buckeye corpus
-├── test_session.py       — offline unit tests for the turn glue (no models/network)
-├── pyproject.toml        — uv project (reuses eval deps + httpx)
-└── README.md             — this file
-```
-
-## Running Tests
-
-```bash
-cd /Users/amit.ranjan/overforge/voice
-uv sync                              # builds .venv with exact eval dep set
-uv run pytest test_endpointing.py -v -s   # models download on first use
-```
-
-Expected output (approximate, depends on Buckeye sample):
-- FCR well below 70% baseline (target: 10–30%)
-- At least 1 EOT hit
-- Clear results table per turn
-
-## Reproduce the Offline Sweep (for reference)
-
-```bash
-cd /Users/amit.ranjan/overforge/eval/voice-turn-bakeoff
-uv run python replay_gated.py   # full HOLD × threshold sweep on 10 Buckeye turns
+├── ws_app.py          — FastAPI entrypoint + lifespan model warm-up
+├── ws_connection.py   — per-connection WebSocket handler
+├── ws_protocol.py     — WS message framing + auth handshake
+├── ws_sink.py         — TtsSink adapter (NoopTtsSink in current deploy)
+├── ws_auth.py         — token validation
+├── session.py         — VoiceSession turn orchestrator
+├── stt.py             — faster-whisper local STT (fallback)
+├── stt_assemblyai.py  — AssemblyAI real-time STT (primary)
+├── stt_soniox.py      — Soniox shadow streamer (log-only)
+├── endpointing.py     — SilenceGatedEndpointer (local path)
+├── brain_client.py    — RestBrainClient → POST /api/interviews/:id/answer
+├── contracts.py       — shared dataclasses + Protocols
+├── telemetry.py       — per-turn voice.turn telemetry (STT/oracle/TTS ms)
+├── adapters/          — Silero VAD + Smart Turn ONNX adapters
+├── load_ws.py         — standalone WS load-test harness (uv run python load_ws.py --help)
+├── harness/           — offline replay harness
+└── eval/              — bakeoff results
 ```

@@ -1,6 +1,7 @@
 # Overforge — Production Re-Architecture Spec
 
-> Status: **DRAFT for sign-off**. No M1 code is written until this is approved.
+> Status: **HISTORICAL** — implemented; deviations now normative: plain `ws` WebSocket (not
+> Socket.io), DockerKernel per-run containers (not Judge0). See newer docs for current architecture.
 > Owner: Amit. Author: senior-engineer pass, 2026-06.
 
 ## 0. Principles (the bar every decision is held to)

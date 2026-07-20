@@ -9,7 +9,7 @@ gates locally (husky) and in CI (GitLab) before landing.
 overforge/
 ├── frontend/          # Next.js App Router (TypeScript) — port 3000
 ├── backend/           # Node.js/Express FSM + LLM + scorer — port 5001
-├── voice/             # FastAPI voice service (Python, uv-managed) — port 9001
+├── voice/             # FastAPI voice service (Python, uv-managed) — port 5002
 ├── playwright/        # Playwright E2E harness
 ├── deploy/            # docker-compose.yml, Caddy config, pull-runtimes.sh
 ├── supabase/          # migrations/
@@ -37,7 +37,7 @@ npm ci
 (cd frontend && npm run dev)          # :3000
 
 # Voice service (optional)
-(cd voice && uv sync && uv run python ws_app.py)   # :9001
+(cd voice && uv sync && uv run uvicorn ws_app:app --host 0.0.0.0 --port 5002)   # :5002
 ```
 
 ## Gates

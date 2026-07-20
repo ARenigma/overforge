@@ -28,10 +28,3 @@ psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/migrations/0001_init_inte
   backs reliable interviewer email. Both are **service-role only** — RLS is enabled
   with no client policies, so authenticated/anon clients cannot read or write them.
 - **Interviewer** access to `interviews` is owner-scoped via `auth.uid() = interviewer_id`.
-
-## Verification status
-
-`0001_init_interviews.sql` is standard Postgres/Supabase SQL (idempotent enum
-creation; safe to re-run in dev). It has **not** yet been applied against a live
-project (pending staged credentials); it will be verified on the first
-`supabase db push`.

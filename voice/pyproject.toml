@@ -7,15 +7,13 @@ requires-python = ">=3.11"
 dependencies = [
     "onnxruntime>=1.18",
     "numpy>=1.26",
-    "soundfile>=0.12",
     # Cap <2.12 so torch's minor matches torchaudio's latest (2.11.x): torchaudio ships a prebuilt
     # native ext bound to a specific libtorch ABI, and a cpu-index torch 2.12 against torchaudio 2.11
     # fails to load _torchaudio.abi3.so at import. See the cpu-index pin in [tool.uv.sources] below.
     "torch>=2.3,<2.12",
-    # torchaudio is pulled by silero-vad, but it must be a DIRECT dep for the cpu-index source
-    # override below to apply (uv only marker-splits sources for direct deps). Same <2.12 cap as torch.
+    # torchaudio must be a DIRECT dep for the cpu-index source override below to apply —
+    # uv only marker-splits sources for direct deps, not transitive ones. Same <2.12 cap as torch.
     "torchaudio>=2.3,<2.12",
-    "silero-vad>=5.1",
     "pipecat-ai>=1.4.0",
     "faster-whisper>=1.2.1",
     "librosa>=0.10",
@@ -72,7 +70,7 @@ ignore_missing_imports = true
 [dependency-groups]
 dev = [
     "mypy>=2.1.0",
-    "psutil>=7.2.2",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "soundfile>=0.12",
 ]

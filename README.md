@@ -17,7 +17,7 @@ hiring manager a scorecard when the session ends.
                           │
              ┌────────────▼──────────────┐   ┌──────────────────────┐
              │  Per-run executor          │   │  Python voice service │
-             │  docker.ts + gVisor/runsc  │   │  FastAPI  port 9001   │
+             │  docker.ts + gVisor/runsc  │   │  FastAPI  port 5002   │
              │  --network none            │   │  AssemblyAI STT       │
              │  --read-only --cap-drop    │   │  Cartesia TTS         │
              │  tmpfs /work               │   │  endpointing.py       │
@@ -52,7 +52,7 @@ npm ci
 
 # 2. Copy and fill env files
 cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env.local   # set NEXT_PUBLIC_BACKEND_URL=http://localhost:5001
+cp frontend/.env.example frontend/.env.local   # set NEXT_PUBLIC_API_URL=http://localhost:5001
 
 # 3. Start the backend (port 5001)
 cd backend && npm run dev
@@ -60,8 +60,8 @@ cd backend && npm run dev
 # 4. Start the frontend (port 3000) — separate terminal
 cd frontend && npm run dev
 
-# 5. Voice service — optional for text-only sessions (port 9001)
-cd voice && uv sync && uv run python ws_app.py
+# 5. Voice service — optional for text-only sessions (port 5002)
+cd voice && uv sync && uv run uvicorn ws_app:app --host 0.0.0.0 --port 5002
 ```
 
 ## Tests
