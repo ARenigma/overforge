@@ -35,12 +35,11 @@ alert() {
     # Discord incoming webhooks require {"content": ...} and 400 on {"text": ...};
     # Slack (and generic) webhooks use {"text": ...}. Pick by host. The message is
     # built from our own URLs + HTTP codes, so no JSON-escaping is needed.
-    local text="[Overforge uptime] $msg"
     local payload
     if [[ "$ALERT_WEBHOOK" == *discord.com* || "$ALERT_WEBHOOK" == *discordapp.com* ]]; then
-      payload="{\"content\": \"$text\"}"
+      payload="{\"content\": \"$msg\"}"
     else
-      payload="{\"text\": \"$text\"}"
+      payload="{\"text\": \"$msg\"}"
     fi
     curl -s -X POST "$ALERT_WEBHOOK" \
       -H 'Content-Type: application/json' \
