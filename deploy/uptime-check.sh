@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Lightweight uptime monitor for Overforge.
 # Checks the backend /health endpoint and the Vercel frontend.
-# On a non-2xx response: posts a JSON alert to ALERT_WEBHOOK (Slack/Discord
-# incoming-webhook format) if set, otherwise logs to stdout only.
+# On a non-2xx response: posts a JSON alert to ALERT_WEBHOOK (Discord or Slack
+# incoming-webhook — payload shape auto-selected by host) if set, otherwise
+# logs to stdout only.
 #
 # Dependencies: curl (only). No jq or other tools needed.
 #
@@ -31,10 +32,19 @@ alert() {
   local msg="$1"
   log "ALERT: $msg"
   if [[ -n "${ALERT_WEBHOOK:-}" ]]; then
-    # Slack / Discord both accept {"text": "..."} payloads on incoming webhooks.
+    # Discord incoming webhooks require {"content": ...} and 400 on {"text": ...};
+    # Slack (and generic) webhooks use {"text": ...}. Pick by host. The message is
+    # built from our own URLs + HTTP codes, so no JSON-escaping is needed.
+    local text="[Overforge uptime] $msg"
+    local payload
+    if [[ "$ALERT_WEBHOOK" == *discord.com* || "$ALERT_WEBHOOK" == *discordapp.com* ]]; then
+      payload="{\"content\": \"$text\"}"
+    else
+      payload="{\"text\": \"$text\"}"
+    fi
     curl -s -X POST "$ALERT_WEBHOOK" \
       -H 'Content-Type: application/json' \
-      --data-raw "{\"text\": \"[Overforge uptime] $msg\"}" \
+      --data-raw "$payload" \
       --max-time 10 \
       >/dev/null
   fi
@@ -53,5 +63,8 @@ check() {
   fi
 }
 
-check "backend /health" "$BACKEND_URL/health"
-check "frontend"        "$FRONTEND_URL"
+check "backend /health"      "$BACKEND_URL/health"
+# Deep probe: 503 when Supabase or the Docker daemon is unreachable — a plain
+# /health can't see those, so this is what actually catches a dead dependency.
+check "backend /health/deep" "$BACKEND_URL/health/deep"
+check "frontend"             "$FRONTEND_URL"
