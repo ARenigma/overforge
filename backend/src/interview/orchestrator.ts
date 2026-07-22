@@ -14,19 +14,37 @@ import {
   TestResults,
   SubmitIntent,
 } from './types';
-import { deriveRunSignals, idleNudgesGiven, failureSignature, runPassed } from './signals';
+import {
+  deriveRunSignals,
+  idleNudgesGiven,
+  failureSignature,
+  runPassed,
+  isSyntheticRow,
+} from './signals';
 import {
   decideRunIntervention,
   deriveRunAssistBudget,
   classifyOfferResponse,
   decideIdleIntervention,
+  decideQuiescentIntervention,
+  OfferResolution,
 } from './intervention';
-import { ingestRun, evictEngagement } from './engagement';
+import {
+  ingestRun,
+  evictEngagement,
+  currentEngagement,
+  cooldownOk,
+  recordInterventionFired,
+} from './engagement';
+import { maybeFireObserverNote } from './notes';
+import { stripSpeechTags } from '../voice/speech-tags';
 import {
   markRunInFlight,
   clearRunInFlight,
   markAnswerInFlight,
   clearAnswerInFlight,
+  isRunInFlight,
+  isAnswerInFlight,
 } from './inflight';
 import { selectProblems, getProblemBySlug, toPublicProblem, PublicProblem } from './problems';
 import {
@@ -58,6 +76,7 @@ import {
   insertOutbox,
   makeOutboxStore,
   getProctorSignalsForInterview,
+  updateLastRunIntervention,
   Interview,
   InterviewStatus,
 } from '../db/interviews';
@@ -186,6 +205,29 @@ function durationExceeded(interview: Interview): boolean {
   );
 }
 
+// ─────────────────────── Feature flags ───────────────────────
+
+/** Whether P2 engagement interventions (Path C, encourage, observer notes, async wording) are on. */
+function interventionsEnabled(): boolean {
+  const v = (process.env.ENGAGEMENT_INTERVENTIONS ?? '').toLowerCase();
+  return v === '1' || v === 'true' || v === 'on';
+}
+
+// ─────────────────────── Async run-intervention map ───────────────────────
+
+/** In-memory state for the async run-wording path (§6 item 5). Keyed by interviewId.
+ *  'pending' = wording in-flight; 'ready' = intervention text available; 'none' = no intervention. */
+interface PendingRunIntervention {
+  status: 'pending' | 'ready' | 'none';
+  intervention?: { text: string; kind: string };
+}
+const pendingRunInterventions = new Map<string, PendingRunIntervention>();
+
+/** Read the async run-intervention state for an interview. Used by the /run-intervention route. */
+export function getPendingRunIntervention(interviewId: string): PendingRunIntervention | null {
+  return pendingRunInterventions.get(interviewId) ?? null;
+}
+
 // ─────────────────────── Helpers ───────────────────────
 
 function requireInterview(interview: Interview | null, id: string): Interview {
@@ -213,7 +255,12 @@ async function persistTransition(
   }
 
   if (utterance && utterance.text) {
-    transcript.push({ role: 'interviewer', text: utterance.text, ...(assist ? { assist } : {}) });
+    // Strip speech tags before persisting to transcript — tags are TTS-only guidance.
+    transcript.push({
+      role: 'interviewer',
+      text: stripSpeechTags(utterance.text),
+      ...(assist ? { assist } : {}),
+    });
   }
 
   await updateInterview(interview.id, {
@@ -232,7 +279,7 @@ async function persistTransition(
 
   if (utterance && utterance.text) {
     await appendEvent(interview.id, 'utterance', {
-      text: utterance.text,
+      text: stripSpeechTags(utterance.text),
       expects: utterance.expects,
       ...(assist ? { intervention: true, kind: assist.kind, strength: assist.strength } : {}),
     });
@@ -274,7 +321,7 @@ async function persistClarify(
 ): Promise<void> {
   const transcript: TranscriptTurn[] = interview.transcript ?? [];
   transcript.push({ role: 'candidate', text: candidateQuestion });
-  transcript.push({ role: 'interviewer', text: reply.text });
+  transcript.push({ role: 'interviewer', text: stripSpeechTags(reply.text) });
   await updateInterview(interview.id, {
     fsm_state: newCtx, // phase unchanged; only clarifyCount differs
     phase: newCtx.phase,
@@ -282,7 +329,7 @@ async function persistClarify(
     ...(requestId ? { last_request_id: requestId } : {}),
   });
   await appendEvent(interview.id, 'utterance', {
-    text: reply.text,
+    text: stripSpeechTags(reply.text),
     expects: reply.expects,
     clarify: true,
     question: candidateQuestion.slice(0, 500),
@@ -343,7 +390,11 @@ async function persistOfferResolution(
 ): Promise<void> {
   const transcript: TranscriptTurn[] = interview.transcript ?? [];
   transcript.push({ role: 'candidate', text: candidateAnswer });
-  transcript.push({ role: 'interviewer', text: utterance.text, ...(assist ? { assist } : {}) });
+  transcript.push({
+    role: 'interviewer',
+    text: stripSpeechTags(utterance.text),
+    ...(assist ? { assist } : {}),
+  });
   await updateInterview(interview.id, {
     fsm_state: newCtx,
     phase: newCtx.phase,
@@ -351,7 +402,7 @@ async function persistOfferResolution(
     ...(requestId ? { last_request_id: requestId } : {}),
   });
   await appendEvent(interview.id, 'utterance', {
-    text: utterance.text,
+    text: stripSpeechTags(utterance.text),
     expects: utterance.expects,
     ...(assist
       ? { intervention: true, kind: assist.kind, strength: assist.strength }
@@ -372,7 +423,9 @@ async function maybeResolveHintOffer(
   requestId?: string
 ): Promise<AnswerResult | null> {
   if (ctx.phase !== 'coding') return null;
-  if (ctx.hintOffer?.codeIndex === ctx.codeIndex) return null; // already resolved for this question
+  // A Path-C 'offered' status means the offer is still PENDING (written to fsm_state by the
+  // quiescent path). Only skip when already resolved (declined / hinted).
+  if (ctx.hintOffer?.codeIndex === ctx.codeIndex && ctx.hintOffer.status !== 'offered') return null;
   // REAL runs only: a synthetic Idle marker (Path B check-in) appended after the offer must not
   // hide it — the offer lives on the last real run, and Idle rows must never reach the hint prompt
   // or count as failures.
@@ -380,7 +433,11 @@ async function maybeResolveHintOffer(
     (r) => r.codeIndex === ctx.codeIndex && r.status !== 'Idle'
   );
   const latest = runs[runs.length - 1];
-  if (latest?.intervention?.kind !== 'offer') return null; // no pending offer
+  // Pending offer: either on the last real run (run-path offer) or in fsm_state (Path-C offer).
+  const hasRunPathOffer = latest?.intervention?.kind === 'offer';
+  const hasPathCOffer =
+    ctx.hintOffer?.codeIndex === ctx.codeIndex && ctx.hintOffer?.status === 'offered';
+  if (!hasRunPathOffer && !hasPathCOffer) return null; // no pending offer
   const resp = classifyOfferResponse(answer);
   if (resp === 'other') return null; // ignore → process normally; the offer stays open
 
@@ -616,14 +673,27 @@ export async function getCandidateState(interviewId: string): Promise<CandidateS
   const runs = allRuns.filter((r) => r.status !== 'Idle');
   const trailing = allRuns[allRuns.length - 1];
   const lastReal = runs.length > 0 ? stripHiddenTests(runs[runs.length - 1]) : null;
-  const lastRunResult =
+  const rawLastRunResult =
     lastReal && trailing && trailing.status === 'Idle' && trailing.intervention
       ? { ...lastReal, intervention: trailing.intervention }
       : lastReal;
+  // Strip speech tags from intervention text before sending to the candidate UI (tags are TTS-only).
+  const lastRunResult = rawLastRunResult?.intervention
+    ? {
+        ...rawLastRunResult,
+        intervention: {
+          ...rawLastRunResult.intervention,
+          text: stripSpeechTags(rawLastRunResult.intervention.text),
+        },
+      }
+    : rawLastRunResult;
   return {
     status: interview.status,
     phase: interview.phase,
-    transcript: interview.transcript ?? [],
+    // Strip speech tags from persisted interviewer turns before echoing to the candidate UI.
+    transcript: (interview.transcript ?? []).map((t) =>
+      t.role === 'interviewer' && t.text ? { ...t, text: stripSpeechTags(t.text) } : t
+    ),
     codeSnapshot: interview.code_snapshot ?? '',
     startedAt: interview.tnc_accepted_at,
     assignedLanguage: interview.assigned_language,
@@ -1046,6 +1116,14 @@ export async function submitAnswer(
         snapshotToPersist
       );
 
+      // Observer note: fire-and-forget after answer transitions in the coding phase.
+      if (interventionsEnabled() && (ctx.phase === 'coding' || newCtx.phase === 'coding')) {
+        maybeFireObserverNote(interviewId, {
+          codeIndex: ctx.codeIndex,
+          code: effectiveCode,
+        });
+      }
+
       return { utterance, phase: newCtx.phase, state: newCtx, ...(assist ? { assist } : {}) };
     }); // end withInterviewLock
   } finally {
@@ -1174,18 +1252,55 @@ async function _recordRunInner(interviewId: string, req: RunRequest): Promise<Ru
     }
   }
 
-  // ── Autonomous intervention (USP): a balanced interviewer notices repeated failing runs and
-  // steps in. We decide + word the hint BEFORE persisting, so it rides along ON the run in the
-  // SAME atomic append_code_run write — recordRun never touches transcript/fsm_state, so it can
-  // never race a concurrent submitAnswer (no clobbered FSM transition, no dropped transcript turn).
-  await attachRunIntervention(interview, runCtx, result, req.source);
+  if (interventionsEnabled()) {
+    // Async wording path (§6 item 5): persist the run immediately, then word the intervention
+    // off the critical path. The /run response carries interventionPending:true; the candidate
+    // polls POST /:id/run-intervention until pending:false.
+    pendingRunInterventions.set(interviewId, { status: 'pending' });
+    result.interventionPending = true;
+    // result.intervention intentionally absent — frontend feature-detects interventionPending.
 
-  // One atomic write: append the run AND record the snapshot + last-used language together,
-  // so code_runs[-1], code_snapshot, and code_language can never describe different runs.
-  await appendCodeRun(interviewId, result, req.source, req.language);
+    await appendCodeRun(interviewId, result, req.source, req.language);
 
-  // Feed the engagement engine (P1 shadow mode — log only, no behavior change). Called
-  // after appendCodeRun so the buffer sees the same run the DB sees (§6.3).
+    // Fire async wording — never awaited; failure is logged, not propagated.
+    void (async () => {
+      try {
+        const tempResult: RunResult = { ...result };
+        await attachRunIntervention(interview, runCtx, tempResult, req.source);
+        if (tempResult.intervention) {
+          await updateLastRunIntervention(interviewId, tempResult.intervention).catch((err) => {
+            console.error(
+              `[orchestrator] updateLastRunIntervention failed for ${interviewId}:`,
+              err
+            );
+          });
+          pendingRunInterventions.set(interviewId, {
+            status: 'ready',
+            intervention: tempResult.intervention,
+          });
+          await appendEvent(interviewId, 'utterance', {
+            text: tempResult.intervention.text,
+            intervention: true,
+            kind: tempResult.intervention.kind,
+          }).catch(() => {
+            /* best-effort */
+          });
+        } else {
+          pendingRunInterventions.set(interviewId, { status: 'none' });
+        }
+      } catch (err) {
+        console.error(`[orchestrator] async run-wording failed for ${interviewId}:`, err);
+        pendingRunInterventions.set(interviewId, { status: 'none' });
+      }
+    })();
+  } else {
+    // Sync path (original): decide + word BEFORE persisting so the hint rides on the run atomically.
+    await attachRunIntervention(interview, runCtx, result, req.source);
+    await appendCodeRun(interviewId, result, req.source, req.language);
+  }
+
+  // Feed the engagement engine. Called after appendCodeRun so the buffer sees the same run the
+  // DB sees (§6.3). Also fire an observer note fire-and-forget (ENGAGEMENT_INTERVENTIONS gated).
   ingestRun(interviewId, {
     codeIndex: result.codeIndex ?? 0,
     status: result.status,
@@ -1194,6 +1309,13 @@ async function _recordRunInner(interviewId: string, req: RunRequest): Promise<Ru
     failureSig: runPassed(result) ? null : failureSignature(result),
     code: req.source,
   });
+  if (interventionsEnabled()) {
+    maybeFireObserverNote(interviewId, {
+      codeIndex: result.codeIndex ?? 0,
+      code: req.source,
+      runResult: result,
+    });
+  }
 
   await appendEvent(interviewId, 'code_run', {
     language: req.language,
@@ -1230,19 +1352,26 @@ function idleNudgeEnabled(): boolean {
 }
 
 /**
- * Path B — respond to a candidate who has gone idle during coding (frozen on a blank editor, or
- * paused mid-code) WITHOUT a failing run to react to. The frontend's compound-idle detector (no
- * keystroke + no run + not speaking for a protected window) calls this; the server owns the fairness
- * gates and the oracle words a gentle, content-free check-in. The nudge is persisted as a synthetic
- * 'Idle' run on the code-run channel (via appendCodeRunOnly) so it is race-free and touches neither
- * fsm_state nor the transcript — the same invariant the run path relies on. Best-effort throughout;
- * a failure here must never break the room. `codeLength` is the candidate's current editor length,
- * used only to pick the check-in's wording (blank vs partial).
+ * Path B / Path C — respond to a candidate who has gone idle or quiescent during coding.
+ *
+ * Path B (reason='idle'): no runs observed; frontend's compound-idle detector fires.
+ *   - Content-free check-in only (rung 0: nudge). Never probes, offers, or hints.
+ *   - Persisted as a synthetic 'Idle' run. No lock (append-only, race-free).
+ *
+ * Path C (reason='quiescent', ENGAGEMENT_INTERVENTIONS only): engagement engine sees DEGRADING or
+ *   WHEEL_SPINNING. Has server-executed evidence. Can offer a concrete hint (DEGRADING) or an
+ *   accountability probe (WHEEL_SPINNING). Uses recheck-then-commit under withInterviewLock.
+ *
+ * `codeLength` is only used by Path B (blank vs partial wording). Best-effort throughout;
+ * a failure here must never break the room.
  */
 export async function nudgeInterview(
   interviewId: string,
-  codeLength: number
+  codeLength: number,
+  reason: 'idle' | 'quiescent' = 'idle'
 ): Promise<NudgeResult> {
+  if (reason === 'quiescent') return nudgeQuiescent(interviewId);
+
   // Server-authoritative gate — cheapest possible no-op when the feature is off (no DB, no oracle).
   if (!idleNudgeEnabled()) return { intervention: null };
 
@@ -1258,8 +1387,9 @@ export async function nudgeInterview(
   // Real-run signals (idle markers already excluded inside deriveRunSignals) tell us if they've
   // already solved it; the idle-nudge count + prior offer resolution bound how much we step in.
   const signals = deriveRunSignals(runs, ctx.codeIndex);
-  const offerResolution =
-    ctx.hintOffer?.codeIndex === ctx.codeIndex ? ctx.hintOffer.status : 'none';
+  const offerResolution = (
+    ctx.hintOffer?.codeIndex === ctx.codeIndex ? ctx.hintOffer.status : 'none'
+  ) as OfferResolution;
   // An unresolved OFFER on the last real run means our own question is still on the table —
   // the check-in must wait (and an interleaved Idle marker would hide the offer from the answer path).
   const realRuns = runs.filter((r) => r.codeIndex === ctx.codeIndex && r.status !== 'Idle');
@@ -1299,34 +1429,182 @@ export async function nudgeInterview(
   }
   if (!utterance.text) return { intervention: null };
 
-  // Persist as a synthetic idle marker on the code-run channel — append-only (never overwrites the
-  // real code_snapshot), race-free, invisible to the scorer + run-failure signals.
-  const idleRun: RunResult = {
-    stdout: '',
-    stderr: '',
-    compileOutput: '',
-    status: 'Idle',
-    exitCode: null,
-    timeMs: null,
-    memoryKb: null,
-    codeIndex: ctx.codeIndex,
-    intervention: { text: utterance.text, kind: decision.kind },
-  };
-  try {
-    await appendCodeRunOnly(interviewId, idleRun);
-    await appendEvent(interviewId, 'utterance', {
-      text: utterance.text,
-      intervention: true,
-      kind: decision.kind,
-      idle: true,
-    });
-  } catch (err) {
-    // If the marker didn't persist, still return the utterance (best-effort). The per-question cap
-    // is derived from persisted markers, so a failed persist just means the next idle poll may retry.
-    console.error(`[orchestrator] idle-nudge persist failed for ${interviewId} (non-fatal):`, err);
-  }
+  // Recheck-then-commit: word outside the lock, commit under it. Prevents a stale wording from
+  // being persisted if gates changed (e.g. a run landed while the oracle was working).
+  return withInterviewLock(interviewId, async (): Promise<NudgeResult> => {
+    const fresh = requireInterview(await getById(interviewId), interviewId);
+    if (fresh.status !== 'in_progress') return { intervention: null };
+    const freshCtx = fresh.fsm_state as InterviewContext;
+    if (freshCtx.phase !== 'coding') return { intervention: null };
 
-  return { intervention: { text: utterance.text, kind: decision.kind } };
+    const freshRuns = fresh.code_runs ?? [];
+    const freshSignals = deriveRunSignals(freshRuns, freshCtx.codeIndex);
+    const freshOfferRes = (
+      freshCtx.hintOffer?.codeIndex === freshCtx.codeIndex ? freshCtx.hintOffer.status : 'none'
+    ) as OfferResolution;
+    const freshRealRuns = freshRuns.filter(
+      (r) => r.codeIndex === freshCtx.codeIndex && r.status !== 'Idle'
+    );
+    const freshPendingOffer =
+      freshRealRuns[freshRealRuns.length - 1]?.intervention?.kind === 'offer' &&
+      freshOfferRes === 'none';
+    const freshDecision = decideIdleIntervention({
+      phase: freshCtx.phase,
+      codeLength: Number.isFinite(codeLength) ? Math.max(0, Math.floor(codeLength)) : 0,
+      idleNudgesGiven: idleNudgesGiven(freshRuns, freshCtx.codeIndex),
+      offerResolution: freshOfferRes,
+      lastRealRunPassed: freshSignals.lastRunPassed,
+      pendingOffer: freshPendingOffer,
+    });
+    if (!freshDecision.intervene) return { intervention: null };
+
+    // Strip speech tags before persisting — tags are TTS-only guidance.
+    const safeText = stripSpeechTags(utterance.text);
+    const idleRun: RunResult = {
+      stdout: '',
+      stderr: '',
+      compileOutput: '',
+      status: 'Idle',
+      exitCode: null,
+      timeMs: null,
+      memoryKb: null,
+      codeIndex: freshCtx.codeIndex,
+      intervention: { text: safeText, kind: decision.kind },
+    };
+    try {
+      await appendCodeRunOnly(interviewId, idleRun);
+      recordInterventionFired(interviewId);
+      await appendEvent(interviewId, 'utterance', {
+        text: safeText,
+        intervention: true,
+        kind: decision.kind,
+        idle: true,
+      });
+    } catch (err) {
+      // If the marker didn't persist, still return the utterance (best-effort). The per-question
+      // cap is derived from persisted markers, so a failed persist just means the next idle poll
+      // may retry.
+      console.error(
+        `[orchestrator] idle-nudge persist failed for ${interviewId} (non-fatal):`,
+        err
+      );
+    }
+
+    return { intervention: { text: safeText, kind: decision.kind } };
+  });
+}
+
+/** Path C — quiescent candidate intervention (ENGAGEMENT_INTERVENTIONS only). Recheck-then-commit
+ *  under withInterviewLock. DEGRADING → consent-first offer written to hintOffer.
+ *  WHEEL_SPINNING → accountability probe. */
+async function nudgeQuiescent(interviewId: string): Promise<NudgeResult> {
+  if (!interventionsEnabled()) return { intervention: null };
+
+  // Pre-checks outside lock (cheap).
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  if (interview.status !== 'in_progress') return { intervention: null };
+  if (durationExceeded(interview)) return { intervention: null };
+
+  const ctx = interview.fsm_state as InterviewContext;
+  if (ctx.phase !== 'coding') return { intervention: null };
+
+  const runs = interview.code_runs ?? [];
+  const budget = deriveRunAssistBudget(runs, ctx.codeIndex);
+  const offerResolution = (
+    ctx.hintOffer?.codeIndex === ctx.codeIndex ? ctx.hintOffer.status : 'none'
+  ) as OfferResolution;
+  const engagementState = currentEngagement(interviewId);
+
+  const decision = decideQuiescentIntervention({
+    phase: ctx.phase,
+    engagementState,
+    budget,
+    offerResolution,
+    isRunInFlight: isRunInFlight(interviewId),
+    isAnswerInFlight: isAnswerInFlight(interviewId),
+    cooldownOk: cooldownOk(interviewId),
+  });
+  if (!decision.intervene) return { intervention: null };
+
+  // Word outside the lock (slow oracle call).
+  const problem = assignedProblem(interview, ctx.codeIndex);
+  const interventionReq = {
+    kind: decision.kind,
+    ctx,
+    transcript: interview.transcript ?? [],
+    code: interview.code_snapshot,
+    level: interview.level,
+    roleBrief: interview.role_brief,
+    problemStatement: problem?.statement ?? null,
+    strength: decision.strength,
+  };
+  let utterance: Utterance;
+  try {
+    utterance = await withCostContext({ interviewId, kind: 'brain', phase: 'coding' }, () =>
+      getOracle().generateIntervention(interventionReq)
+    );
+  } catch (err) {
+    console.error(`[orchestrator] quiescent nudge generation failed for ${interviewId}:`, err);
+    utterance = await new DeterministicOracle().generateIntervention(interventionReq);
+  }
+  if (!utterance.text) return { intervention: null };
+
+  // Recheck-then-commit under lock.
+  return withInterviewLock(interviewId, async (): Promise<NudgeResult> => {
+    const fresh = requireInterview(await getById(interviewId), interviewId);
+    if (fresh.status !== 'in_progress') return { intervention: null };
+    const freshCtx = fresh.fsm_state as InterviewContext;
+    if (freshCtx.phase !== 'coding') return { intervention: null };
+
+    const freshRuns = fresh.code_runs ?? [];
+    const freshBudget = deriveRunAssistBudget(freshRuns, freshCtx.codeIndex);
+    const freshOfferRes = (
+      freshCtx.hintOffer?.codeIndex === freshCtx.codeIndex ? freshCtx.hintOffer.status : 'none'
+    ) as OfferResolution;
+    const freshDecision = decideQuiescentIntervention({
+      phase: freshCtx.phase,
+      engagementState: currentEngagement(interviewId),
+      budget: freshBudget,
+      offerResolution: freshOfferRes,
+      isRunInFlight: isRunInFlight(interviewId),
+      isAnswerInFlight: isAnswerInFlight(interviewId),
+      cooldownOk: cooldownOk(interviewId),
+    });
+    if (!freshDecision.intervene) return { intervention: null };
+
+    const safeText = stripSpeechTags(utterance.text);
+    const idleRun: RunResult = {
+      stdout: '',
+      stderr: '',
+      compileOutput: '',
+      status: 'Idle',
+      exitCode: null,
+      timeMs: null,
+      memoryKb: null,
+      codeIndex: freshCtx.codeIndex,
+      intervention: { text: safeText, kind: freshDecision.kind },
+    };
+
+    // For an OFFER: write to fsm_state.hintOffer so the answer path can resolve it.
+    if (freshDecision.kind === 'offer') {
+      const newCtx: InterviewContext = {
+        ...freshCtx,
+        hintOffer: { codeIndex: freshCtx.codeIndex, status: 'offered' },
+      };
+      await updateInterview(interviewId, { fsm_state: newCtx });
+    }
+
+    await appendCodeRunOnly(interviewId, idleRun);
+    recordInterventionFired(interviewId);
+    await appendEvent(interviewId, 'utterance', {
+      text: safeText,
+      intervention: true,
+      kind: freshDecision.kind,
+      quiescent: true,
+    });
+
+    return { intervention: { text: safeText, kind: freshDecision.kind } };
+  });
 }
 
 /** Decide + (maybe) word an interviewer hint for a struggling run, attaching it to `result` so it
@@ -1346,9 +1624,12 @@ async function attachRunIntervention(
     const budget = deriveRunAssistBudget(prior, ctx.codeIndex); // prior only — current has no hint yet
     // How the candidate answered a prior deep-hint offer (read-only from fsm_state, which only the
     // answer path writes — no cross-path race). 'declined'/'hinted' stop the run path from re-hinting.
-    const offerResolution =
-      ctx.hintOffer?.codeIndex === ctx.codeIndex ? ctx.hintOffer.status : 'none';
-    const decision = decideRunIntervention(signals, ctx.phase, budget, offerResolution);
+    const offerResolution = (
+      ctx.hintOffer?.codeIndex === ctx.codeIndex ? ctx.hintOffer.status : 'none'
+    ) as OfferResolution;
+    const decision = decideRunIntervention(signals, ctx.phase, budget, offerResolution, undefined, {
+      engagementInterventionsEnabled: interventionsEnabled(),
+    });
     if (!decision.intervene) return;
 
     const oracle = getOracle();
@@ -1392,7 +1673,9 @@ async function attachRunIntervention(
       utterance = await new DeterministicOracle().generateIntervention(interventionReq);
     }
     if (utterance.text) {
-      result.intervention = { text: utterance.text, kind: decision.kind };
+      // Strip speech tags before persisting — tags are TTS-only guidance, never shown in the UI.
+      result.intervention = { text: stripSpeechTags(utterance.text), kind: decision.kind };
+      recordInterventionFired(interview.id);
     }
   } catch (err) {
     console.error(`[orchestrator] run-intervention failed for ${interview.id}:`, err);
@@ -1460,8 +1743,10 @@ export async function finishAndScore(
 
   // Exclude synthetic idle-nudge markers (Path B): they are interviewer check-ins on a stalled
   // candidate, not code runs — grading them as failed executions would unfairly tank the score.
+  // §6.2: use isSyntheticRow canonical alias so BOTH Path-B idle markers and Path-C quiescent
+  // markers (also status:'Idle') are consistently excluded from the scoring feed.
   const codeRuns: CodeRunSummary[] = (interview.code_runs ?? [])
-    .filter((r: RunResult) => r.status !== 'Idle')
+    .filter((r: RunResult) => !isSyntheticRow(r))
     .map((r: RunResult) => ({
       language: r.language ?? 'unknown',
       status: r.status,

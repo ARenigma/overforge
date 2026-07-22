@@ -41,13 +41,17 @@ export function runPassed(r: RunResult): boolean {
   return r.status === 'Accepted' && cleanExit && noStderr;
 }
 
-/** A synthetic idle-nudge marker (Path B) — appended to the code-run channel to record that the
- *  interviewer checked in on a stalled candidate, race-free. It is NOT a real execution: it must be
- *  excluded from every real-run signal (failure streak, progress, scoring), or it would inflate
- *  consecutiveFailures, be graded as a failed run, and its 'nudge' would consume the run-probe budget. */
+/** A synthetic idle-nudge marker (Path B) or quiescent-intervention marker (Path C) — appended
+ *  to the code-run channel to record an interviewer check-in, race-free. It is NOT a real execution:
+ *  it must be excluded from every real-run signal (failure streak, progress, scoring). */
 export function isIdleRun(r: RunResult): boolean {
   return r.status === 'Idle';
 }
+
+/** Canonical alias for isIdleRun — used by the §6.2 unified ladder accounting (intervention.ts)
+ *  and the finishAndScore scorer feed (orchestrator.ts) to express intent unambiguously.
+ *  Placed here (signals.ts) so intervention.ts can import it without a circular dependency. */
+export const isSyntheticRow = isIdleRun;
 
 /** Stable signature of a FAILING run, used to detect stagnation (same wall, run after run). Prefers
  *  the exact set of failing hidden-test indices; falls back to a normalized first line of the error

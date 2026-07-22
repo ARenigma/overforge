@@ -36,6 +36,7 @@ import {
   answerInterview,
   runCode as apiRunCode,
   nudgeCandidate,
+  fetchRunIntervention,
   speakChunk,
   speakStream,
   fetchCodingProblem,
@@ -112,7 +113,7 @@ function lcgStep(seed: number): [number, number] {
   return [next, next / 0x100000000];
 }
 
-// ── Path B: stuck-not-running idle detector ──────────────────────────────────────────────────
+// ── Path B / Path C: idle + quiescent detectors ─────────────────────────────────────────────
 // During coding a candidate can be stuck WITHOUT a failing run — frozen on a blank editor, or
 // paused mid-code. We watch for COMPOUND idle (no keystroke AND no run AND no chat AND not
 // speaking) and ask the server (feature-flagged + capped per question there) whether a gentle
@@ -126,6 +127,9 @@ const IDLE_BLANK_MIN_PROBLEM_MS = 150_000; // on a BLANK editor, protect this mu
 const IDLE_BLANK_MAX_CHARS = 10; // editor length below this counts as "blank / still planning"
 const DEV_IDLE_WINDOW_MS = 20_000; // dev-interview equivalents (server-authoritative devMode only)
 const DEV_IDLE_BLANK_MIN_PROBLEM_MS = 30_000;
+// Path C — quiescent: typing has paused while code is present (lighter, earlier than idle).
+// The server is authoritative and will usually answer {intervention:null}; this only reports.
+const QUIESCENT_THRESHOLD_MS = 50_000;
 
 // ── Streaming TTS (P1-B) ──────────────────────────────────────────────────────
 // The interviewer's utterance is streamed as raw PCM16 from /speak-stream and scheduled onto a
@@ -1428,9 +1432,54 @@ export default function InterviewPage() {
     try {
       const result = await apiRunCode(id, activeToken, language, code);
       setRunResult(result);
-      // The autonomous interviewer may step in on a struggling run — surface it in the chat
-      // immediately. It rides on the code run (not the transcript); resume() restores the latest.
-      if (result.intervention?.text) {
+      // Stamp the exact moment this run result landed — used as the delivery-gate anchor for the
+      // out-of-band polling path. Captured before any async branch so all paths share the same ref.
+      const runCompletedAt = Date.now();
+      if (result.interventionPending && !result.intervention) {
+        // P2 — new engagement engine: the intervention is being worded out-of-band. Show the
+        // presence cue immediately and poll at ~2 s / 4 s / 7 s after the run lands. Render +
+        // voice the result exactly like the inline path when it arrives. Stop on first result,
+        // server-says-done, or after the third poll (hide cue silently — no error shown).
+        // Delivery gate: drop if the candidate typed or started a new run after this run completed.
+        // (Does NOT use lastRunAtRef: the existing run's finally stamps it ≈ runCompletedAt + a few
+        // μs, which would false-positive the gate. runningRef catches new runs after a render tick,
+        // which is well before the first 2 s poll fires.)
+        const tok = activeToken;
+        void (async () => {
+          setPresenceCueVisible(true);
+          const delays = [2_000, 2_000, 3_000]; // cumulative: ~2 s, ~4 s, ~7 s after run lands
+          for (const delay of delays) {
+            await new Promise<void>((resolve) => setTimeout(resolve, delay));
+            if (lastKeystrokeRef.current > runCompletedAt || runningRef.current) {
+              setPresenceCueVisible(false);
+              return; // candidate typed / spoke / re-ran — drop silently
+            }
+            try {
+              const r = await fetchRunIntervention(id, tok);
+              if (r.intervention?.text) {
+                setPresenceCueVisible(false);
+                setMessages((prev) => [
+                  ...prev,
+                  { role: 'ai', text: r.intervention!.text, assist: r.intervention!.kind },
+                ]);
+                void speak('run', undefined, r.intervention.text);
+                return;
+              }
+              if (!r.pending) {
+                // Server decided not to intervene — stop polling.
+                setPresenceCueVisible(false);
+                return;
+              }
+            } catch {
+              // Poll error — try next slot
+            }
+          }
+          setPresenceCueVisible(false); // three polls exhausted — hide cue, no error
+        })();
+      } else if (result.intervention?.text) {
+        // Existing inline intervention (flag-off backend) — unchanged. The autonomous interviewer
+        // may step in on a struggling run — surface it in the chat immediately. It rides on the
+        // code run (not the transcript); resume() restores the latest.
         setMessages((prev) => [
           ...prev,
           { role: 'ai', text: result.intervention!.text, assist: result.intervention!.kind },
@@ -1445,11 +1494,14 @@ export default function InterviewPage() {
     }
   }, [id, activeToken, language, code, running, speak]);
 
-  // ── Path B: compound-idle detector (stuck-not-running) ───────────────────────────────────────
-  // Poll while in the room. When coding AND the candidate has been idle (no keystroke, no run) past
-  // the protected window AND the interviewer isn't speaking, ask the server whether to check in.
-  // The server owns the real decision (feature flag + per-question cap + gates); this only reports
-  // idleness and voices whatever comes back. All refs are read live to avoid a stale-closure capture.
+  // ── Path B / Path C: compound-idle + quiescent detector ─────────────────────────────────────
+  // Poll while in the room. Two triggers share the same plumbing (cooldown, nudgeInFlight, delivery
+  // gate, presence-cue lead):
+  //   • Path C quiescent (reason:'quiescent'): typing paused ≥50 s while code is present — earlier,
+  //     lighter signal; server is authoritative and usually answers {intervention:null}.
+  //   • Path B idle (reason:'idle'): compound idle ≥90 s (no keystroke AND no run) — unchanged.
+  // Quiescent takes priority (fires first when code exists). All refs are read live to avoid stale
+  // closure capture. The server owns the real decision (feature flag + per-question cap + gates).
   const maybeIdleNudge = useCallback(async () => {
     const tok = activeTokenRef.current;
     if (!tok) return;
@@ -1468,14 +1520,32 @@ export default function InterviewPage() {
       : IDLE_BLANK_MIN_PROBLEM_MS;
 
     const now = Date.now();
-    const idleFor = now - Math.max(lastKeystrokeRef.current, lastRunAtRef.current);
-    if (idleFor < idleWindowMs) return; // still active / thinking — protected
-
+    const idleSinceKeystroke = now - lastKeystrokeRef.current;
+    const idleSinceActivity = now - Math.max(lastKeystrokeRef.current, lastRunAtRef.current);
     const codeLen = codeRef.current.trim().length;
-    // A blank editor early in a problem is planning, not a stall — give extra up-front think time.
-    if (codeLen < IDLE_BLANK_MAX_CHARS) {
-      const problemElapsedMs = (elapsedRef.current - problemStartElapsedRef.current) * 1000;
-      if (problemElapsedMs < blankFloorMs) return;
+
+    // Path C — quiescent: typing has paused ≥50 s while meaningful code is present. Uses
+    // keystroke time only ("typing has quiesced"), not run time. The existing runningRef guard
+    // above already ensures no run is in flight.
+    const isQuiescent =
+      codeLen > IDLE_BLANK_MAX_CHARS && idleSinceKeystroke >= QUIESCENT_THRESHOLD_MS;
+
+    // Path B — idle: compound idle (no keystroke AND no run) for the full protected window.
+    const isIdle = idleSinceActivity >= idleWindowMs;
+
+    // Quiescent fires first (earlier trigger when code exists); idle handles blank-editor stalls.
+    let reason: 'idle' | 'quiescent';
+    if (isQuiescent) {
+      reason = 'quiescent';
+    } else if (isIdle) {
+      // A blank editor early in a problem is planning, not a stall — give extra up-front think time.
+      if (codeLen < IDLE_BLANK_MAX_CHARS) {
+        const problemElapsedMs = (elapsedRef.current - problemStartElapsedRef.current) * 1000;
+        if (problemElapsedMs < blankFloorMs) return;
+      }
+      reason = 'idle';
+    } else {
+      return; // neither threshold reached — still active / thinking, protected
     }
 
     nudgeInFlightRef.current = true;
@@ -1483,7 +1553,7 @@ export default function InterviewPage() {
     // speech) that occurs AFTER this timestamp invalidates the returned intervention.
     const nudgeSentAt = Date.now();
     try {
-      const res = await nudgeCandidate(id, tok, codeLen);
+      const res = await nudgeCandidate(id, tok, codeLen, reason);
       if (res.intervention?.text) {
         // §6.3 delivery gate: drop if the candidate was active after the request was sent.
         // lastKeystrokeRef covers keystrokes, chat messages, and voice turns (all update it).

@@ -2,7 +2,7 @@
 // else: produce the next interviewer utterance, and judge whether a coding
 // answer warrants a follow-up. It NEVER selects the next state — the machine does.
 
-import { InterviewContext, OracleDecision, Effect, InterventionKind } from './types';
+import { InterviewContext, OracleDecision, Effect, InterventionKind, ObserverNote } from './types';
 
 export interface TranscriptTurn {
   role: 'interviewer' | 'candidate' | 'system';
@@ -100,6 +100,12 @@ export interface InterventionRequest {
   /** Expert-authored per-family grounding hints for the current problem (server-only), used to seed
    *  a code-anchored counter-question. */
   probeHints?: string[] | null;
+  /** Recent observer notes (§6.4): injected into intervention wording to sharpen specificity.
+   *  approach/transition always included; diagnosis only at ladderRung ≥ 2. */
+  observerNotes?: ObserverNote[];
+  /** Escalation rung within the intervention ladder — controls how much of the observer note
+   *  is injected (diagnosis only at rung ≥ 2). */
+  ladderRung?: number;
 }
 
 /** A candidate utterance whose intent (a clarifying QUESTION vs an ANSWER) is not yet known. */
@@ -143,24 +149,24 @@ export class DeterministicOracle implements Oracle {
     switch (e.kind) {
       case 'greet':
         return {
-          text: "Hi — I'll be your technical interviewer today. We'll start with a walkthrough of one of your recent projects, then go deeper into a few technical areas. To start, tell me about the most technically challenging project you've worked on recently.",
+          text: "Hi — I'll be your technical interviewer today. We'll start with a walk-through of a recent project of yours, then go deeper into a few technical areas. [pause] To start, tell me about the most technically challenging project you've built recently.",
           expects: 'voice',
         };
       case 'ask_oral':
         return {
           text:
             e.index === 0
-              ? "Let's dig into that project — walk me through the hardest technical decision you made, and why you made it that way."
+              ? 'Okay so — walk me through the hardest technical decision you made on that project, and why you went that way.'
               : 'Now a more conceptual one: explain a core idea from that work from first principles, as if to a sharp peer.',
           expects: 'voice',
         };
       case 'ask_oral_followup':
         return {
-          text: 'Let me push on that a bit — can you give me a concrete example or a specific trade-off you had to make?',
+          text: 'Right — let me push on that a bit. Can you give me a concrete example, or a specific trade-off you had to make?',
           expects: 'voice',
         };
       case 'handoff':
-        return { text: "Great — let's move to the coding portion.", expects: 'text' };
+        return { text: "Okay — let's shift to some coding.", expects: 'text' };
       case 'ask_code':
         return {
           // The full problem is shown on the candidate's screen (problem panel); the interviewer
@@ -213,11 +219,13 @@ export class DeterministicOracle implements Oracle {
     }
     const canned: Record<InterventionKind, string> = {
       counter_question: 'Before we move on — what makes you confident that approach is correct?',
-      probe: "Walk me through what you expected to happen versus what you're seeing.",
+      probe: "Hmm, walk me through what you expected to happen versus what you're actually seeing.",
       hint: 'Take another look at your edge cases — what happens at the boundaries of your input?',
       nudge: "Talk me through where you're at — what are you trying right now?",
       offer:
-        "You've hit this a few times — would you like a more concrete hint, or would you rather keep going?",
+        "You've been at this a while — [pause] would you like a more concrete pointer, or would you rather keep going on your own?",
+      encourage:
+        "<soft>Nice — that's passing now.</soft> [pause] Walk me through what you changed to fix it.",
     };
     return { text: canned[req.kind], expects: 'code' };
   }

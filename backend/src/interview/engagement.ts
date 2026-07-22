@@ -16,6 +16,7 @@
 //   - Quiescence floor ≥ 90 s, per-interview jitter band 90–150 s (§6.7).
 
 import { appendEvent } from '../db/interviews';
+import { ObserverNote } from './types';
 
 // ─────────────────────── Public types ───────────────────────
 
@@ -97,7 +98,19 @@ interface RunEntry {
   totalBytes: number;
 }
 
-type EngagementEntry = SnapshotEntry | RunEntry;
+/** An observer-note entry produced by the off-path LLM call (§6.4). Stored in the ring buffer
+ *  alongside snapshot and run entries; only the most recent N are injected into wording. */
+interface NoteEntry {
+  kind: 'note';
+  codeIndex: number;
+  ts: number;
+  seq: number;
+  approach: string;
+  transition: string;
+  diagnosis: string;
+}
+
+type EngagementEntry = SnapshotEntry | RunEntry | NoteEntry;
 
 interface EngagementBuffer {
   entries: EngagementEntry[];
@@ -106,6 +119,11 @@ interface EngagementBuffer {
   lastState: EngagementClassification | null;
   /** Per-interview jitter-derived quiescence threshold (ms), seeded from interviewId. */
   quiescenceThresholdMs: number;
+  /** Per-interview jitter-derived cross-path intervention cooldown (ms), seeded from interviewId.
+   *  No unprompted intervention (Path A/B/C) fires within this window of the previous one. */
+  cooldownThresholdMs: number;
+  /** Timestamp of the last fired intervention (any path). 0 = never. */
+  lastInterventionTs: number;
   createdAt: number;
 }
 
@@ -138,12 +156,21 @@ function hashId(id: string): number {
 }
 
 /**
- * Per-interview jitter thresholds seeded deterministically so replays reproduce
- * the same values (§6.7). Quiescence band: 90–150 s.
+ * Per-interview jitter thresholds seeded deterministically so replays reproduce the same values
+ * (§6.7). Quiescence band: 90–150 s. Cross-path cooldown band: 120–180 s (2–3 min, different
+ * hash bits so the two thresholds are independent).
  */
-export function deriveThresholds(interviewId: string): { quiescenceThresholdMs: number } {
-  const jitterMs = hashId(interviewId) % 60_001; // 0..60 000 ms
-  return { quiescenceThresholdMs: 90_000 + jitterMs };
+export function deriveThresholds(interviewId: string): {
+  quiescenceThresholdMs: number;
+  cooldownThresholdMs: number;
+} {
+  const h = hashId(interviewId);
+  const jitterMs = h % 60_001; // 0..60 000 ms → quiescence 90–150 s
+  const cooldownJitter = (h >>> 16) % 60_001; // high bits → cooldown 120–180 s
+  return {
+    quiescenceThresholdMs: 90_000 + jitterMs,
+    cooldownThresholdMs: 120_000 + cooldownJitter,
+  };
 }
 
 // ─────────────────────── Buffer helpers ───────────────────────
@@ -151,12 +178,14 @@ export function deriveThresholds(interviewId: string): { quiescenceThresholdMs: 
 function getOrCreate(interviewId: string): EngagementBuffer {
   const existing = buffers.get(interviewId);
   if (existing) return existing;
-  const { quiescenceThresholdMs } = deriveThresholds(interviewId);
+  const { quiescenceThresholdMs, cooldownThresholdMs } = deriveThresholds(interviewId);
   const buf: EngagementBuffer = {
     entries: [],
     lastSeq: -1,
     lastState: null,
     quiescenceThresholdMs,
+    cooldownThresholdMs,
+    lastInterventionTs: 0,
     createdAt: Date.now(),
   };
   buffers.set(interviewId, buf);
@@ -484,7 +513,10 @@ export function ingestSnapshot(
 
   // Line-hash diff vs previous entry's lineHashes (O(lines), content capped at 16 KB).
   const lines = contentLines(opts.code);
-  const prevEntry = buf.entries[buf.entries.length - 1];
+  // NoteEntry lacks lineHashes/totalBytes — find the last snapshot or run entry.
+  const prevEntry = [...buf.entries]
+    .reverse()
+    .find((e): e is SnapshotEntry | RunEntry => e.kind !== 'note');
   const prevLines: string[] = prevEntry?.lineHashes ?? [];
   const prevTotalBytes = prevEntry?.totalBytes ?? 0;
   const totalBytes = lines.reduce((s, l) => s + l.length + 1, 0);
@@ -557,9 +589,12 @@ export function ingestRun(
   // Fall back to the most recent snapshot when no prior run exists.
   const lines = contentLines(opts.code);
   const prevRunEntry = [...buf.entries].reverse().find((e): e is RunEntry => e.kind === 'run');
+  const lastNonNote = [...buf.entries]
+    .reverse()
+    .find((e): e is SnapshotEntry | RunEntry => e.kind !== 'note');
   const prevLines: string[] = prevRunEntry
     ? prevRunEntry.lineHashes
-    : (buf.entries[buf.entries.length - 1]?.lineHashes ?? []);
+    : (lastNonNote?.lineHashes ?? []);
 
   const hadPriorBaseline = prevLines.length > 0;
   // hasNonTrivialChanges: true when non-print/log lines changed (§6.5).
@@ -594,4 +629,76 @@ export function ingestRun(
  */
 export function evictEngagement(interviewId: string): void {
   buffers.delete(interviewId);
+}
+
+// ─────────────────────── P2 engagement accessors ───────────────────────
+
+/** Whether the active interventions engine (P2) is enabled. Separate from shadowEnabled() —
+ *  ENGAGEMENT_SHADOW controls logging; this controls acting. Default OFF when unset. */
+function interventionsEnabled(): boolean {
+  const v = (process.env.ENGAGEMENT_INTERVENTIONS ?? '').toLowerCase();
+  return v === '1' || v === 'true' || v === 'on';
+}
+
+/** The most recent classified engagement state for an interview, or null when the buffer is cold
+ *  (restarted since the last snapshot/run). Used by Path C to decide IF to intervene. */
+export function currentEngagement(interviewId: string): EngagementClassification | null {
+  const buf = buffers.get(interviewId);
+  return buf?.lastState ?? null;
+}
+
+/**
+ * True when the cross-path cooldown has elapsed since the last intervention, or when no
+ * intervention has been fired yet. The cooldown is per-interview-jitter (120–180 s).
+ */
+export function cooldownOk(interviewId: string, now: number = Date.now()): boolean {
+  const buf = buffers.get(interviewId);
+  if (!buf || buf.lastInterventionTs === 0) return true;
+  return now - buf.lastInterventionTs >= buf.cooldownThresholdMs;
+}
+
+/** Record that an unprompted intervention (Path A/B/C) was just fired — starts the cooldown clock. */
+export function recordInterventionFired(interviewId: string, ts: number = Date.now()): void {
+  const buf = buffers.get(interviewId);
+  if (buf) buf.lastInterventionTs = ts;
+}
+
+/**
+ * Ingest an observer note into the ring buffer. The note is also persisted by the caller as an
+ * interview_event before this is called; this function only updates in-memory state for wording
+ * injection. Gated by ENGAGEMENT_INTERVENTIONS — a no-op when the feature is off.
+ */
+export function ingestNote(interviewId: string, note: ObserverNote, codeIndex: number): void {
+  if (!interventionsEnabled()) return;
+  const buf = getOrCreate(interviewId);
+  const entry: NoteEntry = {
+    kind: 'note',
+    codeIndex,
+    ts: Date.now(),
+    seq: note.seq,
+    approach: note.approach,
+    transition: note.transition,
+    diagnosis: note.diagnosis,
+  };
+  buf.entries.push(entry);
+  while (buf.entries.length > RING_CAP) buf.entries.shift();
+}
+
+/**
+ * Return the most recent `maxCount` observer notes from the ring buffer for an interview.
+ * Returns the contiguous suffix only — approach/transition injected into all wording;
+ * diagnosis injected only at ladder rung ≥ 2 (handled by the caller).
+ */
+export function getRecentNotes(interviewId: string, maxCount: number): ObserverNote[] {
+  const buf = buffers.get(interviewId);
+  if (!buf) return [];
+  return buf.entries
+    .filter((e): e is NoteEntry => e.kind === 'note')
+    .slice(-maxCount)
+    .map((e) => ({
+      approach: e.approach,
+      transition: e.transition,
+      diagnosis: e.diagnosis,
+      seq: e.seq,
+    }));
 }

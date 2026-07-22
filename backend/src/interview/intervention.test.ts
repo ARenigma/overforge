@@ -215,7 +215,9 @@ describe('deriveRunAssistBudget', () => {
       probeGiven: false,
       offerMade: false,
       deepHintGiven: false,
+      encourageGiven: false,
       runsSinceLastAssist: Number.POSITIVE_INFINITY,
+      consecutiveFailuresBeforeLatest: 2,
     });
   });
 
@@ -225,7 +227,9 @@ describe('deriveRunAssistBudget', () => {
       probeGiven: true,
       offerMade: false,
       deepHintGiven: false,
+      encourageGiven: false,
       runsSinceLastAssist: 2,
+      consecutiveFailuresBeforeLatest: 3,
     });
   });
 
@@ -235,7 +239,9 @@ describe('deriveRunAssistBudget', () => {
       probeGiven: true,
       offerMade: true,
       deepHintGiven: false,
+      encourageGiven: false,
       runsSinceLastAssist: 3,
+      consecutiveFailuresBeforeLatest: 3,
     });
   });
 
@@ -252,7 +258,9 @@ describe('deriveRunAssistBudget', () => {
       probeGiven: false,
       offerMade: false,
       deepHintGiven: false,
+      encourageGiven: false,
       runsSinceLastAssist: Number.POSITIVE_INFINITY,
+      consecutiveFailuresBeforeLatest: 1,
     });
   });
 });
@@ -275,7 +283,9 @@ describe('decideRunIntervention (balanced ladder)', () => {
     probeGiven: false,
     offerMade: false,
     deepHintGiven: false,
+    encourageGiven: false,
     runsSinceLastAssist: Number.POSITIVE_INFINITY,
+    consecutiveFailuresBeforeLatest: 0,
     ...o,
   });
 

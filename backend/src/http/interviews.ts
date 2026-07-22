@@ -474,7 +474,11 @@ router.post('/:id/snapshot', async (req: Request, res: Response): Promise<void> 
 router.post('/:id/nudge', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { token, codeLength } = req.body as { token?: string; codeLength?: number };
+    const { token, codeLength, reason } = req.body as {
+      token?: string;
+      codeLength?: number;
+      reason?: string;
+    };
 
     await validateCandidate(id, token ?? '');
     // Bounded: the client throttles to one poll per idle window; the server caps at one nudge per
@@ -485,11 +489,48 @@ router.post('/:id/nudge', async (req: Request, res: Response): Promise<void> => 
       message: 'Too many check-in requests; please slow down.',
     });
 
+    const validReason: 'idle' | 'quiescent' = reason === 'quiescent' ? 'quiescent' : 'idle';
     const result = await orchestrator.nudgeInterview(
       id,
-      typeof codeLength === 'number' ? codeLength : 0
+      typeof codeLength === 'number' ? codeLength : 0,
+      validReason
     );
     res.json(result);
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ─────────────────────── POST /api/interviews/:id/run-intervention ───────────────────────
+// Async run-wording poll (§6 item 5). The /run response carries interventionPending:true when the
+// async path is active; the frontend polls here until pending:false. Rate-limited 30/10min.
+// Response: { intervention: {text, kind} | null, pending: boolean }
+// pending:true  = wording still in-flight (retry)
+// pending:false = server decided (intervention present or null = no intervention)
+
+router.post('/:id/run-intervention', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { token } = req.body as { token?: string };
+
+    await validateCandidate(id, token ?? '');
+    await enforceRateLimit(`runiv:${hashToken(token ?? '')}`, {
+      limit: 30,
+      windowMs: 600_000,
+      message: 'Too many run-intervention requests; please slow down.',
+    });
+
+    const pending = orchestrator.getPendingRunIntervention(id);
+    if (!pending || pending.status === 'none') {
+      res.json({ intervention: null, pending: false });
+      return;
+    }
+    if (pending.status === 'pending') {
+      res.json({ intervention: null, pending: true });
+      return;
+    }
+    // status === 'ready'
+    res.json({ intervention: pending.intervention ?? null, pending: false });
   } catch (err) {
     sendError(res, err);
   }

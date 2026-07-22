@@ -15,7 +15,7 @@ import {
   ClarifyRequest,
   ClarifyResult,
 } from './oracle';
-import { OracleDecision, InterventionKind, Effect } from './types';
+import { OracleDecision, InterventionKind, Effect, ObserverNote } from './types';
 import { recordLlmUsage } from '../cost/ledger';
 
 // NOTE: MinimaxConfig + createMinimaxClient are OpenAI-compatible (Bearer auth, request shape, and
@@ -38,6 +38,10 @@ export interface CompleteOptions {
   json?: boolean;
   maxTokens?: number;
   temperature?: number;
+  /** Per-call reasoning effort override (e.g. 'high' for observer notes, 'low' for conversational
+   *  turns). Providers that support reasoning_effort (Groq gpt-oss, Cerebras) use this; others
+   *  ignore it. When set, overrides the config-level reasoningEffort for this call. */
+  reasoningEffort?: string;
 }
 
 export interface MinimaxClient {
@@ -210,9 +214,11 @@ export function createMinimaxClient(config: MinimaxConfig): MinimaxClient {
           // (~half of prod scorings). max_tokens is only a ceiling: a well-behaved response stops
           // early, so this adds no cost when not needed, but lets a reasoning response complete.
           max_tokens: opts.maxTokens ?? 2048,
-          // gpt-oss on Groq: 'low' keeps hidden reasoning (and TTFT) minimal. Only sent when set —
+          // Per-call reasoningEffort overrides the config-level one. Only sent when set —
           // MiniMax rejects unknown params, so its config leaves reasoningEffort undefined.
-          ...(config.reasoningEffort ? { reasoning_effort: config.reasoningEffort } : {}),
+          ...((opts.reasoningEffort ?? config.reasoningEffort)
+            ? { reasoning_effort: opts.reasoningEffort ?? config.reasoningEffort }
+            : {}),
           ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
         }),
       });
@@ -372,31 +378,36 @@ const EVALUATOR_SYSTEM =
 // The autonomous interviewer mid-problem. Balanced: present but not overbearing, and it NEVER
 // hands over the solution — it guides the candidate to find it (so the signal stays the candidate's).
 const INTERVENER_SYSTEM =
-  'You are a balanced, senior technical interviewer stepping in mid-problem — present but not ' +
-  'overbearing, like a real human interviewer. Speak in the first person, ONE short turn (1–2 ' +
-  'sentences). Be specific and encouraging. NEVER write code or give away the solution; guide ' +
-  'the candidate to reach it themselves. ' +
-  // Continuer (evidence-based, real-interviewer warmth): you MAY open with a brief, SPECIFIC
-  // acknowledgment of what the candidate actually said or built (e.g. "Nice — hashing to dedupe,
-  // that\'s clean.") before your question. It must reference their real content — NEVER generic
-  // filler like "Good answer", "That\'s a great point", or "Makes sense". Keep the whole turn to 1–2
-  // sentences even with the lead-in; if you have nothing specific to acknowledge, skip it entirely.
-  'You MAY lead with a brief, SPECIFIC acknowledgment of their actual approach or code before your ' +
-  'question, but never generic praise or filler, and never at the cost of the 1–2 sentence limit. ' +
-  'Your turn is read ALOUD by text-to-speech: never speak ' +
-  'code identifiers/snake_case/camelCase/backticks — say them as natural words ("max attempts", ' +
-  'not "max_attempts"). Never reveal scores or internal reasoning.';
+  'You are a balanced, senior technical interviewer stepping in mid-problem — warm, human, and ' +
+  'never overbearing. Speak in the first person. ONE short turn: 1–3 sentences, ONE idea. ' +
+  'Use contractions and natural interjections (e.g. "Right —", "Hmm,", "Okay so"). ' +
+  'When you want to challenge before asking, VALIDATE first with something SPECIFIC and true ' +
+  '(e.g. "Your two-pointer idea is right — one thing though...") — never generic filler ' +
+  'like "Good answer" or "Great point". Ellipses ("...") are fine for a natural beat. ' +
+  'NEVER use bullet lists, headers, or numbered lists — plain spoken sentences only. ' +
+  'NEVER write code or give away the solution; guide the candidate to reach it themselves. ' +
+  'Your turn is read ALOUD by text-to-speech: never speak code identifiers, snake_case, ' +
+  'camelCase, or backticks — say them as natural words ("max attempts", not "max_attempts"). ' +
+  // Speech tags: Grok TTS supports a small whitelist. Use SPARINGLY (at most 1–2 per turn,
+  // never stacked) only where they serve the moment — a [pause] before the key question, or
+  // <soft> for a gentle encouragement after a long failure streak. Allowed inline: [pause],
+  // [long-pause], [sigh]; allowed wrapping: <soft>…</soft>, <slow>…</slow>. Nothing else.
+  'OPTIONAL TTS EXPRESSION (sparingly — at most 1–2 per turn, never stacked): you may emit ' +
+  '[pause] before a key question, or wrap encouragement in <soft>...</soft>. Only where it ' +
+  'genuinely serves the tone. Do not force it. Never reveal scores or internal reasoning.';
 
 const KIND_GUIDANCE: Record<InterventionKind, string> = {
   counter_question:
     'Challenge the claim or design choice the candidate just made — ask them to justify it. Do not give the answer.',
   probe:
-    'The candidate seems stuck after repeated failing runs. Ask ONE focused question that makes them reason about WHY it is failing — do not tell them the fix.',
-  hint: 'The candidate has ASKED for (or clearly needs) a more concrete hint. Point them at the SPECIFIC failing case or the class of bug — more concrete than a probe — but still WITHOUT writing the fix or any code. The deeper they are stuck, the more specific the pointer.',
+    'The candidate seems stuck after repeated failing runs. Ask ONE focused question that makes them reason about WHY it is failing — do not tell them the fix. Use a natural interjection if it fits the moment (e.g. "Hmm, walk me through...").',
+  hint: 'The candidate has ASKED for (or clearly needs) a more concrete hint. Point them at the SPECIFIC failing case or the class of bug — more concrete than a probe — but still WITHOUT writing the fix or any code. The deeper they are stuck, the more specific the pointer. You may use [pause] before the key pointer.',
   nudge:
     'Gently check in and invite the candidate to talk through their current approach in their own words.',
   offer:
-    'The candidate is still stuck after your earlier probe. OFFER a more concrete hint — ask, in ONE warm sentence, whether they would like a bigger hint or would rather keep going. Do NOT give the hint itself yet, and do not reveal anything about the solution.',
+    "The candidate is still stuck after your earlier probe. OFFER a more concrete hint in ONE warm sentence — ask whether they'd like a bigger hint or would rather keep going. Do NOT give the hint itself yet. [pause] before the question lands well. Do not reveal anything about the solution.",
+  encourage:
+    'The candidate just got their solution working after a tough stretch. Validate what SPECIFICALLY fixed it — cite their actual code or change, never say "good job" generically. Then gently nudge them forward (complexity? edge cases? next question?). <soft>Warm and brief — 1–2 sentences.</soft>',
 };
 
 function buildInterventionPrompt(req: InterventionRequest): string {
@@ -408,10 +419,29 @@ function buildInterventionPrompt(req: InterventionRequest): string {
     .map((r) => `- ${r.status}${r.stderr ? ` (stderr: ${r.stderr.slice(0, 160)})` : ''}`)
     .join('\n');
   const brief = req.roleBrief?.trim();
+
+  // Observer-note context (§6.4): inject approach/transition always; diagnosis at rung ≥ 2 only.
+  // These are internal signals — never reveal them to the candidate; use them to sharpen wording.
+  const notes: ObserverNote[] = req.observerNotes ?? [];
+  const ladderRung = req.ladderRung ?? 0;
+  const noteBlock =
+    notes.length > 0
+      ? 'Internal observer context (do NOT mention or reveal to the candidate — use to sharpen your ' +
+        'wording only):\n' +
+        notes
+          .map((n) => {
+            const parts = [`Approach: ${n.approach}`, `Transition: ${n.transition}`];
+            if (ladderRung >= 2) parts.push(`Diagnosis: ${n.diagnosis}`);
+            return parts.join(' | ');
+          })
+          .join('\n')
+      : '';
+
   return [
     levelGuidance(req.level),
     brief ? `Role context:\n${brief.slice(0, 2000)}` : '',
     req.problemStatement ? `The coding problem:\n${req.problemStatement.slice(0, 1500)}` : '',
+    noteBlock,
     // Path-B idle check-in: no run has failed, so OVERRIDE the failure-oriented nudge guidance with
     // a content-free, situation-specific instruction. Never mention bugs, tests, errors, or fixes.
     req.kind === 'nudge' && req.idleMode === 'blank'
@@ -584,6 +614,8 @@ function buildClarifyPrompt(req: ClarifyRequest): string {
     .join('\n\n');
 }
 
+// 'offer' and 'encourage' are policy decisions (made by intervention.ts), not oracle decisions —
+// the oracle can only choose counter_question/probe/hint/nudge for evaluateAnswer follow-ups.
 const VALID_KINDS: readonly InterventionKind[] = ['counter_question', 'probe', 'hint', 'nudge'];
 
 /**

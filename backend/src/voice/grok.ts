@@ -14,6 +14,7 @@
 
 import WebSocket from 'ws';
 import { Pcm16Aligner, prepareTranscript } from './cartesia';
+import { sanitizeSpeechTags } from './speech-tags';
 
 const DEFAULT_VOICE = 'sirius';
 const DEFAULT_LANGUAGE = 'en';
@@ -77,7 +78,8 @@ export async function synthesize(
   if (!cfg.apiKey) {
     throw new Error('Grok TTS not configured: set XAI_API_KEY.');
   }
-  const shaped = prepareTranscript(text).slice(0, MAX_CHARS);
+  // Sanitize speech tags before sending to Grok TTS: allow whitelisted Grok tags, strip unknown.
+  const shaped = prepareTranscript(sanitizeSpeechTags(text)).slice(0, MAX_CHARS);
   const res = await fetch(httpBaseUrl(), {
     signal: AbortSignal.timeout(30_000),
     method: 'POST',
@@ -244,7 +246,8 @@ export async function* synthesizeStream(
 
   const entry = await acquireSocket(cfg);
   const aligner = new Pcm16Aligner();
-  const shaped = prepareTranscript(text).slice(0, MAX_CHARS);
+  // Sanitize speech tags before sending to Grok TTS: allow whitelisted Grok tags, strip unknown.
+  const shaped = prepareTranscript(sanitizeSpeechTags(text)).slice(0, MAX_CHARS);
 
   // Single-producer single-consumer queue: WS message callbacks push; the async generator pulls.
   // All callbacks run on the Node.js event loop so there are no concurrent pushes.

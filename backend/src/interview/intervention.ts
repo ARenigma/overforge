@@ -9,7 +9,7 @@
 
 import { RunResult } from '../execution/types';
 import { InterventionKind } from './types';
-import { RunSignals } from './signals';
+import { RunSignals, isSyntheticRow, runPassed } from './signals';
 
 export interface RunInterventionPolicy {
   /** Max run-triggered hints per coding question (balanced: 2). */
@@ -31,6 +31,9 @@ export const BALANCED_RUN_POLICY: RunInterventionPolicy = {
  * Per-question assist state, DERIVED from the run log (not stored) so overlapping runs can't corrupt
  * a shared counter. Note: the deep-hint OFFER is a gate, not an assist — it's tracked separately
  * (offerMade) and excluded from the actual-assist accounting.
+ *
+ * §6.2 fix: ladderInterventions() is used for all-rows accounting so a Path-C offer on a synthetic
+ * (Idle) row is visible to the ladder and not silently re-offered on the next quiescence trigger.
  */
 export interface RunAssistBudget {
   /** A gentle probe (or counter-question) has fired on this question. */
@@ -39,8 +42,38 @@ export interface RunAssistBudget {
   offerMade: boolean;
   /** The deep hint has been delivered on this question (via the run path). */
   deepHintGiven: boolean;
-  /** Runs since the last actual assist (probe/hint), Infinity if none — drives the post-probe room. */
+  /** An 'encourage' has already fired for this question (budget 1 per question). */
+  encourageGiven: boolean;
+  /** Runs since the last actual assist (probe/hint), Infinity if none — drives the post-probe room.
+   *  Counts REAL run positions only; synthetic rows do not advance this counter. */
   runsSinceLastAssist: number;
+  /** Trailing consecutive failures in REAL runs BEFORE the current run — used to gate 'encourage':
+   *  only fire after ≥2 real consecutive failures were observed (server-verified progress). */
+  consecutiveFailuresBeforeLatest: number;
+}
+
+/**
+ * All ladder-relevant interventions for a coding question, across BOTH real and synthetic rows.
+ * §6.2 unified timeline: a Path-C offer stored on a synthetic (Idle) row counts toward the ladder
+ * so the interviewer never unknowingly re-offers. Path-B idle nudges on synthetic rows are excluded
+ * (they are check-ins, not assists; the idle budget is tracked separately by idleNudgesGiven).
+ */
+export function ladderInterventions(
+  runs: RunResult[],
+  codeIndex: number
+): Array<{ kind: InterventionKind; onSynthetic: boolean }> {
+  return runs
+    .filter(
+      (r) =>
+        r.codeIndex === codeIndex &&
+        r.intervention?.kind != null &&
+        // Exclude Path-B idle nudges (synthetic rows with kind='nudge') from the ladder.
+        !(isSyntheticRow(r) && r.intervention!.kind === 'nudge')
+    )
+    .map((r) => ({
+      kind: r.intervention!.kind as InterventionKind,
+      onSynthetic: isSyntheticRow(r),
+    }));
 }
 
 export interface RunDecision {
@@ -52,8 +85,10 @@ export interface RunDecision {
   reason: string;
 }
 
-/** Resolution of a deep-hint offer, read from fsm_state (written only by the answer path). */
-export type OfferResolution = 'none' | 'declined' | 'hinted';
+/** Resolution of a deep-hint offer, read from fsm_state (written by the answer path for run-triggered
+ *  offers, and by the quiescent path for Path-C offers). 'offered' = a Path-C offer is pending in
+ *  fsm_state.hintOffer — maybeResolveHintOffer treats this identically to an open run-path offer. */
+export type OfferResolution = 'none' | 'offered' | 'declined' | 'hinted';
 
 const QUIET: RunDecision = Object.freeze({
   intervene: false,
@@ -65,34 +100,62 @@ const QUIET: RunDecision = Object.freeze({
 /**
  * Reconstruct the per-question assist state from the PRIOR run log (the runs before the one that
  * just landed). Interventions are recorded on the run that triggered them, so this is derived,
- * never stored — two overlapping runs can't corrupt a shared counter. The 'offer' kind is a gate,
- * not an assist, so it's tracked separately and never counts toward the probe/hint accounting.
+ * never stored — two overlapping runs can't corrupt a shared counter.
+ *
+ * §6.2 unified timeline: uses ladderInterventions() to count across ALL rows (real + synthetic),
+ * so a Path-C offer persisted on a synthetic (Idle) row is visible to the ladder and cannot be
+ * silently re-offered. Path-B idle nudges are excluded (separate budget tracked by idleNudgesGiven).
  */
 export function deriveRunAssistBudget(priorRuns: RunResult[], codeIndex: number): RunAssistBudget {
-  // Exclude synthetic idle markers: their 'nudge' is an idle check-in on the code-run channel, NOT
-  // a run-failure assist — counting it would set probeGiven and swallow the candidate's first real
-  // run-probe. The idle budget is tracked separately (idleNudgesGiven in signals.ts).
-  const scoped = priorRuns.filter((r) => r.codeIndex === codeIndex && r.status !== 'Idle');
+  // §6.2: count ALL ladder-relevant interventions across real and synthetic rows.
+  const ladder = ladderInterventions(priorRuns, codeIndex);
   let probeGiven = false;
   let offerMade = false;
   let deepHintGiven = false;
-  let lastAssistIdx = -1;
-  scoped.forEach((r, i) => {
-    const kind = r.intervention?.kind;
-    if (!kind) return;
+  let encourageGiven = false;
+  for (const { kind } of ladder) {
     if (kind === 'offer') {
       offerMade = true;
     } else if (kind === 'hint') {
       deepHintGiven = true;
-      lastAssistIdx = i;
+    } else if (kind === 'encourage') {
+      encourageGiven = true;
     } else {
-      probeGiven = true; // probe / counter_question / nudge
-      lastAssistIdx = i;
+      // probe, counter_question, non-idle nudge
+      probeGiven = true;
     }
+  }
+
+  // runsSinceLastAssist: counts REAL run positions only (semantics: "how many executions since we
+  // last stepped in"). Synthetic rows are not executions and must not advance this counter.
+  const realScoped = priorRuns.filter((r) => r.codeIndex === codeIndex && !isSyntheticRow(r));
+  let lastAssistIdx = -1;
+  realScoped.forEach((r, i) => {
+    const kind = r.intervention?.kind;
+    // 'offer' and 'encourage' are not "assists" for the probe-cooldown countdown.
+    if (!kind || kind === 'offer' || kind === 'encourage') return;
+    lastAssistIdx = i;
   });
   const runsSinceLastAssist =
-    lastAssistIdx === -1 ? Number.POSITIVE_INFINITY : scoped.length - lastAssistIdx;
-  return { probeGiven, offerMade, deepHintGiven, runsSinceLastAssist };
+    lastAssistIdx === -1 ? Number.POSITIVE_INFINITY : realScoped.length - lastAssistIdx;
+
+  // consecutiveFailuresBeforeLatest: trailing consecutive failures in prior real runs — used to gate
+  // 'encourage'. The encourage fires on the FIRST passing run after ≥2 consecutive failures, so we
+  // count failures at the tail of the prior-run list (not including the current passing run).
+  let consecutiveFailuresBeforeLatest = 0;
+  for (let i = realScoped.length - 1; i >= 0; i--) {
+    if (runPassed(realScoped[i]!)) break;
+    consecutiveFailuresBeforeLatest++;
+  }
+
+  return {
+    probeGiven,
+    offerMade,
+    deepHintGiven,
+    encourageGiven,
+    runsSinceLastAssist,
+    consecutiveFailuresBeforeLatest,
+  };
 }
 
 /**
@@ -104,15 +167,38 @@ export function deriveRunAssistBudget(priorRuns: RunResult[], codeIndex: number)
  * then the deep HINT is delivered ONLY if the candidate kept failing after the offer (they didn't
  * decline). An accept/decline that arrives via the answer path is recorded as offerResolution and
  * short-circuits here.
+ *
+ * Encourage (§6.5, ENGAGEMENT_INTERVENTIONS only): fires BEFORE the lastRunPassed early-return
+ * when the candidate just passed for the first time after ≥2 consecutive failures — a warm, specific
+ * validation of what they fixed. Budget 1 per question, advisory only (never penalized by scorer).
  */
 export function decideRunIntervention(
   signals: RunSignals,
   phase: string,
   budget: RunAssistBudget,
   offerResolution: OfferResolution = 'none',
-  policy: RunInterventionPolicy = BALANCED_RUN_POLICY
+  policy: RunInterventionPolicy = BALANCED_RUN_POLICY,
+  opts: { engagementInterventionsEnabled?: boolean } = {}
 ): RunDecision {
   if (phase !== 'coding') return QUIET;
+
+  // Encourage: fires on server-verified progress (first passing run after ≥2 consecutive failures).
+  // Must come BEFORE the lastRunPassed early-return so a passing run can still produce an output.
+  // Gated by ENGAGEMENT_INTERVENTIONS and budget-1-per-question.
+  if (
+    opts.engagementInterventionsEnabled &&
+    signals.lastRunPassed &&
+    !budget.encourageGiven &&
+    budget.consecutiveFailuresBeforeLatest >= 2
+  ) {
+    return {
+      intervene: true,
+      kind: 'encourage',
+      strength: 1,
+      reason: 'first pass after repeated failures',
+    };
+  }
+
   if (signals.lastRunPassed) return QUIET; // unblocked — stay quiet
   if (signals.consecutiveFailures < policy.minFailuresToTrigger) return QUIET; // not a single typo
 
@@ -122,9 +208,14 @@ export function decideRunIntervention(
   // progress plateaus (pass count stops climbing) this clears and the ladder resumes — self-correcting.
   if (signals.passedProgress) return QUIET;
 
-  // Deep rung already resolved: the candidate declined the offer, or already got the deep hint
-  // (via the answer path). Never re-hint.
-  if (offerResolution === 'declined' || offerResolution === 'hinted') return QUIET;
+  // Deep rung already resolved: the candidate declined the offer, or already got the deep hint (via
+  // the answer path), or a Path-C offer is currently pending in fsm_state. Never re-hint or pile on.
+  if (
+    offerResolution === 'offered' ||
+    offerResolution === 'declined' ||
+    offerResolution === 'hinted'
+  )
+    return QUIET;
   if (budget.deepHintGiven) return QUIET; // deep hint already delivered on the run path
 
   // The candidate was OFFERED a deeper hint and, instead of answering, kept running while failing —
@@ -153,6 +244,78 @@ export function decideRunIntervention(
     strength: 2,
     reason: signals.stagnant ? 'stagnant after the probe' : 'still stuck after the probe',
   };
+}
+
+// ── Path C: QUIESCENT (engagement-state-driven) intervention ──────────────────────────────────
+// Fired by the /nudge route with reason='quiescent' when the engagement engine detects DEGRADING or
+// WHEEL_SPINNING. Unlike Path B (idle, no runs observed), Path C has server-executed evidence and
+// can offer a concrete hint (DEGRADING) or an accountability probe (WHEEL_SPINNING). All recheck-
+// then-commit — worded outside the lock, committed under withInterviewLock.
+
+export interface QuiescentDecision {
+  intervene: boolean;
+  kind: InterventionKind;
+  strength: number;
+  reason: string;
+}
+
+const QUIET_QUIESCENT: QuiescentDecision = Object.freeze({
+  intervene: false,
+  kind: 'nudge' as InterventionKind,
+  strength: 0,
+  reason: '',
+});
+
+/**
+ * Decide whether/how to intervene for a quiescent candidate (DEGRADING or WHEEL_SPINNING state).
+ * Pure + deterministic — no I/O. The caller is responsible for re-checking after wording under lock.
+ *
+ * Ladder:
+ *   DEGRADING first touch → consent-first `offer` (like the run-path offer, written to hintOffer).
+ *   WHEEL_SPINNING → accountability `probe` (ask the candidate to explain their last change).
+ */
+export function decideQuiescentIntervention(opts: {
+  phase: string;
+  engagementState: string | null; // EngagementClassification | null — string avoids circular import
+  budget: RunAssistBudget;
+  offerResolution: OfferResolution;
+  isRunInFlight: boolean;
+  isAnswerInFlight: boolean;
+  cooldownOk: boolean;
+}): QuiescentDecision {
+  if (opts.phase !== 'coding') return QUIET_QUIESCENT;
+  if (opts.engagementState !== 'DEGRADING' && opts.engagementState !== 'WHEEL_SPINNING')
+    return QUIET_QUIESCENT;
+  if (opts.isRunInFlight || opts.isAnswerInFlight) return QUIET_QUIESCENT;
+  if (!opts.cooldownOk) return QUIET_QUIESCENT;
+  // Offer already pending (Path-C or run-path) / resolved — don't pile on.
+  if (
+    opts.offerResolution === 'offered' ||
+    opts.offerResolution === 'declined' ||
+    opts.offerResolution === 'hinted'
+  )
+    return QUIET_QUIESCENT;
+  if (opts.budget.deepHintGiven) return QUIET_QUIESCENT;
+
+  if (opts.engagementState === 'DEGRADING' && !opts.budget.offerMade) {
+    return {
+      intervene: true,
+      kind: 'offer',
+      strength: 2,
+      reason: 'quiescent:degrading',
+    };
+  }
+
+  if (opts.engagementState === 'WHEEL_SPINNING') {
+    return {
+      intervene: true,
+      kind: 'probe',
+      strength: 1,
+      reason: 'quiescent:wheel_spinning',
+    };
+  }
+
+  return QUIET_QUIESCENT;
 }
 
 // ── Path B: STUCK-NOT-RUNNING (idle) intervention ──────────────────────────────

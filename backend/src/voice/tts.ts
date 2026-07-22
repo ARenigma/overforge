@@ -21,6 +21,8 @@ import {
   synthesizeStream as grokSynthesizeStream,
 } from './grok';
 
+import { stripSpeechTags } from './speech-tags';
+
 /** Which TTS provider is active. Reads TTS_PROVIDER at call time (not module-load time) so tests
  *  can flip the env var between assertions. */
 export function activeTtsProvider(): 'cartesia' | 'grok' {
@@ -32,16 +34,21 @@ export function isTtsConfigured(): boolean {
   return activeTtsProvider() === 'grok' ? isGrokConfigured() : isCartesiaConfigured();
 }
 
-/** Synthesize `text` to a WAV buffer using the active TTS provider. */
+/** Synthesize `text` to a WAV buffer using the active TTS provider.
+ *  Grok: speech tags are sanitized inside grok.ts (whitelist passes, unknowns stripped).
+ *  Cartesia: ALL speech tags are stripped — Cartesia only knows its own <break>/<spell> syntax. */
 export async function synthesize(text: string): Promise<Buffer> {
-  return activeTtsProvider() === 'grok' ? grokSynthesize(text) : cartesiaSynthesize(text);
+  return activeTtsProvider() === 'grok'
+    ? grokSynthesize(text)
+    : cartesiaSynthesize(stripSpeechTags(text));
 }
 
-/** Stream one utterance as raw pcm_s16le mono @ STREAM_SAMPLE_RATE using the active provider. */
+/** Stream one utterance as raw pcm_s16le mono @ STREAM_SAMPLE_RATE using the active provider.
+ *  Same tag-handling rules as synthesize(). */
 export async function* synthesizeStream(text: string): AsyncGenerator<Buffer, void, void> {
   if (activeTtsProvider() === 'grok') {
     yield* grokSynthesizeStream(text);
   } else {
-    yield* cartesiaSynthesizeStream(text);
+    yield* cartesiaSynthesizeStream(stripSpeechTags(text));
   }
 }

@@ -40,6 +40,11 @@ export interface ScoringInput {
   proctor?: ProctorAggregate;
 }
 
+/** Intervention kinds that count against the candidate (assistance that reveals approach/answer).
+ *  Advisory kinds ('offer', 'nudge', 'encourage') are never penalized — they are fairness
+ *  check-ins or positive reinforcement, not hints that reduce the difficulty of the problem. */
+export const PENALIZABLE_KINDS = new Set(['probe', 'hint', 'counter_question']);
+
 // Level-relative grading: the same answer should score differently by seniority.
 const LEVEL_GRADING_GUIDANCE: Record<string, string> = {
   junior:
@@ -135,11 +140,13 @@ export function buildScoringPrompt(input: ScoringInput): string {
   // Exclude MANDATORY counter-questions: they fire on every SUBMIT as a standard format step, not
   // because the candidate was stuck. Penalizing them would deflate every submitter's score (M1). A
   // candidate's ANSWER to a counter-question is still in the transcript and scored on its own merits.
+  // Only penalizable kinds count against the candidate — advisory kinds (offer/nudge/encourage)
+  // are fairness check-ins or positive reinforcement and must never reduce the score.
   const transcriptAssists = input.transcript
-    .filter((t) => t.assist && !t.assist.mandatory)
+    .filter((t) => t.assist && !t.assist.mandatory && PENALIZABLE_KINDS.has(t.assist.kind ?? ''))
     .map((t) => `- [${t.assist?.kind ?? 'assist'}] ${t.text.slice(0, 160)}`);
   const runAssists = input.codeRuns
-    .filter((r) => r.intervention)
+    .filter((r) => r.intervention && PENALIZABLE_KINDS.has(r.intervention.kind ?? ''))
     .map(
       (r) => `- [${r.intervention?.kind ?? 'hint'}] ${(r.intervention?.text ?? '').slice(0, 160)}`
     );

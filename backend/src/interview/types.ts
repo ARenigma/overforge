@@ -50,17 +50,39 @@ export interface InterviewContext {
    *  code run (race-free); only its RESOLUTION is stored here — and ONLY submitAnswer (the answer
    *  path that owns fsm_state) ever writes it, so there's no cross-path write race. The run path
    *  reads it to know a candidate declined ('declined') or already got the deep hint ('hinted') and
-   *  must not re-hint. Absent = no offer resolved yet for that question. Reset when a real answer
-   *  advances the FSM. */
-  hintOffer?: { codeIndex: number; status: 'declined' | 'hinted' };
+   *  must not re-hint. 'offered' = a Path-C quiescent offer is pending (written under the interview
+   *  lock by the quiescent path — maybeResolveHintOffer treats this like an open offer). Absent =
+   *  no offer resolved yet for that question. Reset when a real answer advances the FSM. */
+  hintOffer?: { codeIndex: number; status: 'declined' | 'hinted' | 'offered' };
   config: InterviewConfig;
 }
 
 /** The kind of autonomous interviewer intervention (USP). `counter_question` challenges a
- *  claim, `probe` digs deeper, `hint` unblocks a stuck candidate, `nudge` is a light prompt.
- *  Run-triggered hints are recorded ON the code run that triggered them (race-free, atomic) — the
- *  FSM context stays pure control state. */
-export type InterventionKind = 'counter_question' | 'probe' | 'hint' | 'nudge' | 'offer';
+ *  claim, `probe` digs deeper, `hint` unblocks a stuck candidate, `nudge` is a light prompt,
+ *  `encourage` celebrates server-verified progress after a failure streak (advisory only — never
+ *  penalized by the scorer). Run-triggered hints are recorded ON the code run that triggered them
+ *  (race-free, atomic) — the FSM context stays pure control state. */
+export type InterventionKind =
+  | 'counter_question'
+  | 'probe'
+  | 'hint'
+  | 'nudge'
+  | 'offer'
+  | 'encourage';
+
+/** A structured observer note produced by the off-path LLM call (§6.4). Stored in the ring
+ *  buffer + persisted as an interview_event; injected into intervention wording (approach/transition
+ *  always; diagnosis only at ladder rung ≥ 2). */
+export interface ObserverNote {
+  /** One-sentence read of what the candidate is attempting architecturally. */
+  approach: string;
+  /** One-sentence note on how their thinking appears to be shifting between runs. */
+  transition: string;
+  /** One-sentence root-cause hypothesis for why they are stuck (injected at rung ≥ 2 only). */
+  diagnosis: string;
+  /** Monotonic sequence slot matching the ring-buffer entry. */
+  seq: number;
+}
 
 /** What the driver should do next. The machine emits exactly one per step. */
 export type Effect =

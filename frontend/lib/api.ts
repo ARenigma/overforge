@@ -76,6 +76,10 @@ export interface RunResult {
   /** An autonomous interviewer hint triggered by this run (USP) — shown immediately in the chat;
    *  also persisted to the transcript, so it survives a reload. */
   intervention?: { text: string; kind: string };
+  /** Set by the new engagement engine when the intervention is being worded out-of-band. The room
+   *  should poll /run-intervention rather than waiting for an inline response. When falsy (or absent)
+   *  the old flag-off behaviour applies: `intervention` is the only field to check. */
+  interventionPending?: boolean;
 }
 
 export interface ScorecardDimension {
@@ -314,20 +318,42 @@ export interface NudgeResponse {
 }
 
 /**
- * POST /api/interviews/:id/nudge (Path B — stuck-not-running)
+ * POST /api/interviews/:id/nudge (Path B — stuck-not-running; Path C — quiescent)
  * Reports that the candidate has gone idle during coding (no keystroke + no run + not speaking for
- * a protected window). The server decides whether a gentle check-in is warranted (feature-flagged,
- * capped per question) and returns the utterance, or { intervention: null } to stay quiet.
+ * a protected window) or that typing has quiesced while code is present. The server decides whether
+ * a gentle check-in is warranted (feature-flagged, capped per question) and returns the utterance,
+ * or { intervention: null } to stay quiet.
  * `codeLength` only shapes the wording (blank vs partial) — no source is sent.
+ * `reason` distinguishes the trigger: 'idle' = compound idle (no keystroke+run), 'quiescent' =
+ * typing paused ≥50 s while code present (lighter, earlier — server usually answers null).
  */
 export async function nudgeCandidate(
   id: string,
   token: string,
-  codeLength: number
+  codeLength: number,
+  reason?: 'idle' | 'quiescent'
 ): Promise<NudgeResponse> {
   return apiFetch<NudgeResponse>(`/api/interviews/${id}/nudge`, {
-    body: { token, codeLength },
+    body: { token, codeLength, ...(reason !== undefined ? { reason } : {}) },
   });
+}
+
+/**
+ * POST /api/interviews/:id/run-intervention (P2 — out-of-band run intervention)
+ * Polls for an engagement-engine intervention that was deferred off the /run response path
+ * (signalled by `interventionPending: true` on the run result). Uses POST with a token body to
+ * match house style — no body-less GETs for candidate calls in this codebase.
+ * Returns { intervention, pending }: when `pending` is false and `intervention` is null the engine
+ * has decided not to intervene; stop polling.
+ */
+export async function fetchRunIntervention(
+  id: string,
+  token: string
+): Promise<{ intervention: { text: string; kind: string } | null; pending: boolean }> {
+  return apiFetch<{ intervention: { text: string; kind: string } | null; pending: boolean }>(
+    `/api/interviews/${id}/run-intervention`,
+    { body: { token } }
+  );
 }
 
 /**

@@ -36,6 +36,10 @@ export interface RunResult {
    *  persisted on the run + read by the scorer/intervention. MUST be stripped from the candidate's
    *  /run response (correctness is never leaked live). Absent when the question has no problem/tests. */
   testResults?: TestResults;
+  /** Set by the orchestrator when ENGAGEMENT_INTERVENTIONS is on and the wording is happening
+   *  asynchronously (fire-and-forget). The room polls POST /run-intervention to fetch the text
+   *  once ready. When absent/false, intervention (if any) is already on this result synchronously. */
+  interventionPending?: boolean;
 }
 
 export interface ExecutionKernel {

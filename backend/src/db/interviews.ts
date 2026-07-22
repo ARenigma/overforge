@@ -273,6 +273,32 @@ export async function appendCodeRunOnly(id: string, run: RunResult): Promise<voi
   if (error) throw new Error(`appendCodeRunOnly: ${error.message}`);
 }
 
+/**
+ * Best-effort read-modify-write: patch the `intervention` field on the most recent code_run
+ * for an interview. Used by the async run-wording path (§6) to backfill the intervention after
+ * the /run response has already been sent. Never throws — callers fire-and-forget this.
+ */
+export async function updateLastRunIntervention(
+  id: string,
+  intervention: { text: string; kind: string }
+): Promise<void> {
+  const db = createServiceClient();
+  const { data, error: readErr } = await db
+    .from('interviews')
+    .select('code_runs')
+    .eq('id', id)
+    .single();
+  if (readErr || !data) throw new Error(`updateLastRunIntervention read: ${readErr?.message}`);
+  const runs = ((data as { code_runs?: unknown[] }).code_runs ?? []) as RunResult[];
+  if (runs.length === 0) return;
+  const patched = [...runs.slice(0, -1), { ...runs[runs.length - 1], intervention }];
+  const { error: writeErr } = await db
+    .from('interviews')
+    .update({ code_runs: patched as unknown as Record<string, unknown>[] })
+    .eq('id', id);
+  if (writeErr) throw new Error(`updateLastRunIntervention write: ${writeErr.message}`);
+}
+
 /** Atomically claim an invited interview for begin (single-flight CAS). Sets status to
  *  'in_progress' AND writes the rotated session-token + T&C fields in one UPDATE WHERE
  *  status='invited'. Returns true only for the caller that performed the flip; a concurrent
