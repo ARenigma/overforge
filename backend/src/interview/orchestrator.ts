@@ -14,13 +14,20 @@ import {
   TestResults,
   SubmitIntent,
 } from './types';
-import { deriveRunSignals, idleNudgesGiven } from './signals';
+import { deriveRunSignals, idleNudgesGiven, failureSignature, runPassed } from './signals';
 import {
   decideRunIntervention,
   deriveRunAssistBudget,
   classifyOfferResponse,
   decideIdleIntervention,
 } from './intervention';
+import { ingestRun, evictEngagement } from './engagement';
+import {
+  markRunInFlight,
+  clearRunInFlight,
+  markAnswerInFlight,
+  clearAnswerInFlight,
+} from './inflight';
 import { selectProblems, getProblemBySlug, toPublicProblem, PublicProblem } from './problems';
 import {
   createMinimaxClient,
@@ -663,6 +670,7 @@ export async function cancelInterview(interviewId: string, interviewerId: string
   }
   await updateInterview(interviewId, { status: 'cancelled' });
   await appendEvent(interviewId, 'transition', { from: interview.status, to: 'cancelled' });
+  evictEngagement(interviewId);
 }
 
 export interface RegenerateInviteResult {
@@ -785,241 +793,264 @@ export async function submitAnswer(
   /** The exact editor code that accompanied a SUBMIT (B1) — anchors the counter-question. */
   submittedCode?: string
 ): Promise<AnswerResult> {
-  // Serialise concurrent submissions for the same interview. In voice mode a streamed voice
-  // turn and a typed answer can arrive simultaneously; without this lock the second writer
-  // reads stale fsm_state and silently drops the first caller's candidate turn + FSM
-  // transition. Single-process invariant — see backend/src/interview/lock.ts.
-  return withInterviewLock(interviewId, async () => {
-    const interview = requireInterview(await getById(interviewId), interviewId);
+  // Track in-flight state so the engagement engine's Path C gate sees concurrent answers
+  // and does not fire a quiescence intervention while the answer path is running (§6.3).
+  markAnswerInFlight(interviewId);
+  try {
+    // Serialise concurrent submissions for the same interview. In voice mode a streamed voice
+    // turn and a typed answer can arrive simultaneously; without this lock the second writer
+    // reads stale fsm_state and silently drops the first caller's candidate turn + FSM
+    // transition. Single-process invariant — see backend/src/interview/lock.ts.
+    return await withInterviewLock(interviewId, async () => {
+      const interview = requireInterview(await getById(interviewId), interviewId);
 
-    // Idempotency: if this exact submission was already processed (lost response + client
-    // retry), replay the prior result instead of advancing the FSM a second time.
-    if (requestId && interview.last_request_id === requestId) {
-      return replayLastAnswer(interview);
-    }
+      // Idempotency: if this exact submission was already processed (lost response + client
+      // retry), replay the prior result instead of advancing the FSM a second time.
+      if (requestId && interview.last_request_id === requestId) {
+        return replayLastAnswer(interview);
+      }
 
-    if (interview.status !== 'in_progress') {
-      throw Object.assign(new Error('Interview is not in progress'), { status: 409 });
-    }
+      if (interview.status !== 'in_progress') {
+        throw Object.assign(new Error('Interview is not in progress'), { status: 409 });
+      }
 
-    // Hard time limit: a late answer is NOT accepted (not persisted, not graded) — conclude +
-    // score what's there. Reject with 409 so the client rolls back its optimistic bubble rather
-    // than showing the answer as if it counted. The room normally concludes itself at 0:00; this
-    // is the server-side backstop.
-    if (durationExceeded(interview)) {
-      void finishAndScore(interviewId).catch((err: unknown) => {
-        console.error(`[orchestrator] time-limit scoring failed for ${interviewId}:`, err);
-      });
-      throw Object.assign(new Error('Your interview has concluded — the time limit was reached.'), {
-        status: 409,
-      });
-    }
-
-    const ctx = interview.fsm_state as InterviewContext;
-    const oracle = getOracle();
-    // SUBMIT / MOVE-ON are explicit coding controls: they carry code, not free-text conversation,
-    // so they skip the hint-offer + clarify paths (B4) — a ternary '?' in code must never be read
-    // as a clarifying question, and code must never be read as a yes/no to a pending offer.
-    const explicit = intent === 'submit' || intent === 'move_on';
-
-    // B2: never START a mandatory counter-question that can't be answered before the hard cap. If a
-    // fresh SUBMIT lands inside the reserve window, refuse it and steer to MOVE-ON (instant) so the
-    // "every submit earns a counter-question" invariant holds at the time boundary.
-    if (
-      intent === 'submit' &&
-      ctx.phase === 'coding' &&
-      ctx.followUps === 0 &&
-      interview.tnc_accepted_at
-    ) {
-      const totalMs = interviewDurationMs(interview);
-      const remaining = totalMs - (Date.now() - new Date(interview.tnc_accepted_at).getTime());
-      const reserve = Math.min(SUBMIT_RESERVE_MS, totalMs * 0.15); // scaled for short dev interviews
-      if (remaining < reserve) {
+      // Hard time limit: a late answer is NOT accepted (not persisted, not graded) — conclude +
+      // score what's there. Reject with 409 so the client rolls back its optimistic bubble rather
+      // than showing the answer as if it counted. The room normally concludes itself at 0:00; this
+      // is the server-side backstop.
+      if (durationExceeded(interview)) {
+        void finishAndScore(interviewId).catch((err: unknown) => {
+          console.error(`[orchestrator] time-limit scoring failed for ${interviewId}:`, err);
+        });
         throw Object.assign(
-          new Error(
-            'Not enough time left to submit and discuss — use “Move on” to finish this problem.'
-          ),
-          { status: 409, code: 'submit_window_closed' }
+          new Error('Your interview has concluded — the time limit was reached.'),
+          {
+            status: 409,
+          }
         );
       }
-    }
 
-    // B1: a SUBMIT carries the current editor code; anchor evaluation + the counter-question on it
-    // (and persist it), so the CQ cites the SUBMITTED code even if the candidate never hit Run.
-    const effectiveCode =
-      intent === 'submit' && typeof submittedCode === 'string' && submittedCode.trim()
-        ? submittedCode
-        : interview.code_snapshot;
-    const snapshotToPersist =
-      intent === 'submit' && effectiveCode !== interview.code_snapshot ? effectiveCode : undefined;
-    // M4: submit/move-on carry no free-text — synthesize a neutral transcript line.
-    const answerText = answer.trim()
-      ? answer
-      : intent === 'submit'
-        ? '[Candidate submitted their solution.]'
-        : intent === 'move_on'
-          ? '[Candidate chose to move on to the next problem.]'
-          : answer;
+      const ctx = interview.fsm_state as InterviewContext;
+      const oracle = getOracle();
+      // SUBMIT / MOVE-ON are explicit coding controls: they carry code, not free-text conversation,
+      // so they skip the hint-offer + clarify paths (B4) — a ternary '?' in code must never be read
+      // as a clarifying question, and code must never be read as a yes/no to a pending offer.
+      const explicit = intent === 'submit' || intent === 'move_on';
 
-    // Conversational paths run ONLY for a normal answer. MOVE-ON/SUBMIT skip them (B4).
-    if (!explicit) {
-      // Deep-hint OFFER resolution: a yes/no reply to a pending offer — deliver the deep hint (accept)
-      // or a warm no-penalty ack (decline), WITHOUT advancing. Runs BEFORE clarify.
-      const offerResolved = await maybeResolveHintOffer(interview, ctx, answer, oracle, requestId);
-      if (offerResolved) return offerResolved;
-      // Clarifying-question handling: a candidate may ASK rather than answer; answer it (no spoilers)
-      // and return WITHOUT advancing. Bounded by CLARIFY_CAP.
-      if (ctx.phase === 'oral' || ctx.phase === 'coding') {
-        const clarify = await maybeAnswerClarification(interview, ctx, answer, oracle, requestId);
-        if (clarify) return clarify;
+      // B2: never START a mandatory counter-question that can't be answered before the hard cap. If a
+      // fresh SUBMIT lands inside the reserve window, refuse it and steer to MOVE-ON (instant) so the
+      // "every submit earns a counter-question" invariant holds at the time boundary.
+      if (
+        intent === 'submit' &&
+        ctx.phase === 'coding' &&
+        ctx.followUps === 0 &&
+        interview.tnc_accepted_at
+      ) {
+        const totalMs = interviewDurationMs(interview);
+        const remaining = totalMs - (Date.now() - new Date(interview.tnc_accepted_at).getTime());
+        const reserve = Math.min(SUBMIT_RESERVE_MS, totalMs * 0.15); // scaled for short dev interviews
+        if (remaining < reserve) {
+          throw Object.assign(
+            new Error(
+              'Not enough time left to submit and discuss — use “Move on” to finish this problem.'
+            ),
+            { status: 409, code: 'submit_window_closed' }
+          );
+        }
       }
-    }
 
-    // Evaluate the answer (oral + coding) for the nudge/follow-up signal. MOVE-ON skips the oracle
-    // entirely (firm skip). A SUBMIT still evaluates (records signal + a deeper probe family), but the
-    // machine fires the mandatory counter-question regardless of the oracle's followUp.
-    let decision: import('./types').OracleDecision | undefined;
-    if (intent !== 'move_on' && (ctx.phase === 'oral' || ctx.phase === 'coding')) {
-      decision = await withCostContext({ interviewId, kind: 'brain', phase: ctx.phase }, () =>
-        oracle.evaluateAnswer({
-          answer: answerText,
-          code: effectiveCode,
+      // B1: a SUBMIT carries the current editor code; anchor evaluation + the counter-question on it
+      // (and persist it), so the CQ cites the SUBMITTED code even if the candidate never hit Run.
+      const effectiveCode =
+        intent === 'submit' && typeof submittedCode === 'string' && submittedCode.trim()
+          ? submittedCode
+          : interview.code_snapshot;
+      const snapshotToPersist =
+        intent === 'submit' && effectiveCode !== interview.code_snapshot
+          ? effectiveCode
+          : undefined;
+      // M4: submit/move-on carry no free-text — synthesize a neutral transcript line.
+      const answerText = answer.trim()
+        ? answer
+        : intent === 'submit'
+          ? '[Candidate submitted their solution.]'
+          : intent === 'move_on'
+            ? '[Candidate chose to move on to the next problem.]'
+            : answer;
+
+      // Conversational paths run ONLY for a normal answer. MOVE-ON/SUBMIT skip them (B4).
+      if (!explicit) {
+        // Deep-hint OFFER resolution: a yes/no reply to a pending offer — deliver the deep hint (accept)
+        // or a warm no-penalty ack (decline), WITHOUT advancing. Runs BEFORE clarify.
+        const offerResolved = await maybeResolveHintOffer(
+          interview,
           ctx,
-          transcript: interview.transcript ?? [],
-        })
-      );
-    }
+          answer,
+          oracle,
+          requestId
+        );
+        if (offerResolved) return offerResolved;
+        // Clarifying-question handling: a candidate may ASK rather than answer; answer it (no spoilers)
+        // and return WITHOUT advancing. Bounded by CLARIFY_CAP.
+        if (ctx.phase === 'oral' || ctx.phase === 'coding') {
+          const clarify = await maybeAnswerClarification(interview, ctx, answer, oracle, requestId);
+          if (clarify) return clarify;
+        }
+      }
 
-    const { ctx: newCtx, effect } = advance(ctx, { type: 'answer', decision, intent });
-    // A real answer advanced the FSM → reset the per-question clarify budget + hint-offer state so the
-    // next question starts fresh.
-    newCtx.clarifyCount = 0;
-    newCtx.hintOffer = undefined;
+      // Evaluate the answer (oral + coding) for the nudge/follow-up signal. MOVE-ON skips the oracle
+      // entirely (firm skip). A SUBMIT still evaluates (records signal + a deeper probe family), but the
+      // machine fires the mandatory counter-question regardless of the oracle's followUp.
+      let decision: import('./types').OracleDecision | undefined;
+      if (intent !== 'move_on' && (ctx.phase === 'oral' || ctx.phase === 'coding')) {
+        decision = await withCostContext({ interviewId, kind: 'brain', phase: ctx.phase }, () =>
+          oracle.evaluateAnswer({
+            answer: answerText,
+            code: effectiveCode,
+            ctx,
+            transcript: interview.transcript ?? [],
+          })
+        );
+      }
 
-    // Record the candidate's answer as an event.
-    await appendEvent(interviewId, 'answer', { text: answerText, ...(explicit ? { intent } : {}) });
+      const { ctx: newCtx, effect } = advance(ctx, { type: 'answer', decision, intent });
+      // A real answer advanced the FSM → reset the per-question clarify budget + hint-offer state so the
+      // next question starts fresh.
+      newCtx.clarifyCount = 0;
+      newCtx.hintOffer = undefined;
 
-    if (effect.kind === 'score') {
-      await persistTransition(
-        interview,
-        newCtx,
-        effect,
-        null,
-        answerText,
-        requestId,
-        undefined,
-        snapshotToPersist
-      );
-      // Score in the background so the candidate's final response returns immediately. The
-      // explicit /finish path also calls finishAndScore; the single-flight claim makes it safe.
-      void finishAndScore(interviewId).catch((err: unknown) => {
-        console.error(`[orchestrator] background scoring failed for ${interviewId}:`, err);
+      // Record the candidate's answer as an event.
+      await appendEvent(interviewId, 'answer', {
+        text: answerText,
+        ...(explicit ? { intent } : {}),
       });
-      // Return an empty utterance — the UI should show a "scoring complete" state.
-      return {
-        utterance: { text: 'Your interview is complete. Thank you!', expects: 'text' },
-        phase: 'done',
-        state: { ...newCtx, phase: 'done' },
-      };
-    }
 
-    if (effect.kind === 'done') {
+      if (effect.kind === 'score') {
+        await persistTransition(
+          interview,
+          newCtx,
+          effect,
+          null,
+          answerText,
+          requestId,
+          undefined,
+          snapshotToPersist
+        );
+        // Score in the background so the candidate's final response returns immediately. The
+        // explicit /finish path also calls finishAndScore; the single-flight claim makes it safe.
+        void finishAndScore(interviewId).catch((err: unknown) => {
+          console.error(`[orchestrator] background scoring failed for ${interviewId}:`, err);
+        });
+        // Return an empty utterance — the UI should show a "scoring complete" state.
+        return {
+          utterance: { text: 'Your interview is complete. Thank you!', expects: 'text' },
+          phase: 'done',
+          state: { ...newCtx, phase: 'done' },
+        };
+      }
+
+      if (effect.kind === 'done') {
+        await persistTransition(
+          interview,
+          newCtx,
+          effect,
+          null,
+          answerText,
+          requestId,
+          undefined,
+          snapshotToPersist
+        );
+        return {
+          utterance: { text: '', expects: 'text' },
+          phase: 'done',
+          state: newCtx,
+        };
+      }
+
+      const transcriptWithAnswer: TranscriptTurn[] = [
+        ...(interview.transcript ?? []),
+        { role: 'candidate', text: answerText },
+      ];
+      // For a coding question, the assigned problem (shown on the candidate's screen) grounds the
+      // interviewer's intro + any follow-up hint. codeIndex identifies which question is in play.
+      const codingProblem =
+        effect.kind === 'ask_code'
+          ? assignedProblem(interview, effect.index)
+          : effect.kind === 'ask_followup'
+            ? assignedProblem(interview, effect.codeIndex)
+            : null;
+      const req: UtteranceRequest = {
+        effect,
+        ctx: newCtx,
+        transcript: transcriptWithAnswer,
+        code: effectiveCode,
+        level: interview.level,
+        roleBrief: interview.role_brief,
+        problemStatement: codingProblem?.statement ?? null,
+      };
+
+      // A follow-up is voiced as a typed intervention so it reads like a real interviewer deepening the
+      // thread — the FSM owns WHETHER one happens (mandatory on submit, else within the cap). The whole
+      // resolution is wrapped so a live-LLM failure can NEVER leave a half-applied turn: the
+      // deterministic oracle does no I/O, so it always completes (and stays code-anchored — B5).
+      const isMandatory = effect.kind === 'ask_followup' && effect.mandatory === true;
+      const followUpKind: InterventionKind = isMandatory
+        ? 'counter_question'
+        : (decision?.kind ?? 'probe');
+      const interventionReq = {
+        kind: followUpKind,
+        ctx: newCtx,
+        transcript: transcriptWithAnswer,
+        code: effectiveCode,
+        level: interview.level,
+        roleBrief: interview.role_brief,
+        problemStatement: codingProblem?.statement ?? null,
+        mandatory: isMandatory, // B5: keeps the fallback + LLM prompt code-anchored
+        probeHints: codingProblem?.probeHints ?? null,
+      };
+      let utterance: Utterance;
+      let assist: { kind: InterventionKind; strength: number; mandatory?: boolean } | undefined;
+      try {
+        utterance = await withCostContext(
+          { interviewId, kind: 'brain', phase: newCtx.phase },
+          () =>
+            effect.kind === 'ask_followup'
+              ? oracle.generateIntervention(interventionReq)
+              : oracle.generateUtterance(req)
+        );
+      } catch (err) {
+        console.error(`[orchestrator] utterance generation failed for ${interviewId}:`, err);
+        const fallback = new DeterministicOracle();
+        utterance =
+          effect.kind === 'ask_followup'
+            ? await fallback.generateIntervention(interventionReq)
+            : await fallback.generateUtterance(req);
+      }
+      if (effect.kind === 'ask_followup') {
+        // M1: the mandatory CQ is labeled for the room (counter_question) but flagged `mandatory` so the
+        // scorer excludes it from the assistance penalty. A NON-mandatory follow-up is oracle-chosen
+        // help and IS penalized.
+        assist = isMandatory
+          ? { kind: 'counter_question', strength: effect.depth, mandatory: true }
+          : { kind: followUpKind, strength: effect.depth };
+      }
+
       await persistTransition(
         interview,
         newCtx,
         effect,
-        null,
+        utterance,
         answerText,
         requestId,
-        undefined,
+        assist,
         snapshotToPersist
       );
-      return {
-        utterance: { text: '', expects: 'text' },
-        phase: 'done',
-        state: newCtx,
-      };
-    }
 
-    const transcriptWithAnswer: TranscriptTurn[] = [
-      ...(interview.transcript ?? []),
-      { role: 'candidate', text: answerText },
-    ];
-    // For a coding question, the assigned problem (shown on the candidate's screen) grounds the
-    // interviewer's intro + any follow-up hint. codeIndex identifies which question is in play.
-    const codingProblem =
-      effect.kind === 'ask_code'
-        ? assignedProblem(interview, effect.index)
-        : effect.kind === 'ask_followup'
-          ? assignedProblem(interview, effect.codeIndex)
-          : null;
-    const req: UtteranceRequest = {
-      effect,
-      ctx: newCtx,
-      transcript: transcriptWithAnswer,
-      code: effectiveCode,
-      level: interview.level,
-      roleBrief: interview.role_brief,
-      problemStatement: codingProblem?.statement ?? null,
-    };
-
-    // A follow-up is voiced as a typed intervention so it reads like a real interviewer deepening the
-    // thread — the FSM owns WHETHER one happens (mandatory on submit, else within the cap). The whole
-    // resolution is wrapped so a live-LLM failure can NEVER leave a half-applied turn: the
-    // deterministic oracle does no I/O, so it always completes (and stays code-anchored — B5).
-    const isMandatory = effect.kind === 'ask_followup' && effect.mandatory === true;
-    const followUpKind: InterventionKind = isMandatory
-      ? 'counter_question'
-      : (decision?.kind ?? 'probe');
-    const interventionReq = {
-      kind: followUpKind,
-      ctx: newCtx,
-      transcript: transcriptWithAnswer,
-      code: effectiveCode,
-      level: interview.level,
-      roleBrief: interview.role_brief,
-      problemStatement: codingProblem?.statement ?? null,
-      mandatory: isMandatory, // B5: keeps the fallback + LLM prompt code-anchored
-      probeHints: codingProblem?.probeHints ?? null,
-    };
-    let utterance: Utterance;
-    let assist: { kind: InterventionKind; strength: number; mandatory?: boolean } | undefined;
-    try {
-      utterance = await withCostContext({ interviewId, kind: 'brain', phase: newCtx.phase }, () =>
-        effect.kind === 'ask_followup'
-          ? oracle.generateIntervention(interventionReq)
-          : oracle.generateUtterance(req)
-      );
-    } catch (err) {
-      console.error(`[orchestrator] utterance generation failed for ${interviewId}:`, err);
-      const fallback = new DeterministicOracle();
-      utterance =
-        effect.kind === 'ask_followup'
-          ? await fallback.generateIntervention(interventionReq)
-          : await fallback.generateUtterance(req);
-    }
-    if (effect.kind === 'ask_followup') {
-      // M1: the mandatory CQ is labeled for the room (counter_question) but flagged `mandatory` so the
-      // scorer excludes it from the assistance penalty. A NON-mandatory follow-up is oracle-chosen
-      // help and IS penalized.
-      assist = isMandatory
-        ? { kind: 'counter_question', strength: effect.depth, mandatory: true }
-        : { kind: followUpKind, strength: effect.depth };
-    }
-
-    await persistTransition(
-      interview,
-      newCtx,
-      effect,
-      utterance,
-      answerText,
-      requestId,
-      assist,
-      snapshotToPersist
-    );
-
-    return { utterance, phase: newCtx.phase, state: newCtx, ...(assist ? { assist } : {}) };
-  }); // end withInterviewLock
+      return { utterance, phase: newCtx.phase, state: newCtx, ...(assist ? { assist } : {}) };
+    }); // end withInterviewLock
+  } finally {
+    clearAnswerInFlight(interviewId);
+  }
 }
 
 /** Cap hidden tests executed per Run — bounds container spend on the shared box (bank problems
@@ -1093,6 +1124,15 @@ async function runHiddenTests(
 }
 
 export async function recordRun(interviewId: string, req: RunRequest): Promise<RunResult> {
+  markRunInFlight(interviewId);
+  try {
+    return await _recordRunInner(interviewId, req);
+  } finally {
+    clearRunInFlight(interviewId);
+  }
+}
+
+async function _recordRunInner(interviewId: string, req: RunRequest): Promise<RunResult> {
   const interview = requireInterview(await getById(interviewId), interviewId);
 
   if (interview.status !== 'in_progress') {
@@ -1143,6 +1183,17 @@ export async function recordRun(interviewId: string, req: RunRequest): Promise<R
   // One atomic write: append the run AND record the snapshot + last-used language together,
   // so code_runs[-1], code_snapshot, and code_language can never describe different runs.
   await appendCodeRun(interviewId, result, req.source, req.language);
+
+  // Feed the engagement engine (P1 shadow mode — log only, no behavior change). Called
+  // after appendCodeRun so the buffer sees the same run the DB sees (§6.3).
+  ingestRun(interviewId, {
+    codeIndex: result.codeIndex ?? 0,
+    status: result.status,
+    passed: result.testResults?.passed ?? 0,
+    total: result.testResults?.total ?? 0,
+    failureSig: runPassed(result) ? null : failureSignature(result),
+    code: req.source,
+  });
 
   await appendEvent(interviewId, 'code_run', {
     language: req.language,
@@ -1470,6 +1521,8 @@ export async function finishAndScore(
     });
     await appendEvent(interviewId, 'score', { scorecard });
   });
+  // Release the engagement buffer; the interview is terminal (§6.6 eviction hook).
+  evictEngagement(interviewId);
 
   // Roll up cost + metrics now that every cost_event (incl. the scorer's own) is recorded.
   // Best-effort inside — never blocks scorecard delivery.

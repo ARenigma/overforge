@@ -69,6 +69,7 @@ import {
 import { toast } from 'sonner';
 import { Wordmark } from '@/components/marketing/wordmark';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
+import { PresenceCue } from '@/components/interview/presence-cue';
 import { ProblemDock } from '@/components/interview/problem-dock';
 import { useVoiceMic } from '@/lib/voice/use-voice-mic';
 import { useVoiceSocket } from '@/lib/voice/use-voice-socket';
@@ -88,6 +89,28 @@ const PROBLEM_SOFT_BUDGET_S = 15 * 60;
 // actually cancels echo. Keep the mic gated this long after voice engages — the greeting plays
 // during it, so AEC trains on the real speaker+mic path before the first candidate turn is captured.
 const AEC_WARMUP_MS = 3000;
+
+// ── §6.1 Snapshot throttle ───────────────────────────────────────────────────────────────────
+// Leading-edge throttle interval for code snapshots. The first keystroke after an idle gap fires
+// immediately; subsequent keystrokes are throttled to one snapshot per interval while typing
+// continues. The existing trailing flush (on pause / visibility-change / pagehide) is preserved.
+const SNAPSHOT_THROTTLE_MS = 3_000;
+
+// ── §6.7 Deterministic PRNG helpers (no Math.random for ambient cue schedule) ───────────────
+/** Unsigned 32-bit hash of a string — used to seed the per-interview PRNG. */
+function hashSeed(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  }
+  return h >>> 0;
+}
+
+/** One LCG step: returns [nextSeed, float in [0, 1)]. Deterministic, no Math.random. */
+function lcgStep(seed: number): [number, number] {
+  const next = (Math.imul(1664525, seed) + 1013904223) >>> 0;
+  return [next, next / 0x100000000];
+}
 
 // ── Path B: stuck-not-running idle detector ──────────────────────────────────────────────────
 // During coding a candidate can be stuck WITHOUT a failing run — frozen on a blank editor, or
@@ -608,16 +631,30 @@ export default function InterviewPage() {
   useEffect(() => {
     devModeRef.current = devMode;
   }, [devMode]);
+  useEffect(() => {
+    aiThinkingRef.current = aiThinking;
+  }, [aiThinking]);
   // Live mirror for the current editor language — needed in autosave/finish closures that must
   // read the latest language without re-creating stable callbacks.
   const langRef = useRef<Language>(language);
   useEffect(() => {
     langRef.current = language;
   }, [language]);
-  // Autosave bookkeeping: the string most recently persisted to the backend, and the pending
-  // debounce timer. Both are refs so they never cause re-renders.
+  // Autosave bookkeeping: the string most recently persisted to the backend, the pending trailing
+  // debounce timer, the timestamp of the last fired snapshot (for leading-edge throttle), and a
+  // monotonic seq counter sent with every snapshot so the server can detect stale windows.
   const lastSnapshotRef = useRef('');
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSnapshotTimeRef = useRef(0); // ms timestamp of last fired snapshot
+  const snapshotSeqRef = useRef(0); // monotonic per-interview counter; increments per snapshot
+
+  // §6.7 Presence cue — visible during ambient quiet periods and as a pre-speech lead before
+  // interventions. Driven entirely from page.tsx; the component itself is stateless.
+  const [presenceCueVisible, setPresenceCueVisible] = useState(false);
+
+  // Live mirror for aiThinking — read by the ambient cue effect inside setTimeout callbacks where
+  // state closure is stale (worklet stale-closure bug class).
+  const aiThinkingRef = useRef(false);
   // Conversation is activity too: a candidate asking a clarifying question (or reading the
   // interviewer's reply) is engaged, not stalled — any new message resets the idle clock so the
   // detector can never nudge into the middle of an exchange.
@@ -877,10 +914,11 @@ export default function InterviewPage() {
     const doFlush = () => {
       const tok = activeTokenRef.current;
       const currentCode = codeRef.current;
-      if (phaseRef.current !== 'coding' || !currentCode.trim() || !tok) return;
+      // §6.1: empty-code snapshots allowed — a full-delete must reach the server.
+      if (phaseRef.current !== 'coding' || !tok) return;
       if (currentCode === lastSnapshotRef.current) return;
       lastSnapshotRef.current = currentCode;
-      snapshotCode(id, tok, currentCode, langRef.current);
+      snapshotCode(id, tok, currentCode, langRef.current, ++snapshotSeqRef.current);
     };
 
     const onVisibilityChange = () => {
@@ -909,9 +947,10 @@ export default function InterviewPage() {
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       if (phaseRef.current !== 'coding') return;
       const currentCode = codeRef.current;
-      if (!currentCode.trim() || currentCode === lastSnapshotRef.current) return;
+      // §6.1: allow empty-code snapshot so a full-delete survives unload.
+      if (currentCode === lastSnapshotRef.current) return;
       const tok = activeTokenRef.current;
-      if (tok) snapshotCode(id, tok, currentCode, langRef.current);
+      if (tok) snapshotCode(id, tok, currentCode, langRef.current, ++snapshotSeqRef.current);
       e.preventDefault();
       // Legacy browsers require returnValue (modern browsers ignore the string value).
       e.returnValue = '';
@@ -1340,26 +1379,50 @@ export default function InterviewPage() {
   // Track candidate liveness for the idle detector: every keystroke resets the idle clock so a
   // candidate who is actively typing (or thinking between keystrokes) is never nudged. Stable
   // (deps []) so the CodeMirror instance's captured callback never goes stale.
+  //
+  // §6.1 Leading-edge throttle: the first keystroke after an idle gap fires a snapshot immediately
+  // (leading edge), subsequent keystrokes are throttled to one per SNAPSHOT_THROTTLE_MS. The
+  // trailing flush after the last keystroke is preserved. Empty-code snapshots are allowed (a
+  // full-delete must be visible to the server). All state via live refs — no stale closure risk.
   const handleCodeChange = useCallback((value: string) => {
-    lastKeystrokeRef.current = Date.now();
+    const now = Date.now();
+    lastKeystrokeRef.current = now;
     setCode(value);
-    // Debounce autosave: schedule a keepalive snapshot 3 s after the last keystroke.
-    // All state is read from live refs so this closure is safe with empty deps.
+
+    const sinceLast = now - lastSnapshotTimeRef.current;
+
+    // Cancel any pending trailing flush before we decide whether to fire immediately.
     if (autosaveTimerRef.current !== null) clearTimeout(autosaveTimerRef.current);
+
+    // Leading-edge: fire immediately on the first keystroke after an idle gap.
+    if (sinceLast >= SNAPSHOT_THROTTLE_MS) {
+      const tok = activeTokenRef.current;
+      if (phaseRef.current === 'coding' && tok && value !== lastSnapshotRef.current) {
+        lastSnapshotRef.current = value;
+        lastSnapshotTimeRef.current = now;
+        snapshotCode(id, tok, value, langRef.current, ++snapshotSeqRef.current);
+      }
+    }
+
+    // Trailing flush: fire after typing pauses for SNAPSHOT_THROTTLE_MS so the final state
+    // is always captured even if the last keystroke was throttled.
     autosaveTimerRef.current = setTimeout(() => {
       autosaveTimerRef.current = null;
       const tok = activeTokenRef.current;
-      if (phaseRef.current !== 'coding' || !value.trim() || !tok) return;
-      if (value === lastSnapshotRef.current) return;
-      lastSnapshotRef.current = value;
-      snapshotCode(id, tok, value, langRef.current);
-    }, 3_000);
+      const currentCode = codeRef.current;
+      if (phaseRef.current !== 'coding' || !tok) return;
+      if (currentCode === lastSnapshotRef.current) return;
+      lastSnapshotRef.current = currentCode;
+      lastSnapshotTimeRef.current = Date.now();
+      snapshotCode(id, tok, currentCode, langRef.current, ++snapshotSeqRef.current);
+    }, SNAPSHOT_THROTTLE_MS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleRunCode = useCallback(async () => {
     if (!activeToken || running) return;
     setRunning(true);
+    lastRunAtRef.current = Date.now(); // §6.3: stamp run START so delivery gate sees the activity
     setRunError(null);
     setRunResult(null);
     try {
@@ -1416,23 +1479,47 @@ export default function InterviewPage() {
     }
 
     nudgeInFlightRef.current = true;
+    // §6.3: record the exact moment the request is sent. Any activity (keystroke, run start,
+    // speech) that occurs AFTER this timestamp invalidates the returned intervention.
+    const nudgeSentAt = Date.now();
     try {
       const res = await nudgeCandidate(id, tok, codeLen);
       if (res.intervention?.text) {
-        // Reset the idle clock so we don't immediately re-evaluate right after checking in.
-        lastKeystrokeRef.current = Date.now();
-        setMessages((prev) => [
-          ...prev,
-          { role: 'ai', text: res.intervention!.text, assist: res.intervention!.kind },
-        ]);
-        // Voice the exact utterance we just rendered (idle markers ride the code-run channel).
-        void speak('run', undefined, res.intervention.text);
+        // §6.3 delivery gate: drop if the candidate was active after the request was sent.
+        // lastKeystrokeRef covers keystrokes, chat messages, and voice turns (all update it).
+        // lastRunAtRef covers both run-start and run-end stamps.
+        const lastActivity = Math.max(lastKeystrokeRef.current, lastRunAtRef.current);
+        if (lastActivity > nudgeSentAt) {
+          // Candidate acted while the nudge was in-flight — discard silently.
+          // The server budget recheck makes this safe (the slot isn't consumed).
+        } else {
+          // §6.7 pre-speech presence cue: show "Reading your code…" with a jittered lead
+          // (0.8–3 s) before the intervention bubble appears, so it never reads as robotic.
+          // Math.random is fine here — the AMBIENT schedule is what needs the seeded PRNG.
+          const leadMs = 800 + Math.random() * 2200;
+          setPresenceCueVisible(true);
+          await new Promise<void>((resolve) => setTimeout(resolve, leadMs));
+          setPresenceCueVisible(false);
+
+          // Re-check after the lead delay: the candidate may have typed during the cue.
+          const lastActivityFinal = Math.max(lastKeystrokeRef.current, lastRunAtRef.current);
+          if (lastActivityFinal <= nudgeSentAt) {
+            // Reset the idle clock so we don't immediately re-evaluate right after checking in.
+            lastKeystrokeRef.current = Date.now();
+            setMessages((prev) => [
+              ...prev,
+              { role: 'ai', text: res.intervention!.text, assist: res.intervention!.kind },
+            ]);
+            // Voice the exact utterance we just rendered (idle markers ride the code-run channel).
+            void speak('run', undefined, res.intervention.text);
+          }
+        }
       }
     } catch {
       // Best-effort — a failed idle poll is silent.
     } finally {
-      // Whatever happened (delivered, server said quiet, or error), don't ask again for a full idle
-      // window — a still-idle candidate must never turn the poll into a request stream.
+      // Whatever happened (delivered, server said quiet, dropped, or error), don't ask again for a
+      // full idle window — a still-idle candidate must never turn the poll into a request stream.
       nudgeCooldownUntilRef.current = Date.now() + idleWindowMs;
       nudgeInFlightRef.current = false;
     }
@@ -1443,6 +1530,50 @@ export default function InterviewPage() {
     const timer = setInterval(() => void maybeIdleNudge(), IDLE_POLL_MS);
     return () => clearInterval(timer);
   }, [stage, maybeIdleNudge]);
+
+  // §6.7 Ambient presence cue: shows "Reading your code…" 1–3 times per coding problem during
+  // quiet periods, independent of any pending intervention. Schedule is seeded from the interview
+  // id + problem index so it's deterministic and never Math.random-predictable across sessions.
+  // Never fires while AI is thinking (distinct indicator already visible) or a nudge is in-flight.
+  useEffect(() => {
+    if (phase !== 'coding') return;
+
+    const codeIndex = codingMeta.index;
+    let seed = hashSeed(`${id}-${codeIndex}`);
+    const rand = (): number => {
+      const [ns, v] = lcgStep(seed);
+      seed = ns;
+      return v;
+    };
+
+    const count = 1 + Math.floor(rand() * 3); // 1, 2, or 3 occurrences per problem
+    let cleaned = false;
+    const allTimers: ReturnType<typeof setTimeout>[] = [];
+
+    for (let i = 0; i < count; i++) {
+      // Spread occurrences across the first 8 minutes of the problem (1–8 min).
+      const delayMs = 60_000 + Math.floor(rand() * 420_000);
+      const durationMs = 2_000 + Math.floor(rand() * 2_000); // show for 2–4 s
+
+      const showTimer = setTimeout(() => {
+        if (cleaned) return;
+        // Skip if a distinct indicator is already active or the interview is wrapping up.
+        if (aiThinkingRef.current || nudgeInFlightRef.current || concludeCalledRef.current) return;
+        setPresenceCueVisible(true);
+        const hideTimer = setTimeout(() => {
+          if (!cleaned) setPresenceCueVisible(false);
+        }, durationMs);
+        allTimers.push(hideTimer);
+      }, delayMs);
+      allTimers.push(showTimer);
+    }
+
+    return () => {
+      cleaned = true;
+      allTimers.forEach(clearTimeout);
+      setPresenceCueVisible(false);
+    };
+  }, [phase, codingMeta.index, id]);
 
   function handleAnswerKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     // Mirror Supabase's composer: Enter sends, Shift+Enter inserts a newline. Guard IME
@@ -2110,6 +2241,10 @@ export default function InterviewPage() {
                     </div>
                   );
                 })}
+
+                {/* §6.7 Presence cue — fires before interventions and ambiently during coding.
+                    aria-hidden: decorative; never a perfect predictor of speech. */}
+                <PresenceCue visible={presenceCueVisible} />
 
                 {aiThinking && (
                   <div

@@ -6,7 +6,8 @@ import { Router, Request, Response } from 'express';
 import { requireInterviewer, validateCandidate, isDevEmail } from './middleware';
 import { enforceRateLimit } from './rate-limit';
 import { hashToken } from '../interview/token';
-import type { SubmitIntent } from '../interview/types';
+import type { SubmitIntent, InterviewContext } from '../interview/types';
+import { ingestSnapshot } from '../interview/engagement';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
 import { getById, recordVoiceTurn, recordProctorSignal, updateInterview } from '../db/interviews';
@@ -16,10 +17,10 @@ import { recordTtsCost } from '../cost/ledger';
 import {
   synthesize,
   synthesizeStream,
-  isCartesiaConfigured,
+  isTtsConfigured,
   splitSentences,
   STREAM_SAMPLE_RATE,
-} from '../voice/cartesia';
+} from '../voice/tts';
 import type { RunResult } from '../execution/types';
 
 const router = Router();
@@ -390,16 +391,25 @@ router.post('/:id/run', async (req: Request, res: Response): Promise<void> => {
 router.post('/:id/snapshot', async (req: Request, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const { token, code, language } = req.body as {
+    const {
+      token,
+      code,
+      language,
+      seq: seqBody,
+    } = req.body as {
       token?: string;
       code?: unknown;
       language?: unknown;
+      seq?: unknown;
     };
 
     await validateCandidate(id, token ?? '');
-    await enforceRateLimit(`snapshot:${id}`, { limit: 30, windowMs: 60_000 });
+    // Rate limit raised 30→60/min per §6.1 (leading-edge throttle sends up to ~20/min normally;
+    // 60/min is the burst ceiling so a 429-dropped window counts as unknown activity, not quiescence).
+    await enforceRateLimit(`snapshot:${id}`, { limit: 60, windowMs: 60_000 });
 
     // Validate `code` — required, must be a string, and within the size limit.
+    // Empty code is accepted (§6.1): the candidate may have cleared their editor.
     if (typeof code !== 'string') {
       res.status(400).json({ error: 'code is required and must be a string' });
       return;
@@ -419,9 +429,24 @@ router.post('/:id/snapshot', async (req: Request, res: Response): Promise<void> 
       res.status(409).json({ error: 'Interview is not in progress' });
       return;
     }
-    const ctx = interview.fsm_state as { phase?: string };
+    const ctx = interview.fsm_state as InterviewContext;
     if (ctx.phase !== 'coding') {
       res.status(409).json({ error: 'Code snapshots are only accepted during the coding phase' });
+      return;
+    }
+
+    // Monotonic seq: reject stale snapshots silently (§6.1). A stale seq also guards against
+    // a late-arriving client snapshot clobbering a newer run-written code_snapshot.
+    const seq =
+      typeof seqBody === 'number' && Number.isInteger(seqBody) && seqBody >= 0
+        ? seqBody
+        : undefined;
+
+    // Feed the engagement engine. Returns false for a stale seq — respond 204 without writing
+    // to the DB so the run-written snapshot is never overwritten by an out-of-order client flush.
+    const accepted = ingestSnapshot(id, { seq, codeIndex: ctx.codeIndex, code });
+    if (!accepted) {
+      res.status(204).end();
       return;
     }
 
@@ -514,7 +539,7 @@ router.post('/:id/speak', async (req: Request, res: Response): Promise<void> => 
       message: 'Too many speech requests; please slow down.',
     });
 
-    if (!isCartesiaConfigured()) {
+    if (!isTtsConfigured()) {
       res.status(503).json({ error: 'Voice is not enabled for this interview.' });
       return;
     }
@@ -579,7 +604,7 @@ router.post('/:id/speak-stream', async (req: Request, res: Response): Promise<vo
       message: 'Too many speech requests; please slow down.',
     });
 
-    if (!isCartesiaConfigured()) {
+    if (!isTtsConfigured()) {
       res.status(503).json({ error: 'Voice is not enabled for this interview.' });
       return;
     }

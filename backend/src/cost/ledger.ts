@@ -6,6 +6,7 @@ import { createServiceClient } from '../db/supabase';
 import { getById } from '../db/interviews';
 import { currentCostContext } from './context';
 import { llmCost, ttsCost, sttCost, execCost } from './pricing';
+import { activeTtsProvider } from '../voice/tts';
 
 interface CostEventRow {
   interview_id: string;
@@ -66,14 +67,25 @@ export function recordExecCost(interviewId: string, execMs: number, phase = 'cod
   });
 }
 
-/** Record TTS synthesis (Cartesia bills per character). */
+/** Record TTS synthesis cost. Provider is read from TTS_PROVIDER at call time.
+ *  Grok rate: GROK_TTS_USD_PER_MCHAR env (default $15/1M chars).
+ *  Cartesia rate: TTS_USD_PER_MCHAR env (default ~$65/1M chars, see pricing.ts). */
 export function recordTtsCost(interviewId: string, chars: number, phase?: string): void {
+  const provider = activeTtsProvider();
+  let costUsd: number;
+  if (provider === 'grok') {
+    const rawRate = Number(process.env.GROK_TTS_USD_PER_MCHAR ?? 15);
+    const rate = Number.isFinite(rawRate) ? rawRate : 15;
+    costUsd = (chars / 1_000_000) * rate;
+  } else {
+    costUsd = ttsCost(chars);
+  }
   void insertCostEvent({
     interview_id: interviewId,
     kind: 'tts',
-    provider: 'cartesia',
+    provider,
     chars,
-    cost_usd: ttsCost(chars),
+    cost_usd: costUsd,
     phase: phase ?? null,
   });
 }

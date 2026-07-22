@@ -357,12 +357,20 @@ export async function finishInterview(
  * Persists the current editor code as a lightweight autosave checkpoint.
  * Fire-and-forget (204 expected). Uses keepalive:true so in-flight requests survive
  * page unload (beforeunload / pagehide flush).
+ * `seq` is a monotonic per-interview counter so the server can detect stale windows;
+ * 429 responses are non-fatal (already swallowed by the raw-fetch .catch).
  */
-export function snapshotCode(id: string, token: string, code: string, language: string): void {
+export function snapshotCode(
+  id: string,
+  token: string,
+  code: string,
+  language: string,
+  seq: number
+): void {
   fetch(`${BASE_URL}/api/interviews/${id}/snapshot`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token, code, language }),
+    body: JSON.stringify({ token, code, language, seq }),
     keepalive: true,
   }).catch(() => undefined);
 }
