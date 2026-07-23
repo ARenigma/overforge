@@ -594,6 +594,11 @@ function buildUtterancePrompt(req: UtteranceRequest): string {
       : '',
     `Phase: ${req.ctx.phase}. Next action: ${req.effect.kind}.`,
     effectGuidance(req.effect),
+    req.bannedTopics?.length
+      ? 'YOUR PREVIOUS ATTEMPT REPEATED AN EARLIER QUESTION. The following topic terms are ' +
+        `BANNED — the new question must not touch any of them: ${req.bannedTopics.join(', ')}. ` +
+        'Pick a completely different technical area.'
+      : '',
     req.problemStatement
       ? "The coding problem is ALREADY on the candidate's screen (do NOT read it verbatim — give " +
         `only a one-line gist):\n${req.problemStatement.slice(0, 1500)}`

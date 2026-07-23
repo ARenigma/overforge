@@ -24,6 +24,9 @@ export interface UtteranceRequest {
   /** For `ask_code`: the assigned coding problem's full statement, presented VERBATIM (the oracle
    *  must not invent a problem). Absent for non-coding effects / legacy interviews without a bank. */
   problemStatement?: string | null;
+  /** Repeat-guard retry (ask_oral only): topical terms from questions already asked — the wording
+   *  prompt lists them as banned so the model cannot re-tread an unresolved thread. */
+  bannedTopics?: string[] | null;
 }
 
 export interface Utterance {

@@ -36,6 +36,7 @@ import {
   cooldownOk,
   recordInterventionFired,
 } from './engagement';
+import { isSemanticRepeat, priorAiQuestions, bannedTopicTerms } from './repeat-guard';
 import { maybeFireObserverNote } from './notes';
 import { stripSpeechTags } from '../voice/speech-tags';
 import {
@@ -1096,6 +1097,27 @@ export async function submitAnswer(
               ? oracle.generateIntervention(interventionReq)
               : oracle.generateUtterance(req)
         );
+        // Repeat guard (pass #3): prompt mandates alone don't stop the wording LLM from
+        // re-treading an unresolved thread when asking the NEXT oral question. Structural
+        // guarantee: validate → one retry with an explicit banned-term list → deterministic
+        // pivot. Only guards NEW oral questions past the first — follow-ups are legitimately
+        // same-topic, and question #1 legitimately digs into the project just described.
+        if (effect.kind === 'ask_oral' && effect.index > 0 && !effect.pivot) {
+          const priors = priorAiQuestions(interview.transcript ?? []);
+          if (isSemanticRepeat(utterance.text, priors)) {
+            const retried = await withCostContext(
+              { interviewId, kind: 'brain', phase: newCtx.phase },
+              () => oracle.generateUtterance({ ...req, bannedTopics: bannedTopicTerms(priors) })
+            ).catch(() => null);
+            utterance =
+              retried && !isSemanticRepeat(retried.text, priors)
+                ? retried
+                : await new DeterministicOracle().generateUtterance({
+                    ...req,
+                    effect: { ...effect, pivot: true },
+                  });
+          }
+        }
       } catch (err) {
         console.error(`[orchestrator] utterance generation failed for ${interviewId}:`, err);
         const fallback = new DeterministicOracle();
