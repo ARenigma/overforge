@@ -374,7 +374,11 @@ async function maybeAnswerClarification(
   if (result.intent !== 'question' || !result.reply?.text) return null; // real answer → normal path
   const newCtx: InterviewContext = { ...ctx, clarifyCount: (ctx.clarifyCount ?? 0) + 1 };
   await persistClarify(interview, newCtx, text, result.reply, requestId);
-  return { utterance: result.reply, phase: ctx.phase, state: newCtx };
+  return {
+    utterance: { ...result.reply, text: stripSpeechTags(result.reply.text) },
+    phase: ctx.phase,
+    state: newCtx,
+  };
 }
 
 /** Persist a non-advancing deep-hint offer resolution (accept → hint, decline → ack): append the
@@ -451,7 +455,11 @@ async function maybeResolveHintOffer(
       hintOffer: { codeIndex: ctx.codeIndex, status: 'declined' },
     };
     await persistOfferResolution(interview, newCtx, answer, ack, undefined, requestId);
-    return { utterance: ack, phase: ctx.phase, state: newCtx };
+    return {
+      utterance: { ...ack, text: stripSpeechTags(ack.text) },
+      phase: ctx.phase,
+      state: newCtx,
+    };
   }
 
   // accept → deliver the deep hint (grounded, still no spoiler)
@@ -499,7 +507,7 @@ async function maybeResolveHintOffer(
     requestId
   );
   return {
-    utterance: hint,
+    utterance: { ...hint, text: stripSpeechTags(hint.text) },
     phase: ctx.phase,
     state: newCtx,
     assist: { kind: 'hint', strength: 2 },
@@ -1124,7 +1132,12 @@ export async function submitAnswer(
         });
       }
 
-      return { utterance, phase: newCtx.phase, state: newCtx, ...(assist ? { assist } : {}) };
+      return {
+        utterance: { ...utterance, text: stripSpeechTags(utterance.text) },
+        phase: newCtx.phase,
+        state: newCtx,
+        ...(assist ? { assist } : {}),
+      };
     }); // end withInterviewLock
   } finally {
     clearAnswerInFlight(interviewId);

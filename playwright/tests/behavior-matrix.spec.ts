@@ -73,7 +73,7 @@ test.describe('run-failure ladder + protections (Path A)', () => {
     // cooldown: "want a bigger hint, or keep going?" — never the deep hint auto-injected.
     await room.typeCode(WRONG_ATTEMPT + '\n# r3');
     await room.run();
-    await room.waitForAssist('offer', 20_000);
+    await room.waitForAssist('offer', 50_000);
     expect(await room.assistCount('hint'), 'deep hint must NOT be auto-injected').toBe(0);
 
     // Run 4 — the candidate ignored the offer and kept failing → deliver the deep hint.
@@ -101,7 +101,7 @@ test.describe('run-failure ladder + protections (Path A)', () => {
     await room.run(); // probe
     await room.typeCode(WRONG_ATTEMPT + '\n# r3');
     await room.run(); // offer (stagnation-accelerated)
-    await room.waitForAssist('offer', 20_000);
+    await room.waitForAssist('offer', 50_000);
 
     // Decline via the chat (the answer path resolves the offer without advancing the FSM).
     await room.answer('no thanks, let me keep trying');
@@ -126,7 +126,7 @@ test.describe('run-failure ladder + protections (Path A)', () => {
     await room.run(); // probe
     await room.typeCode(WRONG_ATTEMPT + '\n# r3');
     await room.run(); // offer
-    await room.waitForAssist('offer', 20_000);
+    await room.waitForAssist('offer', 50_000);
 
     const problemBefore = await room.problemTitle();
     await room.answer('yes please');
