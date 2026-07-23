@@ -38,9 +38,14 @@ export interface InterviewContext {
   codeIndex: number;
   /** Follow-ups asked for the current coding question. */
   followUps: number;
-  /** Follow-up nudges issued for the CURRENT oral question (hard cap: 1). Reset to 0 when a
-   *  new oral question is asked. Kept at 0 during non-oral phases. */
+  /** Follow-up nudges issued for the CURRENT oral question (hard cap: 1 standard; up to 2 on
+   *  the dodge path). Reset to 0 when a new oral question is asked. */
   oralFollowUps: number;
+  /** Consecutive dodges on the CURRENT oral question. A dodge is when the oracle judges the
+   *  answer NON-RESPONSIVE to the question asked. Resets to 0 on every advance (new question or
+   *  handoff) and whenever a non-dodging answer arrives. Optional for backward-compat with
+   *  contexts persisted before this field (treated as 0). */
+  oralDodges?: number;
   /** Clarifying questions the candidate has asked on the CURRENT question. A clarify is a
    *  non-advancing self-loop (the interviewer answers without moving on); this bounds it so it
    *  can't stall the interview, and resets to 0 whenever a real answer advances the FSM. Optional
@@ -87,9 +92,9 @@ export interface ObserverNote {
 /** What the driver should do next. The machine emits exactly one per step. */
 export type Effect =
   | { kind: 'greet' }
-  | { kind: 'ask_oral'; index: number } // 0-based
-  | { kind: 'ask_oral_followup'; index: number } // re-probe the same oral question (max 1 per question)
-  | { kind: 'handoff' }
+  | { kind: 'ask_oral'; index: number; pivot?: true } // 0-based; pivot=true when advancing after 3 consecutive dodges
+  | { kind: 'ask_oral_followup'; index: number; dodgeAck?: true } // re-probe the same oral question; dodgeAck=true on dodge #2 (name the dodge)
+  | { kind: 'handoff'; pivot?: true } // pivot=true when the handoff is a forced advance from dodge #3 on the last oral question
   | { kind: 'ask_code'; index: number } // 0-based core question
   | { kind: 'ask_followup'; codeIndex: number; depth: number; mandatory?: boolean } // depth 1..codeMaxFollowUps; mandatory=the format counter-question fired on SUBMIT
   | { kind: 'wrap_up' }
@@ -106,6 +111,12 @@ export interface OracleDecision {
    *  claim (counter_question), dig deeper on a thin answer (probe), or unblock (hint). The FSM
    *  still owns whether a follow-up happens (within `maxFollowUps`); this only shapes its tone. */
   kind?: InterventionKind;
+  /** True when the answer is NON-RESPONSIVE to the question asked (dodged / answered something
+   *  else). Drives the dodge-tracking policy in the oral phase: follow-up with acknowledgment at
+   *  dodge #2, pivot at dodge #3. NEVER set by the oracle for coding answers (coding phase uses
+   *  the followUp/kind signal only). Parsed with strict boolean coercion — any non-`true` value
+   *  (including garbage strings, numbers, undefined) is treated as false by parseDecision. */
+  dodged?: boolean;
 }
 
 /** How a coding-phase answer was submitted. Absent ⇒ `'answer'` (voice transcripts, oral answers,

@@ -4,6 +4,7 @@ import {
   createMinimaxClient,
   createFailoverClient,
   MinimaxOracle,
+  parseDecision,
 } from './minimax';
 import type { MinimaxClient } from './minimax';
 import { DEFAULT_CONFIG } from './types';
@@ -182,6 +183,62 @@ describe('LLM fetch timeout (FIX 1)', () => {
     ]);
     const result = await chain.complete([{ role: 'user', content: 'hi' }]);
     expect(result).toBe('ok-from-provider-2');
+  });
+});
+
+describe('parseDecision: dodged field strictness', () => {
+  it('accepts dodged:true (the only truthy value that counts)', () => {
+    const raw = JSON.stringify({ followUp: false, reason: '', signal: 0.5, dodged: true });
+    expect(parseDecision(raw).dodged).toBe(true);
+  });
+
+  it('defaults dodged to absent when the field is false', () => {
+    const raw = JSON.stringify({ followUp: false, reason: '', signal: 0.5, dodged: false });
+    // false → field is omitted (falsy values produce no dodged key)
+    expect(parseDecision(raw).dodged).toBeUndefined();
+  });
+
+  it('defaults dodged to absent when the field is a garbage string', () => {
+    const raw = JSON.stringify({ followUp: false, reason: '', signal: 0, dodged: 'yes' });
+    expect(parseDecision(raw).dodged).toBeUndefined();
+  });
+
+  it('defaults dodged to absent when the field is a number (1)', () => {
+    const raw = JSON.stringify({ followUp: false, reason: '', signal: 0, dodged: 1 });
+    expect(parseDecision(raw).dodged).toBeUndefined();
+  });
+
+  it('defaults dodged to absent when the field is missing entirely', () => {
+    const raw = JSON.stringify({ followUp: true, reason: 'thin', signal: 0.2, kind: 'probe' });
+    expect(parseDecision(raw).dodged).toBeUndefined();
+  });
+
+  it('defaults dodged to absent when the field is null', () => {
+    const raw = JSON.stringify({ followUp: false, reason: '', signal: 0, dodged: null });
+    expect(parseDecision(raw).dodged).toBeUndefined();
+  });
+
+  it('evaluateAnswer on MinimaxOracle: garbage dodged in LLM output defaults to absent', async () => {
+    const garbageClient: MinimaxClient = {
+      complete: async () =>
+        JSON.stringify({ followUp: false, reason: 'ok', signal: 0.5, dodged: 'BOGUS' }),
+    };
+    const oracle = new MinimaxOracle(garbageClient);
+    const result = await oracle.evaluateAnswer({
+      answer: 'some answer',
+      ctx: {
+        phase: 'oral',
+        oralAsked: 1,
+        codeIndex: 0,
+        followUps: 0,
+        oralFollowUps: 0,
+        config: DEFAULT_CONFIG,
+      },
+      transcript: [],
+    });
+    // Garbage string must NOT propagate as dodged:true — the FSM would wrongly count it as a dodge.
+    expect(result.dodged).toBeUndefined();
+    expect(result.followUp).toBe(false); // other fields unaffected
   });
 });
 

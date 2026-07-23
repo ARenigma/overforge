@@ -72,26 +72,61 @@ export function advance(ctx: InterviewContext, event: InterviewEvent): StepResul
     }
 
     case 'oral': {
-      // Bounded oral nudge: if the oracle flagged this answer as thin AND we haven't already
-      // nudged on this question, re-probe the same question once (don't advance oralAsked).
+      const isDodge = event.decision?.dodged === true;
       const wantsOralNudge = event.decision?.followUp === true;
-      if (wantsOralNudge && ctx.oralFollowUps === 0) {
-        // Re-probe the current question (oralAsked - 1 is the index of the question just answered).
+      // Consecutive-dodge counter: a non-dodge answer resets it to 0.
+      const newOralDodges = isDodge ? (ctx.oralDodges ?? 0) + 1 : 0;
+      const cap = config.maxFollowUps; // DEFAULT_CONFIG.maxFollowUps = 3
+
+      // Pivot at 3 consecutive dodges — advance immediately, never issue another follow-up.
+      // The wording layer uses pivot:true to emit a graceful "No problem — let's move on" line.
+      if (newOralDodges >= 3) {
+        if (ctx.oralAsked < config.oralQuestions) {
+          const index = ctx.oralAsked;
+          return {
+            ctx: { ...ctx, oralAsked: ctx.oralAsked + 1, oralFollowUps: 0, oralDodges: 0 },
+            effect: { kind: 'ask_oral', index, pivot: true },
+          };
+        }
+        return {
+          ctx: { ...ctx, phase: 'handoff', oralFollowUps: 0, oralDodges: 0 },
+          effect: { kind: 'handoff', pivot: true },
+        };
+      }
+
+      // Dodge #2: acknowledge the dodge explicitly and re-ask once (if budget remains).
+      // dodgeAck:true tells the wording layer to name what's missing rather than probe generically.
+      if (newOralDodges === 2 && ctx.oralFollowUps < cap) {
         const index = ctx.oralAsked - 1;
         return {
-          ctx: { ...ctx, oralFollowUps: 1 },
+          ctx: { ...ctx, oralFollowUps: ctx.oralFollowUps + 1, oralDodges: 2 },
+          effect: { kind: 'ask_oral_followup', index, dodgeAck: true },
+        };
+      }
+
+      // Dodge #1 or thin answer (existing behavior): one standard follow-up when no nudge has been
+      // issued yet on this question. isDodge fires the follow-up even if followUp is false (a
+      // non-responsive answer is always worth re-probing once).
+      if ((isDodge || wantsOralNudge) && ctx.oralFollowUps === 0) {
+        const index = ctx.oralAsked - 1;
+        return {
+          ctx: { ...ctx, oralFollowUps: 1, oralDodges: newOralDodges },
           effect: { kind: 'ask_oral_followup', index },
         };
       }
-      // Satisfactory answer, cap already hit, or evaluator unavailable → advance gracefully.
+
+      // Satisfactory answer, cap hit, or evaluator unavailable → advance gracefully.
       if (ctx.oralAsked < config.oralQuestions) {
-        const index = ctx.oralAsked; // 0-based index of the question being asked now
+        const index = ctx.oralAsked;
         return {
-          ctx: { ...ctx, oralAsked: ctx.oralAsked + 1, oralFollowUps: 0 },
+          ctx: { ...ctx, oralAsked: ctx.oralAsked + 1, oralFollowUps: 0, oralDodges: 0 },
           effect: { kind: 'ask_oral', index },
         };
       }
-      return { ctx: { ...ctx, phase: 'handoff', oralFollowUps: 0 }, effect: { kind: 'handoff' } };
+      return {
+        ctx: { ...ctx, phase: 'handoff', oralFollowUps: 0, oralDodges: 0 },
+        effect: { kind: 'handoff' },
+      };
     }
 
     case 'handoff': {

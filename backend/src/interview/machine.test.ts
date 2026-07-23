@@ -340,6 +340,118 @@ describe('coding: MOVE-ON firm skip', () => {
   });
 });
 
+// ─────────────────────── Oral: dodge-acknowledgment + pivot policy ───────────────────────
+
+/** Produce an oral answer event with explicit followUp AND dodged signals. */
+const dodgeAnswer = (followUp = true): InterviewEvent => ({
+  type: 'answer',
+  decision: { followUp, reason: 'dodge', signal: 0.1, dodged: true },
+});
+
+/** Drive to the start of oral Q0 (phase=oral, oralAsked=1, oralFollowUps=0, oralDodges=0). */
+function toOral(config = undefined as never): InterviewContext {
+  let ctx = initialContext(config);
+  ctx = advance(ctx, { type: 'start' }).ctx; // → greeting
+  ctx = advance(ctx, { type: 'answer' }).ctx; // greeting answer → ask_oral(0)
+  return ctx;
+}
+
+describe('oral: dodge-acknowledgment and pivot', () => {
+  test('dodge #1 → normal ask_oral_followup (no dodgeAck), oralDodges set to 1', () => {
+    const ctx = toOral();
+    const { ctx: next, effect } = advance(ctx, dodgeAnswer());
+    expect(effect).toEqual({ kind: 'ask_oral_followup', index: 0 }); // no dodgeAck
+    expect(next.oralFollowUps).toBe(1);
+    expect(next.oralDodges).toBe(1);
+    expect(next.oralAsked).toBe(1); // stayed on Q0
+  });
+
+  test('dodge #2 → ask_oral_followup with dodgeAck:true', () => {
+    let ctx = toOral();
+    ctx = advance(ctx, dodgeAnswer()).ctx; // dodge #1 → follow-up, oralDodges=1
+    const { ctx: next, effect } = advance(ctx, dodgeAnswer()); // dodge #2
+    expect(effect).toEqual({ kind: 'ask_oral_followup', index: 0, dodgeAck: true });
+    expect(next.oralFollowUps).toBe(2);
+    expect(next.oralDodges).toBe(2);
+    expect(next.oralAsked).toBe(1); // still on Q0
+  });
+
+  test('dodge #3 → pivot: advances to ask_oral(1) with pivot:true, resets counters', () => {
+    let ctx = toOral();
+    ctx = advance(ctx, dodgeAnswer()).ctx; // dodge #1
+    ctx = advance(ctx, dodgeAnswer()).ctx; // dodge #2
+    const { ctx: next, effect } = advance(ctx, dodgeAnswer()); // dodge #3 → pivot
+    expect(effect).toEqual({ kind: 'ask_oral', index: 1, pivot: true });
+    expect(next.oralFollowUps).toBe(0);
+    expect(next.oralDodges).toBe(0);
+    expect(next.oralAsked).toBe(2);
+  });
+
+  test('dodge #3 at the LAST oral question → handoff with pivot:true', () => {
+    let ctx = toOral(); // oralAsked=1, config.oralQuestions=2 → one more Q remaining
+    ctx = advance(ctx, answer()).ctx; // advance to oral Q1 (oralAsked=2)
+    // Now on Q1 (last): 3 dodges → should go to handoff
+    ctx = advance(ctx, dodgeAnswer()).ctx; // dodge #1
+    ctx = advance(ctx, dodgeAnswer()).ctx; // dodge #2
+    const { ctx: next, effect } = advance(ctx, dodgeAnswer()); // dodge #3 → handoff pivot
+    expect(effect).toEqual({ kind: 'handoff', pivot: true });
+    expect(next.phase).toBe('handoff');
+    expect(next.oralDodges).toBe(0);
+  });
+
+  test('non-dodge answer resets oralDodges to 0', () => {
+    let ctx = toOral();
+    ctx = advance(ctx, dodgeAnswer()).ctx; // dodge #1, oralDodges=1
+    // Now answer the follow-up WITHOUT dodging — counter resets
+    const { ctx: next, effect } = advance(ctx, answer(false)); // substantive, not a dodge
+    expect(effect.kind).toBe('ask_oral'); // advances to next question
+    expect(next.oralDodges).toBe(0);
+  });
+
+  test('non-dodge thin answer (followUp=true, dodged=false) fires normal follow-up, oralDodges stays 0', () => {
+    const ctx = toOral();
+    const { ctx: next, effect } = advance(ctx, oralAnswer(true)); // thin, NOT a dodge
+    expect(effect).toEqual({ kind: 'ask_oral_followup', index: 0 }); // no dodgeAck
+    expect(next.oralDodges).toBe(0);
+    expect(next.oralFollowUps).toBe(1);
+  });
+
+  test('maxFollowUps cap: dodge #2 does NOT fire when oralFollowUps is already at cap', () => {
+    // Use a config with maxFollowUps=1 so the cap is hit after dodge #1.
+    const tightConfig = { oralQuestions: 2, coreQuestions: 2, maxFollowUps: 1 };
+    let ctx = toOral(tightConfig as never);
+    ctx = advance(ctx, dodgeAnswer()).ctx; // dodge #1 → follow-up, oralFollowUps=1 (= cap)
+    // Dodge #2: oralFollowUps(1) < cap(1) is false → fall through to advance
+    const { effect } = advance(ctx, dodgeAnswer()); // dodge #2, but cap hit
+    expect(effect.kind).toBe('ask_oral'); // advances, not another follow-up
+    expect((effect as { dodgeAck?: boolean }).dodgeAck).toBeUndefined();
+  });
+
+  test('pivot fires an ask_oral advance (not a follow-up), so maxFollowUps is never exceeded', () => {
+    let ctx = toOral();
+    ctx = advance(ctx, dodgeAnswer()).ctx; // dodge #1
+    ctx = advance(ctx, dodgeAnswer()).ctx; // dodge #2
+    // At this point oralFollowUps=2, oralDodges=2
+    const { effect } = advance(ctx, dodgeAnswer()); // dodge #3 → pivot
+    expect(effect.kind).toBe('ask_oral'); // it's an advance, not ask_oral_followup
+    expect(effect).toMatchObject({ pivot: true });
+  });
+
+  test('oralDodges resets for the next oral question after a normal advance', () => {
+    let ctx = toOral();
+    // Accumulate one dodge on Q0
+    ctx = advance(ctx, dodgeAnswer()).ctx; // dodge #1, oralDodges=1
+    // Non-dodging follow-up answer → advance to Q1
+    ctx = advance(ctx, answer(false)).ctx;
+    expect(ctx.oralDodges).toBe(0); // reset on advance
+    expect(ctx.oralFollowUps).toBe(0);
+    // On Q1, a dodge should start fresh at 1
+    const { ctx: after, effect } = advance(ctx, dodgeAnswer());
+    expect(effect).toEqual({ kind: 'ask_oral_followup', index: 1 });
+    expect(after.oralDodges).toBe(1);
+  });
+});
+
 describe('mustFireCounter predicate', () => {
   const cases: [string, SubmitIntent | undefined, number, boolean][] = [
     ['submit, first answer', 'submit', 0, true],

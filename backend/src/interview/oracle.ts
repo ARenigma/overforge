@@ -153,6 +153,12 @@ export class DeterministicOracle implements Oracle {
           expects: 'voice',
         };
       case 'ask_oral':
+        if (e.pivot) {
+          return {
+            text: "No problem — let's move to something else. Now, walk me through a time when you had to make a hard technical trade-off under real constraints.",
+            expects: 'voice',
+          };
+        }
         return {
           text:
             e.index === 0
@@ -161,11 +167,20 @@ export class DeterministicOracle implements Oracle {
           expects: 'voice',
         };
       case 'ask_oral_followup':
+        if (e.dodgeAck) {
+          return {
+            text: "I notice you're speaking to the general area — I'm looking for something more specific here. What was the actual decision you made, and why did you choose it over the alternatives?",
+            expects: 'voice',
+          };
+        }
         return {
           text: 'Right — let me push on that a bit. Can you give me a concrete example, or a specific trade-off you had to make?',
           expects: 'voice',
         };
       case 'handoff':
+        if (e.pivot) {
+          return { text: "No problem — let's shift to the coding section.", expects: 'text' };
+        }
         return { text: "Okay — let's shift to some coding.", expects: 'text' };
       case 'ask_code':
         return {
@@ -193,12 +208,14 @@ export class DeterministicOracle implements Oracle {
   async evaluateAnswer(req: EvaluateRequest): Promise<OracleDecision> {
     const len = (req.answer ?? '').trim().length;
     // Deterministic rule: thin answers warrant a follow-up; substantial ones don't.
+    // The deterministic oracle cannot judge responsiveness, so dodged is always false.
     const followUp = len > 0 && len < 120;
     const signal = Math.max(0, Math.min(1, len / 240));
     return {
       followUp,
       reason: followUp ? 'answer was thin; probe deeper' : 'answer was substantive',
       signal,
+      dodged: false,
       ...(followUp ? { kind: 'probe' as const } : {}),
     };
   }
