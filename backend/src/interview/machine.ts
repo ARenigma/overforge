@@ -100,7 +100,7 @@ export function advance(ctx: InterviewContext, event: InterviewEvent): StepResul
         const index = ctx.oralAsked - 1;
         return {
           ctx: { ...ctx, oralFollowUps: ctx.oralFollowUps + 1, oralDodges: 2 },
-          effect: { kind: 'ask_oral_followup', index, dodgeAck: true },
+          effect: { kind: 'ask_oral_followup', index, ordinal: ctx.oralFollowUps + 1, dodgeAck: true },
         };
       }
 
@@ -111,7 +111,7 @@ export function advance(ctx: InterviewContext, event: InterviewEvent): StepResul
         const index = ctx.oralAsked - 1;
         return {
           ctx: { ...ctx, oralFollowUps: 1, oralDodges: newOralDodges },
-          effect: { kind: 'ask_oral_followup', index },
+          effect: { kind: 'ask_oral_followup', index, ordinal: 1 },
         };
       }
 

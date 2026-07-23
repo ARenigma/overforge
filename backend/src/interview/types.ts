@@ -93,7 +93,7 @@ export interface ObserverNote {
 export type Effect =
   | { kind: 'greet' }
   | { kind: 'ask_oral'; index: number; pivot?: true } // 0-based; pivot=true when advancing after 3 consecutive dodges
-  | { kind: 'ask_oral_followup'; index: number; dodgeAck?: true } // re-probe the same oral question; dodgeAck=true on dodge #2 (name the dodge)
+  | { kind: 'ask_oral_followup'; index: number; ordinal: number; dodgeAck?: true } // re-probe the same oral question; ordinal=1 on first probe, ≥2 auto-sets dodgeAck (name the dodge)
   | { kind: 'handoff'; pivot?: true } // pivot=true when the handoff is a forced advance from dodge #3 on the last oral question
   | { kind: 'ask_code'; index: number } // 0-based core question
   | { kind: 'ask_followup'; codeIndex: number; depth: number; mandatory?: boolean } // depth 1..codeMaxFollowUps; mandatory=the format counter-question fired on SUBMIT

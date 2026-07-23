@@ -172,6 +172,7 @@ async function runObserverNote(
     seq,
   }).catch((err: unknown) => {
     console.error(`[notes] appendEvent failed for ${interviewId}:`, err);
+    captureException(err);
   });
 }
 

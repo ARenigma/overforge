@@ -16,6 +16,7 @@
 //   - Quiescence floor ≥ 90 s, per-interview jitter band 90–150 s (§6.7).
 
 import { appendEvent } from '../db/interviews';
+import { captureException } from '../observability/sentry';
 import { ObserverNote } from './types';
 
 // ─────────────────────── Public types ───────────────────────
@@ -465,6 +466,7 @@ function maybeFireTransition(
     seq,
   }).catch((err: unknown) => {
     console.error(`[engagement] appendEvent failed for ${interviewId}:`, err);
+    captureException(err);
   });
 }
 

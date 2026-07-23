@@ -116,7 +116,7 @@ describe('interview machine', () => {
     // thin answer on oral question 0 → should get one nudge
     res = advance(ctx, oralAnswer(true));
     ctx = res.ctx;
-    expect(res.effect).toEqual({ kind: 'ask_oral_followup', index: 0 });
+    expect(res.effect).toEqual({ kind: 'ask_oral_followup', index: 0, ordinal: 1 });
     expect(ctx.oralFollowUps).toBe(1);
     expect(ctx.oralAsked).toBe(1); // oralAsked NOT incremented during nudge
 
@@ -174,7 +174,7 @@ describe('interview machine', () => {
     // oral Q1: thin → nudge
     res = advance(ctx, oralAnswer(true));
     ctx = res.ctx;
-    expect(res.effect).toEqual({ kind: 'ask_oral_followup', index: 1 });
+    expect(res.effect).toEqual({ kind: 'ask_oral_followup', index: 1, ordinal: 1 });
 
     // nudge answered → advance to handoff (all orals exhausted)
     res = advance(ctx, oralAnswer(true));
@@ -360,7 +360,7 @@ describe('oral: dodge-acknowledgment and pivot', () => {
   test('dodge #1 → normal ask_oral_followup (no dodgeAck), oralDodges set to 1', () => {
     const ctx = toOral();
     const { ctx: next, effect } = advance(ctx, dodgeAnswer());
-    expect(effect).toEqual({ kind: 'ask_oral_followup', index: 0 }); // no dodgeAck
+    expect(effect).toEqual({ kind: 'ask_oral_followup', index: 0, ordinal: 1 }); // no dodgeAck
     expect(next.oralFollowUps).toBe(1);
     expect(next.oralDodges).toBe(1);
     expect(next.oralAsked).toBe(1); // stayed on Q0
@@ -370,7 +370,7 @@ describe('oral: dodge-acknowledgment and pivot', () => {
     let ctx = toOral();
     ctx = advance(ctx, dodgeAnswer()).ctx; // dodge #1 → follow-up, oralDodges=1
     const { ctx: next, effect } = advance(ctx, dodgeAnswer()); // dodge #2
-    expect(effect).toEqual({ kind: 'ask_oral_followup', index: 0, dodgeAck: true });
+    expect(effect).toEqual({ kind: 'ask_oral_followup', index: 0, ordinal: 2, dodgeAck: true });
     expect(next.oralFollowUps).toBe(2);
     expect(next.oralDodges).toBe(2);
     expect(next.oralAsked).toBe(1); // still on Q0
@@ -411,7 +411,7 @@ describe('oral: dodge-acknowledgment and pivot', () => {
   test('non-dodge thin answer (followUp=true, dodged=false) fires normal follow-up, oralDodges stays 0', () => {
     const ctx = toOral();
     const { ctx: next, effect } = advance(ctx, oralAnswer(true)); // thin, NOT a dodge
-    expect(effect).toEqual({ kind: 'ask_oral_followup', index: 0 }); // no dodgeAck
+    expect(effect).toEqual({ kind: 'ask_oral_followup', index: 0, ordinal: 1 }); // no dodgeAck
     expect(next.oralDodges).toBe(0);
     expect(next.oralFollowUps).toBe(1);
   });
@@ -447,7 +447,7 @@ describe('oral: dodge-acknowledgment and pivot', () => {
     expect(ctx.oralFollowUps).toBe(0);
     // On Q1, a dodge should start fresh at 1
     const { ctx: after, effect } = advance(ctx, dodgeAnswer());
-    expect(effect).toEqual({ kind: 'ask_oral_followup', index: 1 });
+    expect(effect).toEqual({ kind: 'ask_oral_followup', index: 1, ordinal: 1 });
     expect(after.oralDodges).toBe(1);
   });
 });
