@@ -1149,6 +1149,7 @@ export default function InterviewPage() {
     setAnswerError(null);
     setMessages((prev) => [...prev, { role: 'candidate', text }]);
     setAiThinking(true);
+    const sentAt = Date.now();
     try {
       const res = await answerInterview(id, activeToken, text, requestId);
       pendingAnswerRef.current = null;
@@ -1157,12 +1158,13 @@ export default function InterviewPage() {
       // get a jittered 800–2600ms lead before the bubble lands — a multi-sentence reply
       // arriving in <1s is humanly impossible. The aiThinking spinner stays visible through
       // the lead (it is already active) so there is never a double indicator on screen.
-      // Plain (non-assist) oral replies keep today's timing. Error paths are in catch and
-      // are not affected. speak() is called after the delay so voice ordering is correct.
-      if (res.assist) {
-        await new Promise<void>((resolve) =>
-          setTimeout(resolve, 800 + Math.random() * 1800)
-        );
+      // Plain replies get a jittered MINIMUM-ELAPSED floor (~0.9–1.5s total since send) — a
+      // fast server path once produced a 641ms question, which reads machine-instant. Error
+      // paths are in catch and unaffected. speak() runs after the delay (voice ordering OK).
+      const minElapsedMs = res.assist ? 1600 + Math.random() * 1800 : 900 + Math.random() * 600;
+      const remaining = minElapsedMs - (Date.now() - sentAt);
+      if (remaining > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, remaining));
       }
       // Carry the assist tag onto the live bubble (follow-up probe / accepted-offer hint) so the
       // intervention styling shows immediately, exactly as a reload would restore it.
@@ -1207,6 +1209,7 @@ export default function InterviewPage() {
       setMessages((prev) => [...prev, { role: 'candidate', text: 'Submitted my solution.' }]);
     }
     setAiThinking(true);
+    const sentAt = Date.now();
     try {
       const res = await answerInterview(
         id,
@@ -1218,13 +1221,16 @@ export default function InterviewPage() {
       );
       setPhase(res.phase);
       // Indistinguishability fix: SUBMIT always triggers a mandatory counter-question
-      // (the USP), so it always gets the lead. An assist-tagged move_on reply also gets
-      // it. aiThinking stays visible through the lead — no double indicator. speak() is
-      // called after the delay so voice ordering is correct. Error rollback is in catch.
-      if (intent === 'submit' || res.assist) {
-        await new Promise<void>((resolve) =>
-          setTimeout(resolve, 800 + Math.random() * 1800)
-        );
+      // (the USP), so it always gets the lead; other replies get the minimum-elapsed
+      // floor (matches handleSendAnswer). aiThinking stays visible through the lead — no
+      // double indicator. speak() runs after the delay (voice ordering OK). Rollback in catch.
+      const minElapsedMs =
+        intent === 'submit' || res.assist
+          ? 1600 + Math.random() * 1800
+          : 900 + Math.random() * 600;
+      const remaining = minElapsedMs - (Date.now() - sentAt);
+      if (remaining > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, remaining));
       }
       setMessages((prev) => [
         ...prev,

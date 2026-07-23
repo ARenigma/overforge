@@ -36,7 +36,7 @@ import {
   cooldownOk,
   recordInterventionFired,
 } from './engagement';
-import { isSemanticRepeat, priorAiQuestions, bannedTopicTerms } from './repeat-guard';
+import { clusterCount, priorAiQuestions, bannedTopicTerms } from './repeat-guard';
 import { maybeFireObserverNote } from './notes';
 import { stripSpeechTags } from '../voice/speech-tags';
 import {
@@ -1097,25 +1097,33 @@ export async function submitAnswer(
               ? oracle.generateIntervention(interventionReq)
               : oracle.generateUtterance(req)
         );
-        // Repeat guard (pass #3): prompt mandates alone don't stop the wording LLM from
-        // re-treading an unresolved thread when asking the NEXT oral question. Structural
-        // guarantee: validate → one retry with an explicit banned-term list → deterministic
-        // pivot. Only guards NEW oral questions past the first — follow-ups are legitimately
-        // same-topic, and question #1 legitimately digs into the project just described.
-        if (effect.kind === 'ask_oral' && effect.index > 0 && !effect.pivot) {
+        // Repeat guard (passes #3+#4): prompt mandates alone don't stop the wording LLM from
+        // re-treading an unresolved thread — and pass #4 proved follow-ups are where the
+        // fixation actually lives (the model snaps BACK to a dead thread even after the
+        // question moved on). Interview-wide structural invariant: no topic cluster gets
+        // more than 3 interviewer turns. A NEW question may not join ANY existing cluster
+        // (limit 0); a follow-up may sit in its own question's cluster until it reaches 3
+        // members (limit 2 priors). Validate → one retry with an explicit banned-term list →
+        // deterministic fallback (pivot line for new questions, generic push for follow-ups).
+        const guardOral =
+          (effect.kind === 'ask_oral' && effect.index > 0 && !effect.pivot) ||
+          effect.kind === 'ask_oral_followup';
+        if (guardOral) {
           const priors = priorAiQuestions(interview.transcript ?? []);
-          if (isSemanticRepeat(utterance.text, priors)) {
+          const limit = effect.kind === 'ask_oral' ? 0 : 2;
+          if (clusterCount(utterance.text, priors) > limit) {
             const retried = await withCostContext(
               { interviewId, kind: 'brain', phase: newCtx.phase },
               () => oracle.generateUtterance({ ...req, bannedTopics: bannedTopicTerms(priors) })
             ).catch(() => null);
             utterance =
-              retried && !isSemanticRepeat(retried.text, priors)
+              retried && clusterCount(retried.text, priors) <= limit
                 ? retried
-                : await new DeterministicOracle().generateUtterance({
-                    ...req,
-                    effect: { ...effect, pivot: true },
-                  });
+                : await new DeterministicOracle().generateUtterance(
+                    effect.kind === 'ask_oral'
+                      ? { ...req, effect: { ...effect, pivot: true } }
+                      : req
+                  );
           }
         }
       } catch (err) {

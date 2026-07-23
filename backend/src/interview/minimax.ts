@@ -548,10 +548,11 @@ function effectGuidance(effect: Effect): string {
       }
       return (
         "The candidate's last answer was thin or evasive. REQUIRED SHAPE, two beats: first, in half " +
-        'a sentence, acknowledge what their answer DID cover ("Right — that covers the deployment ' +
-        'side…"); second, name precisely what is still missing and re-ask for exactly that. Never ' +
-        'repeat your previous phrasing. ONE question total. This is the last prompt on this topic ' +
-        'before moving on.'
+        'a sentence, acknowledge what their answer DID cover; second, name precisely what is still ' +
+        'missing and re-ask for exactly that. Never repeat your previous phrasing, and NEVER reuse ' +
+        'a bridging phrase that already appears in this transcript (if you said "Right — that ' +
+        'covers…" before, open differently this time). ONE question total. This is the last prompt ' +
+        'on this topic before moving on.'
       );
     case 'ask_code':
       return (

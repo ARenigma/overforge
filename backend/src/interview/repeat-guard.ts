@@ -65,3 +65,25 @@ export function bannedTopicTerms(priors: string[], cap = 24): string[] {
   for (const q of priors) for (const w of contentKeywords(q)) out.add(w);
   return [...out].slice(0, cap);
 }
+
+/**
+ * How many prior interviewer turns already sit in `candidate`'s topic cluster (same overlap
+ * test as isSemanticRepeat, counted instead of short-circuited).
+ *
+ * The interview-wide invariant this powers (pass #4): NO topic cluster may exceed 3
+ * interviewer turns — a human either gets an answer, names the impasse, or lets the thread
+ * go by the third touch. New questions are blocked from joining ANY existing cluster;
+ * follow-ups may sit in their own question's cluster until it reaches 3 members.
+ */
+export function clusterCount(candidate: string, priors: string[]): number {
+  const cand = contentKeywords(candidate);
+  if (cand.size === 0) return 0;
+  let count = 0;
+  for (const prior of priors) {
+    const prev = contentKeywords(prior);
+    let shared = 0;
+    for (const w of cand) if (prev.has(w)) shared++;
+    if (shared >= 4 || shared / cand.size >= 0.5) count++;
+  }
+  return count;
+}
