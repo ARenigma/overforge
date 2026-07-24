@@ -1111,19 +1111,24 @@ export async function submitAnswer(
         if (guardOral) {
           const priors = priorAiQuestions(interview.transcript ?? []);
           const limit = effect.kind === 'ask_oral' ? 0 : 2;
-          if (clusterCount(utterance.text, priors) > limit) {
+          const firstCount = clusterCount(utterance.text, priors);
+          if (firstCount > limit) {
             const retried = await withCostContext(
               { interviewId, kind: 'brain', phase: newCtx.phase },
               () => oracle.generateUtterance({ ...req, bannedTopics: bannedTopicTerms(priors) })
             ).catch(() => null);
-            utterance =
-              retried && clusterCount(retried.text, priors) <= limit
-                ? retried
-                : await new DeterministicOracle().generateUtterance(
-                    effect.kind === 'ask_oral'
-                      ? { ...req, effect: { ...effect, pivot: true } }
-                      : req
-                  );
+            const retryOk = retried !== null && clusterCount(retried.text, priors) <= limit;
+            utterance = retryOk
+              ? retried
+              : await new DeterministicOracle().generateUtterance(
+                  effect.kind === 'ask_oral' ? { ...req, effect: { ...effect, pivot: true } } : req
+                );
+            // Observable proof the guard acted (pass #5 could not tell "didn't fire" from
+            // "fired and failed") — greppable in docker logs, no candidate data in the line.
+            console.log(
+              `[repeat-guard] fired interview=${interviewId} effect=${effect.kind} ` +
+                `cluster=${firstCount} limit=${limit} action=${retryOk ? 'retry-ok' : 'fallback'}`
+            );
           }
         }
       } catch (err) {

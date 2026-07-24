@@ -20,16 +20,38 @@ const STOPWORDS = new Set([
   'into', 'during', 'still', 'need', 'want', 'like', 'just', 'right', 'okay', 'let',
   'lets', 'more', 'some', 'any', 'one', 'two', 'also', 'covers', 'covered', 'take',
   'takes', 'took', 'perform', 'performs', 'performed', 'use', 'uses', 'used', 'using',
+  'not', 'out', 'all', 'are', 'per', 'via', 'own', 'new', 'way', 'say', 'see', 'now', 'get',
 ]);
 
-/** Topical content keywords of an utterance: lowercased, punctuation-stripped, stopword-free,
- *  length > 3. Exported for unit tests. */
+/** Suffixes stripped (longest-first) so morphological variants share a stem — pass #5 proved
+ *  the guard blind without this: "atomicity"/"atomic", "migrated"/"migration" never matched,
+ *  so the same question re-worded always slid under the shared-term threshold. */
+// 'ion' (not 'ation') so migration→migrat matches migrated→migrat; same for execution/executes.
+const SUFFIXES = ['ions', 'ion', 'ities', 'ity', 'ings', 'ing', 'ies', 'ers', 'er', 'ed', 'es', 's'];
+
+/** Crude stemmer: iteratively strip one suffix while the stem stays ≥4 chars. Exported for tests. */
+export function stem(word: string): string {
+  let w = word;
+  for (const suf of SUFFIXES) {
+    if (w.length - suf.length >= 4 && w.endsWith(suf)) {
+      w = w.slice(0, -suf.length);
+      break;
+    }
+  }
+  return w;
+}
+
+/** Topical content stems of an utterance: lowercased, punctuation-stripped, stopword-free,
+ *  length > 3, suffix-stemmed. Exported for unit tests. */
 export function contentKeywords(text: string): Set<string> {
   const words = text
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, ' ')
     .split(/[\s-]+/)
-    .filter((w) => w.length > 3 && !STOPWORDS.has(w));
+    // ≥3 chars: 3-letter terms are often THE topic ("lua", "api", "key", "aws") — pass #5's
+    // turn 5 only failed to cluster because "lua" was being dropped by a >3 filter.
+    .filter((w) => w.length >= 3 && !STOPWORDS.has(w))
+    .map(stem);
   return new Set(words);
 }
 
@@ -41,21 +63,26 @@ export function priorAiQuestions(transcript: TranscriptTurn[], limit = 8): strin
     .map((t) => t.text);
 }
 
+/** Shared-stem overlap test between one candidate utterance and one prior. Thresholds
+ *  calibrated on the pass-#5 prod transcript: every re-worded same-question turn shares ≥3
+ *  stems with a prior (lua/redis/atomic/failover/script/migrat…), while genuinely different
+ *  questions about the SAME project (memory sizing, load testing) stay at ≤2. */
+function overlaps(cand: Set<string>, prior: string): boolean {
+  const prev = contentKeywords(prior);
+  let shared = 0;
+  for (const w of cand) if (prev.has(w)) shared++;
+  return shared >= 3 || shared / cand.size >= 0.4;
+}
+
 /**
- * TRUE when `candidate` re-treads a prior question's topic: ≥4 shared content keywords with
- * any single prior question, or ≥50% of the candidate's own keywords already seen in one.
- * Tuned loose-enough that a genuinely new topic (different nouns) never trips it — an oral
- * question about, say, cache invalidation shares no content nouns with one about Lua failover.
+ * TRUE when `candidate` re-treads any prior question's topic. Tuned so a genuinely new
+ * topic (different nouns) never trips it — a question about, say, cache invalidation
+ * shares no content stems with one about Lua failover.
  */
 export function isSemanticRepeat(candidate: string, priors: string[]): boolean {
   const cand = contentKeywords(candidate);
   if (cand.size === 0) return false;
-  for (const prior of priors) {
-    const prev = contentKeywords(prior);
-    let shared = 0;
-    for (const w of cand) if (prev.has(w)) shared++;
-    if (shared >= 4 || shared / cand.size >= 0.5) return true;
-  }
+  for (const prior of priors) if (overlaps(cand, prior)) return true;
   return false;
 }
 
@@ -79,11 +106,6 @@ export function clusterCount(candidate: string, priors: string[]): number {
   const cand = contentKeywords(candidate);
   if (cand.size === 0) return 0;
   let count = 0;
-  for (const prior of priors) {
-    const prev = contentKeywords(prior);
-    let shared = 0;
-    for (const w of cand) if (prev.has(w)) shared++;
-    if (shared >= 4 || shared / cand.size >= 0.5) count++;
-  }
+  for (const prior of priors) if (overlaps(cand, prior)) count++;
   return count;
 }
