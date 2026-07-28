@@ -15,6 +15,7 @@ jest.mock('../db/interviews', () => {
       const id = `iv-${++n}`;
       const row = {
         id,
+        interviewer_id: input.interviewerId,
         status: 'invited',
         phase: (input.fsmState as { phase: string }).phase,
         fsm_state: input.fsmState,
@@ -670,5 +671,76 @@ describe('coding submit/move-on (orchestrator)', () => {
     // The problem did not advance and no CQ was recorded.
     const st = await orch.getCandidateState(id);
     expect(st.phase).toBe('coding');
+  });
+});
+
+// ─────────────── Spectate view (getSpectateView) ───────────────
+
+describe('getSpectateView', () => {
+  async function makeStartedInterview(interviewerId: string): Promise<string> {
+    const { id } = await orch.createInterview({
+      interviewerId,
+      candidateEmail: 'spec@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true });
+    return id;
+  }
+
+  test('owner can spectate an in-progress interview', async () => {
+    const id = await makeStartedInterview('owner-1');
+    const view = await orch.getSpectateView(id, 'owner-1');
+    expect(view.status).toBe('in_progress');
+    expect(typeof view.phase).toBe('string');
+    expect(Array.isArray(view.transcript)).toBe(true);
+    expect(typeof view.codeSnapshot).toBe('string');
+    expect(typeof view.durationSeconds).toBe('number');
+    // elapsedSeconds and remainingSeconds are derived from tnc_accepted_at (set by begin).
+    expect(typeof view.elapsedSeconds).toBe('number');
+    expect(typeof view.remainingSeconds).toBe('number');
+    expect(view.elapsedSeconds).toBeGreaterThanOrEqual(0);
+    expect(view.remainingSeconds).toBeGreaterThanOrEqual(0);
+    expect(view.elapsedSeconds! + view.remainingSeconds!).toBeCloseTo(view.durationSeconds, -1);
+  });
+
+  test('non-owner interviewer gets 403', async () => {
+    const id = await makeStartedInterview('owner-2');
+    await expect(orch.getSpectateView(id, 'other-interviewer')).rejects.toMatchObject({
+      status: 403,
+    });
+  });
+
+  test('invited (not-started) interview returns 409', async () => {
+    const { id } = await orch.createInterview({
+      interviewerId: 'owner-3',
+      candidateEmail: 'spec3@example.com',
+    });
+    await expect(orch.getSpectateView(id, 'owner-3')).rejects.toMatchObject({
+      status: 409,
+    });
+  });
+
+  test('hidden tests and reference solution are never present in the spectate payload', async () => {
+    const id = await makeStartedInterview('owner-4');
+    const view = await orch.getSpectateView(id, 'owner-4');
+    // Serialise the entire payload and assert it contains no hidden-test keys.
+    const payload = JSON.stringify(view);
+    expect(payload).not.toContain('hiddenTests');
+    expect(payload).not.toContain('referencePython');
+    expect(payload).not.toContain('testResults');
+    // problem (if present) must only carry public fields.
+    if (view.problem !== null) {
+      const p = view.problem as unknown as Record<string, unknown>;
+      expect('hiddenTests' in p).toBe(false);
+      expect('referencePython' in p).toBe(false);
+    }
+  });
+
+  test('calling getSpectateView twice does not mutate fsm_state', async () => {
+    const id = await makeStartedInterview('owner-5');
+    const rowBefore = JSON.stringify(await db.getById(id));
+    await orch.getSpectateView(id, 'owner-5');
+    await orch.getSpectateView(id, 'owner-5');
+    const rowAfter = JSON.stringify(await db.getById(id));
+    expect(rowAfter).toBe(rowBefore);
   });
 });

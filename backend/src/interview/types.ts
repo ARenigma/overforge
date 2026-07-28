@@ -59,6 +59,13 @@ export interface InterviewContext {
    *  lock by the quiescent path — maybeResolveHintOffer treats this like an open offer). Absent =
    *  no offer resolved yet for that question. Reset when a real answer advances the FSM. */
   hintOffer?: { codeIndex: number; status: 'declined' | 'hinted' | 'offered' };
+  /** Approach-first gate (ENGAGEMENT_INTERVENTIONS): true once the candidate has shared their
+   *  approach for the current coding problem (verbally or implicitly via a code run / submit).
+   *  Default undefined = false. Reset to false on advanceCoding (per-problem). The gate fires
+   *  AT MOST ONE non-mandatory counter_question on the first 'answer' event in the coding phase
+   *  if the approach is thin; else a brief acknowledgment. Never increments followUps so the
+   *  mandatory SUBMIT counter-question invariant is untouched. */
+  codeApproachDone?: boolean;
   config: InterviewConfig;
 }
 

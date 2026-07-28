@@ -130,7 +130,8 @@ export function advance(ctx: InterviewContext, event: InterviewEvent): StepResul
     }
 
     case 'handoff': {
-      const next = { ...ctx, phase: 'coding' as const, codeIndex: 0, followUps: 0 };
+      // codeApproachDone: false — the approach gate is fresh for the first coding problem.
+      const next = { ...ctx, phase: 'coding' as const, codeIndex: 0, followUps: 0, codeApproachDone: false };
       return { ctx: next, effect: { kind: 'ask_code', index: 0 } };
     }
 
@@ -179,13 +180,14 @@ export function advance(ctx: InterviewContext, event: InterviewEvent): StepResul
 
 /** Single-source coding advance: next core question, or wrap-up after the last. Used by BOTH the
  *  no-follow-up path and (Phase 1) the MOVE-ON firm skip, so they can never diverge. Resets
- *  followUps for the new question. Pure. */
+ *  followUps and codeApproachDone for the new question. Pure. */
 function advanceCoding(ctx: InterviewContext): StepResult {
   const { config } = ctx;
   if (ctx.codeIndex < config.coreQuestions - 1) {
     const codeIndex = ctx.codeIndex + 1;
     return {
-      ctx: { ...ctx, codeIndex, followUps: 0 },
+      // codeApproachDone: false resets the approach gate for each new coding problem.
+      ctx: { ...ctx, codeIndex, followUps: 0, codeApproachDone: false },
       effect: { kind: 'ask_code', index: codeIndex },
     };
   }

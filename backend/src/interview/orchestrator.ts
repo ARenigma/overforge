@@ -27,6 +27,8 @@ import {
   classifyOfferResponse,
   decideIdleIntervention,
   decideQuiescentIntervention,
+  decideApproachGate,
+  decideMilestoneProbe,
   OfferResolution,
 } from './intervention';
 import {
@@ -515,6 +517,135 @@ async function maybeResolveHintOffer(
   };
 }
 
+// ─────────────────────── Approach-first gate (ENGAGEMENT_INTERVENTIONS) ───────────────────────
+
+/** Canned approach acknowledgment texts — brief, humanlike, rotated deterministically.
+ *  Used when the oracle decides no counter-question is warranted (approach is satisfactory).
+ *  Not oracle-generated: the ack is a simple handoff back to coding, not an analytical turn. */
+const APPROACH_ACKS = [
+  "Sounds good — go ahead and code that up.",
+  "Makes sense. Let's see it.",
+  "Yeah, that sounds like a solid direction — get coding.",
+] as const;
+
+/**
+ * Approach-first gate: intercepts the FIRST 'answer' event in the coding phase (before any run)
+ * and treats it as the candidate's approach statement. If the oracle finds the approach thin or
+ * flawed it fires ONE non-mandatory counter_question (penalizable by the scorer). Otherwise a
+ * brief canned acknowledgment is returned. Either way, `codeApproachDone` is written to
+ * fsm_state so subsequent answers go through the normal advance path.
+ *
+ * Key invariants (§ approach-gate spec):
+ *   - Does NOT increment `followUps` → mandatory SUBMIT counter-question fires normally.
+ *   - Returns null for: flag off, non-coding, intent=submit/move_on, approach already done,
+ *     any real run already logged for this problem (implicit close).
+ *   - The non-advancing fsm_state write uses the same retry-safe requestId as the main path.
+ */
+async function maybeHandleApproach(
+  interview: Interview,
+  ctx: InterviewContext,
+  answer: string,
+  oracle: Oracle,
+  requestId?: string
+): Promise<AnswerResult | null> {
+  const gateDecision = decideApproachGate({
+    phase: ctx.phase,
+    intent: undefined, // only called for non-explicit (intent='answer') paths
+    codeApproachDone: ctx.codeApproachDone,
+    realRunCount: (interview.code_runs ?? []).filter(
+      (r) => r.codeIndex === ctx.codeIndex && !isSyntheticRow(r)
+    ).length,
+    engagementEnabled: interventionsEnabled(),
+  });
+  if (!gateDecision.gate) return null;
+
+  // Evaluate the approach (does it warrant a counter-question?).
+  let decision: import('./types').OracleDecision | undefined;
+  try {
+    decision = await withCostContext(
+      { interviewId: interview.id, kind: 'brain', phase: 'coding' },
+      () =>
+        oracle.evaluateAnswer({
+          answer,
+          code: interview.code_snapshot,
+          ctx,
+          transcript: interview.transcript ?? [],
+        })
+    );
+  } catch (err) {
+    console.error(`[orchestrator] approach evaluation failed for ${interview.id}:`, err);
+    decision = { followUp: false, reason: 'evaluation failed', signal: 0 };
+  }
+
+  // Mark approach done — written to fsm_state regardless of whether a CQ fires.
+  const newCtx: InterviewContext = { ...ctx, codeApproachDone: true };
+
+  const fireCq = decision?.followUp === true;
+  let utterance: Utterance;
+  let assist: { kind: InterventionKind; strength: number } | undefined;
+
+  if (fireCq) {
+    const problem = assignedProblem(interview, ctx.codeIndex);
+    const cqReq = {
+      kind: 'counter_question' as const,
+      ctx: newCtx,
+      transcript: [
+        ...(interview.transcript ?? []),
+        { role: 'candidate' as const, text: answer },
+      ],
+      code: interview.code_snapshot,
+      level: interview.level,
+      roleBrief: interview.role_brief,
+      problemStatement: problem?.statement ?? null,
+      mandatory: false, // NOT mandatory — penalizable by scorer per PENALIZABLE_KINDS
+      strength: 1,
+    };
+    try {
+      utterance = await withCostContext(
+        { interviewId: interview.id, kind: 'brain', phase: 'coding' },
+        () => oracle.generateIntervention(cqReq)
+      );
+    } catch (err) {
+      console.error(`[orchestrator] approach CQ generation failed for ${interview.id}:`, err);
+      utterance = await new DeterministicOracle().generateIntervention(cqReq);
+    }
+    assist = { kind: 'counter_question', strength: 1 };
+  } else {
+    // Approach satisfactory — brief canned ack, no oracle call (fast, deterministic).
+    const idx = (interview.transcript ?? []).length % APPROACH_ACKS.length;
+    utterance = { text: APPROACH_ACKS[idx], expects: 'code' };
+  }
+
+  // Persist non-advancing turn (approach is a sub-state, not an FSM step).
+  const transcript: TranscriptTurn[] = interview.transcript ?? [];
+  transcript.push({ role: 'candidate', text: answer });
+  if (utterance.text) {
+    transcript.push({
+      role: 'interviewer',
+      text: stripSpeechTags(utterance.text),
+      ...(assist ? { assist } : {}),
+    });
+  }
+  await updateInterview(interview.id, {
+    fsm_state: newCtx,
+    phase: newCtx.phase, // unchanged (still 'coding')
+    transcript,
+    ...(requestId ? { last_request_id: requestId } : {}),
+  });
+  await appendEvent(interview.id, 'utterance', {
+    text: stripSpeechTags(utterance.text),
+    approach: true,
+    ...(assist ? { intervention: true, kind: assist.kind, strength: assist.strength } : {}),
+  });
+
+  return {
+    utterance: { ...utterance, text: stripSpeechTags(utterance.text) },
+    phase: ctx.phase,
+    state: newCtx,
+    ...(assist ? { assist } : {}),
+  };
+}
+
 // ─────────────────────── Public orchestrator functions ───────────────────────
 
 export interface CreateInterviewResult {
@@ -738,6 +869,85 @@ function assertOwner(interview: Interview, interviewerId: string): void {
   if (interview.interviewer_id !== interviewerId) {
     throw Object.assign(new Error('You are not authorized for this interview'), { status: 403 });
   }
+}
+
+// ─────────────────────── Spectate view ───────────────────────
+
+export interface SpectateView {
+  status: string;
+  phase: string;
+  transcript: TranscriptTurn[];
+  codeSnapshot: string;
+  language: string | null;
+  startedAt: string | null;
+  durationSeconds: number;
+  elapsedSeconds: number | null;
+  remainingSeconds: number | null;
+  problem: PublicProblem | null;
+  codeIndex: number;
+  total: number;
+  /** Status of the last real run only — hidden-test correctness is never included. */
+  lastRunStatus: string | null;
+}
+
+/**
+ * Read-only snapshot for the interviewer spectate view. Asserts ownership (403 if not owner).
+ * Returns 409 when the interview has not yet started ('invited'). Strictly read-only: no FSM
+ * mutation, no token issuance, no side effects.
+ */
+export async function getSpectateView(
+  interviewId: string,
+  interviewerId: string
+): Promise<SpectateView> {
+  const interview = requireInterview(await getById(interviewId), interviewId);
+  assertOwner(interview, interviewerId);
+
+  if (interview.status === 'invited') {
+    throw Object.assign(new Error('Interview has not started yet'), {
+      status: 409,
+      code: 'not_started',
+    });
+  }
+
+  const ctx = interview.fsm_state as InterviewContext;
+  const allRuns = interview.code_runs ?? [];
+  // Synthetic 'Idle' markers have no meaningful run status — use only real executions.
+  const realRuns = allRuns.filter((r) => r.status !== 'Idle');
+  const lastRun = realRuns.length > 0 ? realRuns[realRuns.length - 1] : null;
+
+  const problem = assignedProblem(interview, ctx.codeIndex);
+  const total = interview.coding_problem_ids?.length || ctx.config.coreQuestions;
+
+  const durationMs = interviewDurationMs(interview);
+  let elapsedSeconds: number | null = null;
+  let remainingSeconds: number | null = null;
+  if (interview.tnc_accepted_at) {
+    const elapsed = Math.max(
+      0,
+      Math.floor((Date.now() - new Date(interview.tnc_accepted_at).getTime()) / 1000)
+    );
+    elapsedSeconds = elapsed;
+    remainingSeconds = Math.max(0, Math.floor(durationMs / 1000) - elapsed);
+  }
+
+  return {
+    status: interview.status,
+    phase: interview.phase,
+    // Strip speech tags from interviewer turns — same as getCandidateState.
+    transcript: (interview.transcript ?? []).map((t) =>
+      t.role === 'interviewer' && t.text ? { ...t, text: stripSpeechTags(t.text) } : t
+    ),
+    codeSnapshot: interview.code_snapshot ?? '',
+    language: interview.code_language ?? null,
+    startedAt: interview.tnc_accepted_at,
+    durationSeconds: Math.round(durationMs / 1000),
+    elapsedSeconds,
+    remainingSeconds,
+    problem: problem ? toPublicProblem(problem) : null,
+    codeIndex: ctx.codeIndex,
+    total,
+    lastRunStatus: lastRun?.status ?? null,
+  };
 }
 
 /** Soft-cancel — keeps the row + transcript; the candidate's invite link stops working. */
@@ -974,6 +1184,14 @@ export async function submitAnswer(
         if (ctx.phase === 'oral' || ctx.phase === 'coding') {
           const clarify = await maybeAnswerClarification(interview, ctx, answer, oracle, requestId);
           if (clarify) return clarify;
+        }
+        // Approach-first gate (ENGAGEMENT_INTERVENTIONS): the first verbal answer in the coding
+        // phase is treated as the approach statement. Fires ≤1 non-mandatory counter_question
+        // or a brief ack, WITHOUT advancing the FSM or incrementing followUps. Returns null
+        // when the gate is closed (flag off / approach done / any run already logged / not coding).
+        if (ctx.phase === 'coding') {
+          const approached = await maybeHandleApproach(interview, ctx, answer, oracle, requestId);
+          if (approached) return approached;
         }
       }
 
@@ -1652,6 +1870,118 @@ async function nudgeQuiescent(interviewId: string): Promise<NudgeResult> {
     });
 
     return { intervention: { text: safeText, kind: freshDecision.kind } };
+  });
+}
+
+// ─────────────────────── Path C: Milestone probe (ENGAGEMENT_INTERVENTIONS) ───────────────────────
+
+/**
+ * Proactive code-anchored probe fired ONCE per coding problem when the candidate first writes
+ * substantive structure (function/loop/data-structure) and is in a productive engagement state
+ * (FLOWING or STRUGGLING_PRODUCTIVE). Triggered fire-and-forget from the /snapshot route after
+ * the engagement engine signals `milestoneCrossed`. Delivery: Path C channel (synthetic Idle row
+ * with `probe` kind) — same race-safe pattern as nudgeQuiescent, under withInterviewLock.
+ *
+ * Why Path C (not run-intervention async seam): the milestone is triggered by a snapshot, not a
+ * run. The Path C channel already implements recheck-then-commit under lock (§6.2) and the
+ * in-flight guard (§6.3). Using it reuses those race-safety guarantees with no new infrastructure.
+ *
+ * Budget: consumed from the same `probeGiven` slot as run-path probes — the two cannot stack.
+ */
+export async function nudgeMilestoneProbe(interviewId: string): Promise<void> {
+  if (!interventionsEnabled()) return;
+
+  const interview = await getById(interviewId);
+  if (!interview || interview.status !== 'in_progress') return;
+  if (durationExceeded(interview)) return;
+
+  const ctx = interview.fsm_state as InterviewContext;
+  if (ctx.phase !== 'coding') return;
+
+  // Pre-check outside lock (cheap).
+  const engagementState = currentEngagement(interviewId);
+  const runs = interview.code_runs ?? [];
+  const budget = deriveRunAssistBudget(runs, ctx.codeIndex);
+  const decision = decideMilestoneProbe({
+    phase: ctx.phase,
+    engagementState,
+    budget,
+    isRunInFlight: isRunInFlight(interviewId),
+    isAnswerInFlight: isAnswerInFlight(interviewId),
+    cooldownOk: cooldownOk(interviewId),
+  });
+  if (!decision.intervene) return;
+
+  // Word outside the lock (potentially slow oracle call).
+  const problem = assignedProblem(interview, ctx.codeIndex);
+  const interventionReq = {
+    kind: 'probe' as const,
+    ctx,
+    transcript: interview.transcript ?? [],
+    code: interview.code_snapshot,
+    level: interview.level,
+    roleBrief: interview.role_brief,
+    problemStatement: problem?.statement ?? null,
+    strength: 1,
+  };
+  let utterance: Utterance;
+  try {
+    utterance = await withCostContext({ interviewId, kind: 'brain', phase: 'coding' }, () =>
+      getOracle().generateIntervention(interventionReq)
+    );
+  } catch (err) {
+    console.error(`[orchestrator] milestone-probe generation failed for ${interviewId}:`, err);
+    utterance = await new DeterministicOracle().generateIntervention(interventionReq);
+  }
+  if (!utterance.text) return;
+
+  // Recheck-then-commit under lock (§6.2).
+  await withInterviewLock(interviewId, async (): Promise<void> => {
+    const fresh = await getById(interviewId);
+    if (!fresh || fresh.status !== 'in_progress') return;
+    const freshCtx = fresh.fsm_state as InterviewContext;
+    if (freshCtx.phase !== 'coding') return;
+
+    // Re-derive all guards with fresh data.
+    const freshState = currentEngagement(interviewId);
+    const freshRuns = fresh.code_runs ?? [];
+    const freshBudget = deriveRunAssistBudget(freshRuns, freshCtx.codeIndex);
+    const freshDecision = decideMilestoneProbe({
+      phase: freshCtx.phase,
+      engagementState: freshState,
+      budget: freshBudget,
+      isRunInFlight: isRunInFlight(interviewId),
+      isAnswerInFlight: isAnswerInFlight(interviewId),
+      cooldownOk: cooldownOk(interviewId),
+    });
+    if (!freshDecision.intervene) return;
+
+    const safeText = stripSpeechTags(utterance.text);
+    const milestoneRun: RunResult = {
+      stdout: '',
+      stderr: '',
+      compileOutput: '',
+      status: 'Idle',
+      exitCode: null,
+      timeMs: null,
+      memoryKb: null,
+      codeIndex: freshCtx.codeIndex,
+      intervention: { text: safeText, kind: 'probe' },
+    };
+
+    await appendCodeRunOnly(interviewId, milestoneRun);
+    recordInterventionFired(interviewId);
+    await appendEvent(interviewId, 'utterance', {
+      text: safeText,
+      intervention: true,
+      kind: 'probe',
+      milestone: true,
+    });
+
+    console.log(
+      `[milestone-probe] fired interview=${interviewId} codeIndex=${freshCtx.codeIndex} ` +
+        `engagementState=${freshState}`
+    );
   });
 }
 

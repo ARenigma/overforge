@@ -8,7 +8,7 @@
 // module decides IF and WHICH — so the cadence is testable and can't run away.
 
 import { RunResult } from '../execution/types';
-import { InterventionKind } from './types';
+import { InterventionKind, SubmitIntent } from './types';
 import { RunSignals, isSyntheticRow, runPassed } from './signals';
 
 export interface RunInterventionPolicy {
@@ -427,4 +427,84 @@ export function classifyOfferResponse(text: string): 'accept' | 'decline' | 'oth
     return 'accept';
   }
   return 'other';
+}
+
+// ── Approach-first gate (ENGAGEMENT_INTERVENTIONS) ────────────────────────────────────────────
+// The first candidate 'answer' in the coding phase is treated as an approach statement.
+// The oracle may fire ONE non-mandatory counter_question if the approach is thin/wrong.
+// Budget: does NOT increment followUps, so the mandatory SUBMIT counter-question is unaffected.
+// Gate closes automatically when a run or submit precedes the first verbal answer.
+
+export interface ApproachGateDecision {
+  /** Whether the approach gate should fire (i.e. intercept this answer as an approach statement). */
+  gate: boolean;
+  reason: string;
+}
+
+/**
+ * Decide whether the current 'answer' event should be treated as a coding-phase approach
+ * statement (gated). Pure + deterministic — no I/O. Returns gate:false on any disqualifying
+ * condition; the orchestrator short-circuits the normal advance path when gate:true.
+ *
+ * Invariants:
+ *   - Never fires for submit/move_on (explicit coding controls).
+ *   - Never fires if the approach is already done for this problem (codeApproachDone=true).
+ *   - Never fires if a real run already happened (candidate ignored the invitation — implicit close).
+ *   - Never fires when ENGAGEMENT_INTERVENTIONS is off (caller passes engagementEnabled:false).
+ */
+export function decideApproachGate(opts: {
+  phase: string;
+  intent: SubmitIntent | undefined;
+  codeApproachDone: boolean | undefined;
+  realRunCount: number;
+  engagementEnabled: boolean;
+}): ApproachGateDecision {
+  if (!opts.engagementEnabled) return { gate: false, reason: 'engagement disabled' };
+  if (opts.phase !== 'coding') return { gate: false, reason: 'not coding' };
+  if (opts.intent === 'submit' || opts.intent === 'move_on')
+    return { gate: false, reason: 'explicit coding control' };
+  if (opts.codeApproachDone) return { gate: false, reason: 'approach already done' };
+  if (opts.realRunCount > 0) return { gate: false, reason: 'run before verbal approach (implicit close)' };
+  return { gate: true, reason: 'first verbal answer in coding phase' };
+}
+
+// ── Milestone probe (ENGAGEMENT_INTERVENTIONS, P2) ────────────────────────────────────────────
+// Fires ONCE per coding problem when the engagement engine detects that the candidate has
+// written substantive structure (function/loop/data-structure) for the first time AND the
+// engagement state is FLOWING or STRUGGLING_PRODUCTIVE. Uses the same budget as the run-path
+// ladder (probeGiven) so it cannot stack with a run-path probe.
+
+export interface MilestoneProbeDecision {
+  intervene: boolean;
+  reason: string;
+}
+
+const QUIET_MILESTONE: MilestoneProbeDecision = Object.freeze({ intervene: false, reason: '' });
+
+/**
+ * Decide whether to fire a proactive code-anchored probe when the candidate crosses the
+ * first structural milestone in their code. Pure + deterministic — no I/O.
+ *
+ * Guards (§6.3/§6.5):
+ *   - Only for FLOWING or STRUGGLING_PRODUCTIVE (productive coding, not degrading).
+ *   - Not while a run or answer is in-flight (quiescence boundary only).
+ *   - Cross-path cooldown must have elapsed.
+ *   - Budget: no prior probe/offer/hint for this problem (shared ladder budget).
+ */
+export function decideMilestoneProbe(opts: {
+  phase: string;
+  engagementState: string | null;
+  budget: RunAssistBudget;
+  isRunInFlight: boolean;
+  isAnswerInFlight: boolean;
+  cooldownOk: boolean;
+}): MilestoneProbeDecision {
+  if (opts.phase !== 'coding') return QUIET_MILESTONE;
+  if (opts.engagementState !== 'FLOWING' && opts.engagementState !== 'STRUGGLING_PRODUCTIVE')
+    return QUIET_MILESTONE;
+  if (opts.isRunInFlight || opts.isAnswerInFlight) return QUIET_MILESTONE;
+  if (!opts.cooldownOk) return QUIET_MILESTONE;
+  if (opts.budget.probeGiven || opts.budget.offerMade || opts.budget.deepHintGiven)
+    return QUIET_MILESTONE;
+  return { intervene: true, reason: 'milestone:first-structure-in-code' };
 }

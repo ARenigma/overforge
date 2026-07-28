@@ -581,48 +581,48 @@ describe('ingestSnapshot', () => {
   });
 
   test('no seq → always accepted (backward-compat)', () => {
-    const accepted = ingestSnapshot(testId, { codeIndex: 0, code: 'hello' });
-    expect(accepted).toBe(true);
+    const res = ingestSnapshot(testId, { codeIndex: 0, code: 'hello' });
+    expect(res.accepted).toBe(true);
   });
 
   test('seq=0 on fresh buffer → accepted, sets lastSeq=0', () => {
-    expect(ingestSnapshot(testId, { seq: 0, codeIndex: 0, code: 'a' })).toBe(true);
+    expect(ingestSnapshot(testId, { seq: 0, codeIndex: 0, code: 'a' }).accepted).toBe(true);
   });
 
   test('seq=1 after seq=0 → accepted (monotonically increasing)', () => {
     ingestSnapshot(testId, { seq: 0, codeIndex: 0, code: 'a' });
-    expect(ingestSnapshot(testId, { seq: 1, codeIndex: 0, code: 'ab' })).toBe(true);
+    expect(ingestSnapshot(testId, { seq: 1, codeIndex: 0, code: 'ab' }).accepted).toBe(true);
   });
 
   test('duplicate seq (seq=0 twice) → rejected (stale)', () => {
     ingestSnapshot(testId, { seq: 0, codeIndex: 0, code: 'a' });
-    expect(ingestSnapshot(testId, { seq: 0, codeIndex: 0, code: 'b' })).toBe(false);
+    expect(ingestSnapshot(testId, { seq: 0, codeIndex: 0, code: 'b' }).accepted).toBe(false);
   });
 
   test('lower seq after higher seq → rejected', () => {
     ingestSnapshot(testId, { seq: 5, codeIndex: 0, code: 'a' });
-    expect(ingestSnapshot(testId, { seq: 3, codeIndex: 0, code: 'b' })).toBe(false);
+    expect(ingestSnapshot(testId, { seq: 3, codeIndex: 0, code: 'b' }).accepted).toBe(false);
   });
 
   test('page reload (seq restarts at 1) re-anchors instead of rejecting — autosave survives', () => {
     ingestSnapshot(testId, { seq: 47, codeIndex: 0, code: 'a' });
     // Reload: client counter restarts. seq=1 must be accepted as a new client session…
-    expect(ingestSnapshot(testId, { seq: 1, codeIndex: 0, code: 'b' })).toBe(true);
+    expect(ingestSnapshot(testId, { seq: 1, codeIndex: 0, code: 'b' }).accepted).toBe(true);
     // …and the stream continues monotonically from the new anchor.
-    expect(ingestSnapshot(testId, { seq: 2, codeIndex: 0, code: 'c' })).toBe(true);
-    expect(ingestSnapshot(testId, { seq: 2, codeIndex: 0, code: 'd' })).toBe(false);
+    expect(ingestSnapshot(testId, { seq: 2, codeIndex: 0, code: 'c' }).accepted).toBe(true);
+    expect(ingestSnapshot(testId, { seq: 2, codeIndex: 0, code: 'd' }).accepted).toBe(false);
   });
 
   test('much-lower seq (gap ≥ 10) also re-anchors (session boundary without seq=1)', () => {
     ingestSnapshot(testId, { seq: 60, codeIndex: 0, code: 'a' });
-    expect(ingestSnapshot(testId, { seq: 12, codeIndex: 0, code: 'b' })).toBe(true);
+    expect(ingestSnapshot(testId, { seq: 12, codeIndex: 0, code: 'b' }).accepted).toBe(true);
   });
 
   test('codeIndex change resets seq space (any seq accepted after reset)', () => {
     ingestSnapshot(testId, { seq: 10, codeIndex: 0, code: 'a' });
     // New question: seq=0 should be accepted even though 0 < 10
-    const accepted = ingestSnapshot(testId, { seq: 0, codeIndex: 1, code: 'b' });
-    expect(accepted).toBe(true);
+    const res = ingestSnapshot(testId, { seq: 0, codeIndex: 1, code: 'b' });
+    expect(res.accepted).toBe(true);
   });
 
   test('codeIndex change resets feature stream (buffer cleared)', () => {
@@ -633,7 +633,7 @@ describe('ingestSnapshot', () => {
     // Switch to question 1 — buffer should reset
     ingestSnapshot(testId, { seq: 0, codeIndex: 1, code: 'new question code' });
     // After reset, the next seq=1 snapshot for question 1 should be accepted
-    expect(ingestSnapshot(testId, { seq: 1, codeIndex: 1, code: 'more code' })).toBe(true);
+    expect(ingestSnapshot(testId, { seq: 1, codeIndex: 1, code: 'more code' }).accepted).toBe(true);
   });
 });
 
@@ -725,7 +725,7 @@ describe('evictEngagement', () => {
     ingestSnapshot(id, { seq: 100, codeIndex: 0, code: 'a' });
     evictEngagement(id);
     // After eviction, the buffer is gone; seq=0 must be accepted (fresh start)
-    expect(ingestSnapshot(id, { seq: 0, codeIndex: 0, code: 'b' })).toBe(true);
+    expect(ingestSnapshot(id, { seq: 0, codeIndex: 0, code: 'b' }).accepted).toBe(true);
     evictEngagement(id);
   });
 

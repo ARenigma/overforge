@@ -66,6 +66,8 @@ interface EnhancedCodeMirrorEditorProps {
   pasteDisabled?: boolean;
   /** Called when a paste/drop is blocked, so the room can show a hint. */
   onPasteBlockedAction?: () => void;
+  /** Render the editor in read-only mode (spectate view). No edits accepted. */
+  readOnly?: boolean;
 }
 
 export function EnhancedCodeMirrorEditor({
@@ -78,6 +80,7 @@ export function EnhancedCodeMirrorEditor({
   isExecuting = false,
   pasteDisabled = false,
   onPasteBlockedAction,
+  readOnly = false,
 }: EnhancedCodeMirrorEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -143,6 +146,10 @@ export function EnhancedCodeMirrorEditor({
       getLanguageExtension(language),
       indentUnit.of(' '.repeat(tabSize)),
       keymap.of([...searchKeymap, ...customKeymap]),
+      // Read-only mode: disable all input (spectate view).
+      ...(readOnly
+        ? [EditorState.readOnly.of(true), EditorView.editable.of(false)]
+        : []),
       // Integrity: block paste + drop into the editor unless explicitly allowed.
       EditorView.domEventHandlers({
         paste(event) {
@@ -257,7 +264,7 @@ export function EnhancedCodeMirrorEditor({
         view.destroy();
       }
     };
-  }, [language, tabSize, isExecuting, pasteDisabled, themeVersion]);
+  }, [language, tabSize, isExecuting, pasteDisabled, readOnly, themeVersion]);
 
   // Handle value changes (e.g., when switching between questions)
   useEffect(() => {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import NextLink from 'next/link';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/client';
 import { RescoreButton } from './rescore-button';
@@ -15,7 +16,7 @@ import {
   type CostSummary,
 } from '@/lib/interview-detail';
 import { Button } from '@/components/ui/button';
-import { Link } from 'lucide-react';
+import { Link, Radio } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 
@@ -186,6 +187,20 @@ export function LiveInterview({ initial }: { initial: InterviewDetail }) {
             >
               <Link className="h-3.5 w-3.5" />
               Copy invite link
+            </Button>
+          )}
+          {/* Spectate live — only available while the interview is in progress. */}
+          {iv.status === 'in_progress' && (
+            <Button
+              asChild
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 border-primary/40 text-xs text-primary hover:bg-primary/10 hover:text-primary"
+            >
+              <NextLink href={`/dashboard/${iv.id}/spectate`}>
+                <Radio className="h-3.5 w-3.5" aria-hidden="true" />
+                Spectate live
+              </NextLink>
             </Button>
           )}
           <StatusBadge intent={meta.intent}>{meta.label}</StatusBadge>

@@ -126,6 +126,10 @@ interface EngagementBuffer {
   /** Timestamp of the last fired intervention (any path). 0 = never. */
   lastInterventionTs: number;
   createdAt: number;
+  /** True once a structural milestone (function/loop/data-structure) has been detected for the
+   *  current codeIndex. Used to fire the milestone probe exactly once per coding problem. Reset
+   *  to false on codeIndex change (same discipline as the feature stream hard-reset). */
+  milestoneCrossed: boolean;
 }
 
 // ─────────────────────── Constants ───────────────────────
@@ -188,6 +192,7 @@ function getOrCreate(interviewId: string): EngagementBuffer {
     cooldownThresholdMs,
     lastInterventionTs: 0,
     createdAt: Date.now(),
+    milestoneCrossed: false,
   };
   buffers.set(interviewId, buf);
   return buf;
@@ -204,6 +209,30 @@ function sweepIfStale(interviewId: string, buf: EngagementBuffer, now: number): 
   }
   // Enforce ring cap.
   while (buf.entries.length > RING_CAP) buf.entries.shift();
+  return false;
+}
+
+// ─────────────────────── Structural milestone detection ───────────────────────
+
+/**
+ * True when the candidate's code contains at least one complete structural element: a function
+ * definition, a loop, or a major data structure (hash map / set). Used to detect the "crossed
+ * from planning to implementation" milestone for the proactive code-anchored probe.
+ *
+ * Mirrors the anchor heuristics in oracle.ts `codeAnchoredProbe` — same signals, pure function.
+ * Returns false for short or blank code (< 30 chars) to avoid false positives on skeletons.
+ */
+export function hasMilestoneStructure(code: string): boolean {
+  const src = code.trim();
+  if (src.length < 30) return false;
+  // Function / method definition (Python def, JS/TS function, Go func, Rust fn)
+  if (/\b(?:def|function|func|fn)\s+\w+/.test(src)) return true;
+  // Any for/while loop
+  if (/\b(for|while)\b/.test(src)) return true;
+  // Hash map / dictionary usage
+  if (/(\bdict\(|defaultdict\b|new Map\b|HashMap\b|\{[^}\n]*:[^}\n]*\})/.test(src)) return true;
+  // Set usage
+  if (/(\bset\(\)|new Set\b|HashSet\b)/.test(src)) return true;
   return false;
 }
 
@@ -475,29 +504,35 @@ function maybeFireTransition(
 /**
  * Ingest a code snapshot into the engagement engine.
  *
- * Returns `false` when the snapshot's `seq` is stale — the caller (snapshot route)
- * MUST return 204 without writing to the DB. Returns `true` when accepted; the caller
- * proceeds with the normal updateInterview persistence.
+ * Returns `{ accepted: false }` when the snapshot's `seq` is stale — the caller (snapshot
+ * route) MUST return 204 without writing to the DB. Returns `{ accepted: true }` when
+ * accepted; the caller proceeds with the normal updateInterview persistence.
+ *
+ * `milestoneCrossed` is true the FIRST time a snapshot for this codeIndex contains a
+ * structural milestone (function/loop/data-structure) — the caller fires the proactive
+ * code-anchored probe fire-and-forget when this is true and ENGAGEMENT_INTERVENTIONS is on.
  *
  * Side-effect: fires-and-forgets an appendEvent on state transitions.
  */
 export function ingestSnapshot(
   interviewId: string,
   opts: { seq?: number; codeIndex: number; code: string; ts?: number }
-): boolean {
-  if (!shadowEnabled()) return true; // pass-through; caller handles persistence
+): { accepted: boolean; milestoneCrossed: boolean } {
+  if (!shadowEnabled()) return { accepted: true, milestoneCrossed: false }; // pass-through
 
   const now = opts.ts ?? Date.now();
   const buf = getOrCreate(interviewId);
 
-  if (sweepIfStale(interviewId, buf, now)) return true; // cold-start after TTL eviction
+  if (sweepIfStale(interviewId, buf, now)) return { accepted: true, milestoneCrossed: false };
 
-  // Hard-reset the feature stream on codeIndex change (§6.1).
+  // Hard-reset the feature stream on codeIndex change (§6.1). Also resets milestoneCrossed
+  // so the probe can fire once per coding problem.
   const lastEntry = buf.entries[buf.entries.length - 1];
   const lastCodeIndex = lastEntry?.codeIndex ?? -1;
   if (lastCodeIndex !== -1 && lastCodeIndex !== opts.codeIndex) {
     buf.entries = [];
     buf.lastSeq = -1;
+    buf.milestoneCrossed = false;
   }
 
   // Stale seq rejection (§6.1). Back-compat: accept unconditionally when no seq supplied.
@@ -508,7 +543,7 @@ export function ingestSnapshot(
   if (opts.seq !== undefined) {
     if (opts.seq <= buf.lastSeq) {
       const isNewClientSession = opts.seq === 1 || buf.lastSeq - opts.seq >= 10;
-      if (!isNewClientSession) return false;
+      if (!isNewClientSession) return { accepted: false, milestoneCrossed: false };
     }
     buf.lastSeq = opts.seq;
   }
@@ -554,7 +589,15 @@ export function ingestSnapshot(
   const scoped = buf.entries.filter((e) => e.codeIndex === opts.codeIndex);
   maybeFireTransition(interviewId, buf, scoped, now, entry.seq);
 
-  return true;
+  // Milestone detection: first time this codeIndex's snapshot contains substantive structure.
+  // Returns true exactly once per codeIndex so the caller fires the probe once.
+  let milestoneCrossed = false;
+  if (!buf.milestoneCrossed && hasMilestoneStructure(opts.code)) {
+    buf.milestoneCrossed = true;
+    milestoneCrossed = true;
+  }
+
+  return { accepted: true, milestoneCrossed };
 }
 
 /**
@@ -581,10 +624,11 @@ export function ingestRun(
   const buf = getOrCreate(interviewId);
   if (sweepIfStale(interviewId, buf, now)) return;
 
-  // Hard-reset on codeIndex change (§6.1).
+  // Hard-reset on codeIndex change (§6.1). Also resets milestoneCrossed (per-problem).
   const lastEntry = buf.entries[buf.entries.length - 1];
   if (lastEntry && lastEntry.codeIndex !== opts.codeIndex) {
     buf.entries = [];
+    buf.milestoneCrossed = false;
   }
 
   // Diff vs the previous run's lineHashes (run-to-run comparison for WHEEL_SPINNING).

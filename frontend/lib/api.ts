@@ -519,3 +519,38 @@ export async function fetchCodingProblem(
     return null;
   }
 }
+
+// ── Spectate endpoint ─────────────────────────────────────────────────────────
+
+/** Read-only interviewer spectate view — polls GET /api/interviews/:id/spectate. */
+export interface SpectateView {
+  status: string;
+  phase: string;
+  transcript: TranscriptTurn[];
+  codeSnapshot: string;
+  language: string | null;
+  startedAt: string | null;
+  durationSeconds: number;
+  elapsedSeconds: number | null;
+  remainingSeconds: number | null;
+  problem: PublicProblem | null;
+  codeIndex: number;
+  total: number;
+  /** Status of the last real run only — hidden-test correctness is never included. */
+  lastRunStatus: string | null;
+}
+
+/**
+ * GET /api/interviews/:id/spectate
+ * Read-only live view for the owning interviewer. Requires a valid Supabase access token.
+ * Returns 409 when the interview has not yet started.
+ */
+export async function getSpectateView(
+  accessToken: string,
+  id: string
+): Promise<SpectateView> {
+  return apiFetch<SpectateView>(`/api/interviews/${id}/spectate`, {
+    method: 'GET',
+    accessToken,
+  });
+}

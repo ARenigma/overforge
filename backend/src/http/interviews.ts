@@ -442,9 +442,10 @@ router.post('/:id/snapshot', async (req: Request, res: Response): Promise<void> 
         ? seqBody
         : undefined;
 
-    // Feed the engagement engine. Returns false for a stale seq — respond 204 without writing
-    // to the DB so the run-written snapshot is never overwritten by an out-of-order client flush.
-    const accepted = ingestSnapshot(id, { seq, codeIndex: ctx.codeIndex, code });
+    // Feed the engagement engine. Returns { accepted: false } for a stale seq — respond 204
+    // without writing to the DB so the run-written snapshot is never overwritten by an
+    // out-of-order client flush. milestoneCrossed signals the first structural-code milestone.
+    const { accepted, milestoneCrossed } = ingestSnapshot(id, { seq, codeIndex: ctx.codeIndex, code });
     if (!accepted) {
       res.status(204).end();
       return;
@@ -457,6 +458,15 @@ router.post('/:id/snapshot', async (req: Request, res: Response): Promise<void> 
       patch.code_language = language;
     }
     await updateInterview(id, patch);
+
+    // Milestone probe (ENGAGEMENT_INTERVENTIONS): fire-and-forget when the candidate first
+    // writes substantive structure (function/loop/data-structure) for this coding problem.
+    // Never awaited — failure is logged; the response is already returning 204.
+    if (milestoneCrossed) {
+      void orchestrator.nudgeMilestoneProbe(id).catch((err: unknown) => {
+        console.error(`[milestone] probe failed for ${id}:`, err);
+      });
+    }
 
     res.status(204).end();
   } catch (err) {
@@ -913,6 +923,25 @@ router.post('/:id/proctor', async (req: Request, res: Response): Promise<void> =
     });
 
     res.status(204).end();
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ─────────────────────── GET /api/interviews/:id/spectate ───────────────────────
+// Interviewer read-only spectate view. The owning interviewer (interviewer_id must match
+// req.userId) can poll this while a candidate's interview is live: it returns phase/status,
+// the tag-stripped transcript, the current coding problem (public fields only — never hidden
+// tests or the reference solution), the latest code snapshot + language, elapsed/remaining time,
+// and the last run's status. Strictly read-only: no FSM mutation, no token issuance, no side
+// effects. Rate-limited to 120 per 10 min per user (safe polling cadence of ~3s). Returns 409
+// when the interview is still 'invited' (not started yet) so the UI can say "not started yet".
+
+router.get('/:id/spectate', requireInterviewer, async (req: Request, res: Response): Promise<void> => {
+  try {
+    await enforceRateLimit(`spectate:${req.userId}`, { limit: 120, windowMs: 600_000 });
+    const view = await orchestrator.getSpectateView(req.params.id, req.userId!);
+    res.json(view);
   } catch (err) {
     sendError(res, err);
   }
