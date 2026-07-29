@@ -4,8 +4,7 @@ import {
   createMinimaxClient,
   createFailoverClient,
   MinimaxOracle,
-  parseDecision,
-} from './minimax';
+  parseDecision, renderRecentTranscript } from './minimax';
 import type { MinimaxClient } from './minimax';
 import { DEFAULT_CONFIG } from './types';
 
@@ -272,5 +271,38 @@ describe('classifyAndAnswer parse safety (FIX 3)', () => {
     const oracle = new MinimaxOracle(down);
     const result = await oracle.classifyAndAnswer({ text: 'any question?', ctx, transcript: [] });
     expect(result).toEqual({ intent: 'answer' });
+  });
+});
+
+// ─────────── renderRecentTranscript: bounded prompt (real-session latency finding) ───────────
+
+describe('renderRecentTranscript', () => {
+  test('caps total characters, keeping the MOST RECENT turns', () => {
+    const long = Array.from({ length: 60 }, (_, i) => ({
+      role: i % 2 ? 'candidate' : 'interviewer',
+      text: `turn ${i} ${'x'.repeat(400)}`,
+    }));
+    const out = renderRecentTranscript(long, 2000);
+    expect(out.length).toBeLessThanOrEqual(2000);
+    // The last turn must survive; the earliest must be dropped.
+    expect(out).toContain('turn 59');
+    expect(out).not.toContain('turn 0 ');
+  });
+
+  test('caps each individual turn so one rambling answer cannot crowd out the rest', () => {
+    const out = renderRecentTranscript([
+      { role: 'candidate', text: 'y'.repeat(5000) },
+      { role: 'interviewer', text: 'and then?' },
+    ]);
+    expect(out).toContain('and then?');
+    expect(out.length).toBeLessThan(5000);
+  });
+
+  test('short transcripts pass through unchanged', () => {
+    const out = renderRecentTranscript([
+      { role: 'interviewer', text: 'hello' },
+      { role: 'candidate', text: 'hi' },
+    ]);
+    expect(out).toBe('interviewer: hello\ncandidate: hi');
   });
 });

@@ -78,6 +78,21 @@ _MAX_TURN_FRAMES = int(_MAX_TURN_S * _SR / _VAD_FRAME)
 _STREAM_PAUSE_S = 0.4
 _STREAM_MIN_SEG_FRAMES = int(2.5 * _SR / _VAD_FRAME)
 
+# Continuation grace: how long to hold a SHORT/incomplete end-of-turn before treating it as the
+# candidate's answer. Only short commits pay this (see _looks_incomplete), so a normal answer keeps
+# today's latency. 0.6 s is the pause a person leaves mid-sentence without ceding the floor.
+_CONTINUATION_GRACE_S = 0.6
+# A commit at/below this word count is a candidate for the grace hold ("there?", "and then", "so").
+_INCOMPLETE_MAX_WORDS = 4
+# Trailing words that mean the thought is unfinished regardless of length ("...because", "and").
+_DANGLING_TAIL = frozenset(
+    {
+        "and", "but", "or", "so", "because", "since", "if", "when", "while", "that", "which",
+        "the", "a", "an", "to", "of", "for", "with", "like", "then", "than", "is", "was", "we",
+        "i", "it", "there",
+    }
+)
+
 # Known STT silence-hallucinations. faster-whisper invents filler like "thank you" / "you" / "bye"
 # on near-silent or noise-only audio; the bare ``if not transcript`` check only catches the empty
 # string, so these would otherwise render as a candidate turn (the "I said nothing but 'thank you'
@@ -118,6 +133,39 @@ def _is_filler_only(text: str) -> bool:
     """True if every token in ``text`` is a filler interjection (a thinking pause, not an answer)."""  # noqa: E501
     tokens = re.findall(r"[a-z0-9]+", text.lower())
     return len(tokens) > 0 and all(tok in _FILLER_WORDS for tok in tokens)
+
+
+def _looks_incomplete(text: str) -> bool:
+    """True when a committed transcript reads like a mid-thought pause rather than a finished answer.
+
+    Two independent tests, both cheap and language-agnostic enough for our use:
+      * very few words (``"there?"``, ``"we used a queue"``) — a real answer to an interview
+        question is longer, and a 1–4 word commit is overwhelmingly a clipped fragment;
+      * a dangling final word (``"...and"``, ``"...because"``) — grammatically unfinished at any
+        length.
+
+    Used ONLY to decide whether to hold the floor briefly (see ``_CONTINUATION_GRACE_S``); it never
+    drops a turn, so a false positive costs 0.6 s and a false negative costs nothing new.
+    """
+    tokens = re.findall(r"[a-z0-9']+", text.lower())
+    if not tokens:
+        return False  # empty/false-fire is handled by the existing guards, not here
+    return len(tokens) <= _INCOMPLETE_MAX_WORDS or tokens[-1] in _DANGLING_TAIL
+
+
+def _continues(held: str, nxt: str) -> bool:
+    """True when ``nxt`` looks like the SAME thought as ``held``, finished.
+
+    AssemblyAI re-commits the fuller sentence after a mid-thought cut, so the continuation shares
+    the fragment's opening words ("there?" → "There, I mean the p99 latency…"). A genuinely new
+    turn shares nothing and must be handled as its own turn — merging the two would silently drop
+    the first answer.
+    """
+    held_toks = re.findall(r"[a-z0-9']+", held.lower())
+    nxt_toks = re.findall(r"[a-z0-9']+", nxt.lower())
+    if not held_toks or len(nxt_toks) <= len(held_toks):
+        return False
+    return nxt_toks[: len(held_toks)] == held_toks or held_toks[0] == nxt_toks[0]
 
 # Backend FSM phases that mean the interview is over. The backend normalizes every terminal path to
 # 'done'; 'scoring' is accepted defensively in case a transitional state ever leaks through.
@@ -214,6 +262,10 @@ class VoiceSession:
         self._streamer_started = False
         self._fell_back = False
         self._stream_frames = 0  # frames forwarded since the last re-arm (telemetry audio_s)
+        # Continuation grace state: when the last text-bearing partial arrived, and a monotonic
+        # end-of-turn counter so a newer commit always supersedes one still inside its grace hold.
+        self._last_partial_at = 0.0
+        self._eot_seq = 0
         self._pump_frame_task: asyncio.Task[AudioArray] | None = None
         self._pump_event_task: asyncio.Task[TurnEvent] | None = None
         self._pump_event_gen = 0  # _turn_gen at event-waiter creation — stale-event guard
@@ -402,7 +454,55 @@ class VoiceSession:
             self._fallback_to_local()
             return None
         if self._state is not _State.LISTENING or not event.end_of_turn:
+            # A partial with text means the candidate is (still) speaking — the continuation-grace
+            # check below reads this timestamp to decide whether a short commit was really the end
+            # of a thought or just a pause mid-sentence.
+            if event.transcript.strip():
+                self._last_partial_at = time.monotonic()
             return None  # stale (belt-and-braces; re-arm drains the queue) or a partial
+
+        # ── Continuation grace (real-session finding: the interviewer answered "there?") ──
+        # AssemblyAI's punctuation-based EOT sometimes commits mid-thought. For a SHORT/incomplete
+        # commit only, hold briefly WITHOUT disarming the mic: if a fresh partial lands in the
+        # window the candidate simply paused, so we absorb this commit and keep listening (AAI will
+        # emit a fuller end-of-turn). Substantial commits skip the hold entirely, so normal turns
+        # pay ZERO added latency. Versioned by _eot_seq so a newer commit always supersedes.
+        streamer = self._streamer
+        if _looks_incomplete(event.transcript) and streamer is not None:
+            # We hold the floor by DRAINING the streamer's queue ourselves for the grace window:
+            # pump() is blocked awaiting this handler, so a plain sleep would never see the very
+            # partials we are waiting for. A text-bearing partial ⇒ the candidate resumed (absorb);
+            # a fuller end-of-turn ⇒ supersede this commit and answer that instead.
+            deadline = time.monotonic() + _CONTINUATION_GRACE_S
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                try:
+                    nxt = await asyncio.wait_for(streamer.events.get(), timeout=remaining)
+                except (asyncio.TimeoutError, TimeoutError):
+                    break
+                if nxt.fatal:
+                    self._fallback_to_local()
+                    return None
+                if nxt.end_of_turn:
+                    # Only a commit that CONTINUES the held fragment may supersede it. A genuinely
+                    # separate turn is pushed back for the next pump iteration, so two quick turns
+                    # are never merged (and the first is never dropped).
+                    if _continues(event.transcript, nxt.transcript):
+                        event = nxt  # fuller commit — answer the complete thought
+                    else:
+                        streamer.events.put_nowait(nxt)
+                    break
+                if nxt.transcript.strip():
+                    self._last_partial_at = time.monotonic()
+                    logger.debug(
+                        "Continuation grace absorbed a short commit (%r) — candidate resumed.",
+                        event.transcript.strip()[:60],
+                    )
+                    return None  # still LISTENING; nothing was disarmed, no re-arm needed
+            if self._state is not _State.LISTENING:
+                return None  # state moved on under us (barge-in / terminal / re-arm)
         # A real turn is committing — cancel the idle probe watchdog so it doesn't fire
         # concurrently with turn processing or re-arm.
         self._cancel_idle_watchdog()

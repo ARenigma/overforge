@@ -33,7 +33,7 @@ from contracts import (  # noqa: E402
     Utterance,
 )
 from endpointing import EotEvent  # noqa: E402
-from session import _MAX_TURN_FRAMES, VoiceSession  # noqa: E402
+from session import _MAX_TURN_FRAMES, _looks_incomplete, VoiceSession  # noqa: E402
 
 _FRAME = 512
 
@@ -1218,3 +1218,87 @@ async def test_idle_probe_cancelled_on_session_close(monkeypatch) -> None:
     pump_task.cancel()
     await asyncio.gather(pump_task, return_exceptions=True)
     await session.aclose()
+
+# ─────────────── Continuation grace (real-session finding: answered "there?") ───────────────
+
+
+def test_looks_incomplete_classifies_real_prod_fragments() -> None:
+    """The 2026-07-26 session had the interviewer answer the fragment "there?" as if it were an
+    answer. Short commits and dangling tails must be recognised as mid-thought; real answers not."""
+    # Fragments the interviewer must NOT treat as a finished answer.
+    for frag in ("there?", "and then", "yes", "we scaled it because", "so"):
+        assert _looks_incomplete(frag) is True, frag
+    # Substantial answers must skip the grace hold entirely (zero added latency).
+    for answer in (
+        "We used a load balancer and queue-based streaming.",
+        "The Lua script ran EVAL on the Redis primary for the relevant hash slot.",
+    ):
+        assert _looks_incomplete(answer) is False, answer
+    # Empty is handled by the existing false-fire guard, not here.
+    assert _looks_incomplete("") is False
+
+
+async def test_short_commit_absorbed_when_candidate_resumes() -> None:
+    """A short end-of-turn followed by a fresh partial = the candidate merely paused. The commit is
+    absorbed (never submitted to the brain) and the session keeps listening; the eventual complete
+    thought is what reaches the brain. pump() returns one result per call, so the caller loops."""
+    brain = FakeBrain(results=[AnswerResult(Utterance("next q", "voice"), "oral", {})])
+    session, streamer = _stream_session(brain)
+    q: asyncio.Queue = asyncio.Queue()
+
+    results: list = []
+
+    async def driver() -> None:
+        # Mirror the WS layer: call pump repeatedly, keeping every non-None turn.
+        while len(results) == 0:
+            r = await session.pump(q)
+            if r is not None:
+                results.append(r)
+
+    drive = asyncio.create_task(driver())
+    await asyncio.sleep(0)
+
+    # Short commit enters its grace hold…
+    streamer.events.put_nowait(TurnEvent(transcript="there?", end_of_turn=True, formatted=True))
+    await asyncio.sleep(0.05)
+    # …and the candidate resumes mid-hold (a text-bearing partial) → absorbed.
+    streamer.events.put_nowait(
+        TurnEvent(transcript="there? I mean the p99", end_of_turn=False, formatted=False)
+    )
+    await asyncio.sleep(0.1)
+    # Then finishes the thought properly.
+    streamer.events.put_nowait(
+        TurnEvent(
+            transcript="There, I mean the p99 latency was the bottleneck we measured.",
+            end_of_turn=True,
+            formatted=True,
+        )
+    )
+    await asyncio.wait_for(drive, timeout=3.0)
+
+    # The brain saw ONLY the complete thought — never the "there?" fragment.
+    assert len(brain.calls) == 1
+    assert "p99" in brain.calls[0][2]
+    assert results[0].utterance.text == "next q"
+
+
+async def test_substantial_commit_skips_grace_and_answers_immediately() -> None:
+    """Regression guard on latency: a normal answer must not pay the grace hold."""
+    brain = FakeBrain(results=[AnswerResult(Utterance("next q", "voice"), "oral", {})])
+    session, streamer = _stream_session(brain)
+    pump_task = asyncio.create_task(session.pump(asyncio.Queue()))
+    await asyncio.sleep(0)
+
+    started = time.monotonic()
+    streamer.events.put_nowait(
+        TurnEvent(
+            transcript="We used a load balancer and queue-based streaming to absorb the bursts.",
+            end_of_turn=True,
+            formatted=True,
+        )
+    )
+    result = await pump_task
+    elapsed = time.monotonic() - started
+
+    assert result is not None and len(brain.calls) == 1
+    assert elapsed < 0.5, f"substantial answer paid a grace hold ({elapsed:.2f}s)"

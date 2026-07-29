@@ -439,11 +439,31 @@ const KIND_GUIDANCE: Record<InterventionKind, string> = {
     'The candidate just got their solution working after a tough stretch. Validate what SPECIFICALLY fixed it — cite their actual code or change, never say "good job" generically. Then gently nudge them forward (complexity? edge cases? next question?). <soft>Warm and brief — 1–2 sentences.</soft>',
 };
 
+/** Render the trailing transcript for a prompt, bounded in BOTH turns and characters.
+ *
+ *  Real-session finding (2026-07-26): oracle latency climbed 872ms → 1590ms across one interview
+ *  because a 40-turn window with no per-turn cap grows without limit — by mid-interview the prompt
+ *  dominates time-to-first-token. Caps: TRANSCRIPT_WINDOW turns, TURN_CHAR_CAP per turn, and
+ *  TRANSCRIPT_CHAR_BUDGET overall (oldest dropped first, so the most recent exchange always
+ *  survives). Older context is carried by the observer notes, not by raw transcript bulk.
+ */
+export function renderRecentTranscript(
+  transcript: { role: string; text: string }[],
+  budget = TRANSCRIPT_CHAR_BUDGET
+): string {
+  const lines: string[] = [];
+  let used = 0;
+  for (const t of transcript.slice(-TRANSCRIPT_WINDOW).reverse()) {
+    const line = `${t.role}: ${t.text.slice(0, TURN_CHAR_CAP)}`;
+    if (used + line.length > budget) break;
+    lines.push(line);
+    used += line.length;
+  }
+  return lines.reverse().join('\n');
+}
+
 function buildInterventionPrompt(req: InterventionRequest): string {
-  const recent = req.transcript
-    .slice(-TRANSCRIPT_WINDOW)
-    .map((t) => `${t.role}: ${t.text}`)
-    .join('\n');
+  const recent = renderRecentTranscript(req.transcript);
   const runs = (req.recentRuns ?? [])
     .map((r) => `- ${r.status}${r.stderr ? ` (stderr: ${r.stderr.slice(0, 160)})` : ''}`)
     .join('\n');
@@ -506,6 +526,10 @@ function utteranceMode(kind: string): Utterance['expects'] {
 // The full interview is short (~12 turns) and fits the model context comfortably, so the
 // interviewer sees the whole conversation — earlier oral answers inform later questions.
 const TRANSCRIPT_WINDOW = 40;
+/** Per-turn character cap inside a rendered prompt (a rambling answer can't crowd out the rest). */
+const TURN_CHAR_CAP = 500;
+/** Total character budget for the rendered transcript — bounds time-to-first-token growth. */
+const TRANSCRIPT_CHAR_BUDGET = 6000;
 
 // Seniority calibration for question generation. Same level count for everyone (2 oral + 2
 // coding, ≤3 follow-ups) — only the difficulty/depth of each question changes.
@@ -603,10 +627,7 @@ function effectGuidance(effect: Effect): string {
 }
 
 function buildUtterancePrompt(req: UtteranceRequest): string {
-  const recent = req.transcript
-    .slice(-TRANSCRIPT_WINDOW)
-    .map((t) => `${t.role}: ${t.text}`)
-    .join('\n');
+  const recent = renderRecentTranscript(req.transcript);
   const brief = req.roleBrief?.trim();
   const lastCandidate = [...req.transcript].reverse().find((t) => t.role === 'candidate')?.text;
   return [
