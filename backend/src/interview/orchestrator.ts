@@ -38,7 +38,7 @@ import {
   cooldownOk,
   recordInterventionFired,
 } from './engagement';
-import { clusterCount, priorAiQuestions, bannedTopicTerms } from './repeat-guard';
+import { clusterCount, isSemanticRepeat, priorAiQuestions, bannedTopicTerms } from './repeat-guard';
 import { maybeFireObserverNote } from './notes';
 import { stripSpeechTags } from '../voice/speech-tags';
 import {
@@ -352,6 +352,16 @@ async function maybeAnswerClarification(
   if ((ctx.clarifyCount ?? 0) >= CLARIFY_CAP) return null; // bounded → treat as an answer
   if (!looksLikeQuestion(text)) return null; // cheap gate: obvious answers skip the LLM classify
   const problem = ctx.phase === 'coding' ? assignedProblem(interview, ctx.codeIndex) : null;
+
+  // D6b: compute elapsed/remaining so the clarifier can answer "how much time do I have?" factually.
+  const durationMs = interviewDurationMs(interview);
+  const elapsedMs = interview.tnc_accepted_at
+    ? Date.now() - new Date(interview.tnc_accepted_at).getTime()
+    : null;
+  const elapsedSeconds = elapsedMs !== null ? Math.round(elapsedMs / 1000) : null;
+  const remainingSeconds =
+    elapsedMs !== null ? Math.max(0, Math.round((durationMs - elapsedMs) / 1000)) : null;
+
   const clarifyReq = {
     text,
     ctx,
@@ -359,6 +369,8 @@ async function maybeAnswerClarification(
     problemStatement: problem?.statement ?? null,
     level: interview.level,
     roleBrief: interview.role_brief,
+    elapsedSeconds,
+    remainingSeconds,
   };
   let result;
   try {
@@ -375,6 +387,22 @@ async function maybeAnswerClarification(
     }
   }
   if (result.intent !== 'question' || !result.reply?.text) return null; // real answer → normal path
+
+  // D3: repeat guard — the clarify reply must not re-tread the interviewer's prior questions.
+  // The primary fix is CLARIFIER_SYSTEM (D6b): this is a structural backstop that falls back
+  // to the deterministic safe redirect when the LLM reply clusters with prior questions.
+  if (isSemanticRepeat(result.reply.text, priorAiQuestions(interview.transcript ?? []))) {
+    console.log(
+      `[repeat-guard] fired interview=${interview.id} effect=clarify action=fallback`
+    );
+    try {
+      result = await new DeterministicOracle().classifyAndAnswer(clarifyReq);
+    } catch {
+      return null;
+    }
+    if (result.intent !== 'question' || !result.reply?.text) return null;
+  }
+
   const newCtx: InterviewContext = { ...ctx, clarifyCount: (ctx.clarifyCount ?? 0) + 1 };
   await persistClarify(interview, newCtx, text, result.reply, requestId);
   return {
@@ -1349,6 +1377,34 @@ export async function submitAnswer(
             // "fired and failed") — greppable in docker logs, no candidate data in the line.
             console.log(
               `[repeat-guard] fired interview=${interviewId} effect=${effect.kind} ` +
+                `cluster=${firstCount} limit=${limit} action=${retryOk ? 'retry-ok' : 'fallback'}`
+            );
+          }
+        }
+        // D3: repeat guard for coding follow-ups. A follow-up may legitimately stay on the same
+        // PROBLEM but must not re-ask a question already asked (same cluster check as oral).
+        // For mandatory CQ: always falls through to the deterministic codeAnchoredProbe
+        // (DeterministicOracle.generateIntervention with mandatory=true) — the CQ must never drop.
+        if (effect.kind === 'ask_followup') {
+          const priors = priorAiQuestions(transcriptWithAnswer);
+          const limit = 2;
+          const firstCount = clusterCount(utterance.text, priors);
+          if (firstCount > limit) {
+            const retried = await withCostContext(
+              { interviewId, kind: 'brain', phase: newCtx.phase },
+              () =>
+                oracle.generateIntervention({
+                  ...interventionReq,
+                  bannedTopics: bannedTopicTerms(priors),
+                })
+            ).catch(() => null);
+            const retryOk = retried !== null && clusterCount(retried.text, priors) <= limit;
+            // Mandatory CQ must always fire — deterministic fallback is always code-anchored.
+            utterance = retryOk
+              ? retried
+              : await new DeterministicOracle().generateIntervention(interventionReq);
+            console.log(
+              `[repeat-guard] fired interview=${interviewId} effect=${effect.kind}${isMandatory ? '(mandatory)' : ''} ` +
                 `cluster=${firstCount} limit=${limit} action=${retryOk ? 'retry-ok' : 'fallback'}`
             );
           }

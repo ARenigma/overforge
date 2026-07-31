@@ -628,7 +628,8 @@ describe('orchestrator end-to-end (offline)', () => {
     const aiTurns = transcript.filter((t) => t.role === 'interviewer');
     // greet + ask_oral(0) + ask_oral(1) + handoff + ask_code(0) = 5 AI turns
     expect(aiTurns.length).toBe(5);
-    const handoffIdx = aiTurns.findIndex((t) => /shift to some coding/i.test(t.text));
+    // D5: the DeterministicOracle now says "That's the walkthrough done — now the coding round."
+    const handoffIdx = aiTurns.findIndex((t) => /walkthrough done/i.test(t.text));
     const askCodeIdx = aiTurns.findIndex((t, i) => i > handoffIdx && /screen/i.test(t.text));
     expect(handoffIdx).toBeGreaterThanOrEqual(0); // handoff utterance persisted
     expect(askCodeIdx).toBeGreaterThan(handoffIdx); // ask_code follows it in order
@@ -640,6 +641,40 @@ describe('orchestrator end-to-end (offline)', () => {
     );
     // begin(greet=1) + ans1(ask_oral0=1) + ans2(ask_oral1=1) + ans3(handoff+ask_code0=2) = 5
     expect(myTransitions.length).toBe(5);
+  });
+
+  // ── D3/D6b: clarify path leaves fsm_state unchanged except clarifyCount ─────────────────────
+
+  test('D3/D6b: clarify question leaves fsm_state byte-identical to pre-answer except clarifyCount', async () => {
+    const { id } = await orch.createInterview({
+      interviewerId: 'u-clfy',
+      candidateEmail: 'clarify@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true }); // greeting phase
+    // Advance to oral so the clarify path is open (phase=oral).
+    await orch.submitAnswer(id, longAnswer); // greeting → oral Q0
+
+    const before = (
+      (await db.getById(id)) as Record<string, unknown>
+    ).fsm_state as Record<string, unknown>;
+
+    // "Can you repeat that?" → looksLikeQuestion=true (starts with "can") →
+    // DeterministicOracle classifyAndAnswer returns intent=question + safe redirect.
+    const res = await orch.submitAnswer(id, 'Can you repeat that question?');
+
+    const after = (
+      (await db.getById(id)) as Record<string, unknown>
+    ).fsm_state as Record<string, unknown>;
+
+    // Every field except clarifyCount must be byte-identical.
+    const { clarifyCount: _bc, ...beforeRest } = before;
+    const { clarifyCount: _ac, ...afterRest } = after;
+    expect(JSON.stringify(afterRest)).toBe(JSON.stringify(beforeRest));
+    expect(after.clarifyCount).toBe(1);
+
+    // The clarify reply must be spoken (non-empty utterance) and the phase must not advance.
+    expect(res.utterance.text).toBeTruthy();
+    expect(res.phase).toBe(before.phase as string);
   });
 
   // ── D2: verbal coding answers never advance (SESSION_FINDINGS_2026-07-26) ───────────────────

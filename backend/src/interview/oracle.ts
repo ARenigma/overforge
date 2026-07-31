@@ -109,6 +109,9 @@ export interface InterventionRequest {
   /** Escalation rung within the intervention ladder — controls how much of the observer note
    *  is injected (diagnosis only at rung ≥ 2). */
   ladderRung?: number;
+  /** Repeat-guard retry: topic stems from questions already asked — the new follow-up must not
+   *  touch any of them. Mirrors the bannedTopics on UtteranceRequest. */
+  bannedTopics?: string[] | null;
 }
 
 /** A candidate utterance whose intent (a clarifying QUESTION vs an ANSWER) is not yet known. */
@@ -121,6 +124,10 @@ export interface ClarifyRequest {
   problemStatement?: string | null;
   level?: string;
   roleBrief?: string | null;
+  /** Seconds elapsed since interview start — lets the interviewer answer "how much time do I have?" factually. */
+  elapsedSeconds?: number | null;
+  /** Seconds remaining in the interview — paired with elapsedSeconds for time questions. */
+  remainingSeconds?: number | null;
 }
 
 /** Intent classification + (if a question) the grounded, non-spoiler reply — one bounded seam. */
@@ -149,10 +156,13 @@ export interface Oracle {
 export class DeterministicOracle implements Oracle {
   async generateUtterance(req: UtteranceRequest): Promise<Utterance> {
     const e = req.effect;
+    // D6a: name from env so the deterministic fallback matches the live persona.
+    const name = process.env.INTERVIEWER_NAME ?? 'Finn';
     switch (e.kind) {
       case 'greet':
         return {
-          text: "Hi — I'll be your technical interviewer today. We'll start with a walk-through of a recent project of yours, then go deeper into a few technical areas. [pause] To start, tell me about the most technically challenging project you've built recently.",
+          // D5: name the two sections in the greeting; D6a: introduce by name.
+          text: `Hey — I'm ${name}, thanks for making the time. We'll start with a walkthrough of something you've built, then move into a coding problem. So — what's the most technically interesting project you've worked on recently?`,
           expects: 'voice',
         };
       case 'ask_oral':
@@ -182,9 +192,11 @@ export class DeterministicOracle implements Oracle {
         };
       case 'handoff':
         if (e.pivot) {
-          return { text: "No problem — let's shift to the coding section.", expects: 'text' };
+          // D5: name the transition even on pivot.
+          return { text: "No problem — that's the walkthrough done. Now let's get into the coding round.", expects: 'text' };
         }
-        return { text: "Okay — let's shift to some coding.", expects: 'text' };
+        // D5: spoken section label for the oral→coding boundary.
+        return { text: "That's the walkthrough done — now the coding round.", expects: 'text' };
       case 'ask_code':
         return {
           // The full problem is shown on the candidate's screen (problem panel); the interviewer
@@ -208,7 +220,8 @@ export class DeterministicOracle implements Oracle {
           expects: 'code',
         };
       case 'wrap_up':
-        return { text: 'Thanks — that concludes the interview.', expects: 'text' };
+        // D5: spoken section label for the wrap-up boundary.
+        return { text: 'Last part — thanks for the time. That wraps things up.', expects: 'text' };
       case 'score':
       case 'done':
         return { text: '', expects: 'text' };

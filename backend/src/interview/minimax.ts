@@ -278,7 +278,7 @@ export class MinimaxOracle implements Oracle {
   async generateUtterance(req: UtteranceRequest): Promise<Utterance> {
     const expects = utteranceMode(req.effect.kind);
     const messages: ChatMessage[] = [
-      { role: 'system', content: INTERVIEWER_SYSTEM },
+      { role: 'system', content: interviewerSystem() },
       { role: 'user', content: buildUtterancePrompt(req) },
     ];
     const text = (await this.client.complete(messages, { temperature: 0.6 })).trim();
@@ -317,7 +317,7 @@ export class MinimaxOracle implements Oracle {
 
   async classifyAndAnswer(req: ClarifyRequest): Promise<ClarifyResult> {
     const messages: ChatMessage[] = [
-      { role: 'system', content: CLARIFIER_SYSTEM },
+      { role: 'system', content: clarifierSystem() },
       { role: 'user', content: buildClarifyPrompt(req) },
     ];
     let raw = '';
@@ -340,11 +340,20 @@ export class MinimaxOracle implements Oracle {
   }
 }
 
-const INTERVIEWER_SYSTEM =
-  'You are a sharp, warm, professional technical interviewer. Speak in the first person, one ' +
-  'short turn at a time. You have no name and represent no specific company — NEVER emit ' +
-  'placeholders like "[Interviewer Name]" or "[Company]" (your turns are read ALOUD); just speak ' +
-  'naturally without one. ' +
+/** Read at call-time so a process restart with a new INTERVIEWER_NAME takes effect without a deploy. */
+function interviewerName(): string {
+  return process.env.INTERVIEWER_NAME ?? 'Finn';
+}
+
+/** Built per-call so the persona name is always current. Kept close to the original wording —
+ *  the only structural changes are D6a (name + addressability) and no other edits. */
+function interviewerSystem(): string {
+  const name = interviewerName();
+  return (
+    `You are a sharp, warm, professional technical interviewer named ${name}. Speak in the first person, one ` +
+    `short turn at a time. Your name is ${name} — when the candidate addresses you by name (e.g. "Hey ${name}, …"), ` +
+    `acknowledge it naturally and answer their request directly. Represent no specific company — NEVER emit ` +
+    `placeholders like "[Company]" (your turns are read ALOUD); just speak naturally. ` +
   'SPOKEN OUTPUT RULE: every turn is read aloud by text-to-speech, so NEVER emit code identifiers, ' +
   'snake_case, camelCase, backticks, or symbols — say them as natural words (e.g. "max attempts", ' +
   'NOT "max_attempts"; "external task sensor", NOT "ExternalTaskSensor"). ' +
@@ -381,7 +390,9 @@ const INTERVIEWER_SYSTEM =
   'on gracefully regardless of the response. Never repeat the same challenge more than once per ' +
   'question. The handoff to coding must be warm (e.g. "Let\'s shift to some coding") — never ' +
   'imply the candidate failed or that answers were wrong. ' +
-  'Never reveal scores or internal reasoning.';
+  'Never reveal scores or internal reasoning.'
+  );
+}
 
 const EVALUATOR_SYSTEM =
   'You judge a candidate answer for depth. Respond ONLY with strict JSON: ' +
@@ -488,6 +499,12 @@ function buildInterventionPrompt(req: InterventionRequest): string {
 
   return [
     levelGuidance(req.level),
+    // D3: repeat-guard retry — banned topic stems from the prior questions list.
+    req.bannedTopics?.length
+      ? 'YOUR PREVIOUS ATTEMPT REPEATED AN EARLIER QUESTION. The following topic stems are ' +
+        `BANNED — the new question must not touch any of them: ${req.bannedTopics.join(', ')}. ` +
+        'Pick a completely different angle on this problem.'
+      : '',
     brief ? `Role context:\n${brief.slice(0, 2000)}` : '',
     req.problemStatement ? `The coding problem:\n${req.problemStatement.slice(0, 1500)}` : '',
     noteBlock,
@@ -547,21 +564,25 @@ function levelGuidance(level?: string): string {
   return LEVEL_QUESTION_GUIDANCE[(level ?? 'mid').toLowerCase()] ?? LEVEL_QUESTION_GUIDANCE.mid;
 }
 
-/** Per-effect steering so the interviewer runs project-first, then conceptual — see INTERVIEWER_SYSTEM.
+/** Per-effect steering so the interviewer runs project-first, then conceptual — see interviewerSystem().
  *  The FSM fixes WHICH effect fires (greet → ask_oral 0..n → coding); this shapes each into the
  *  project-first-then-grill-then-concept flow. */
 function effectGuidance(effect: Effect): string {
+  // D6a: read name at call time so rebranding via env is instant on restart.
+  const name = interviewerName();
   switch (effect.kind) {
     case 'greet':
       return (
-        'OPENING turn — this sets the human tone for the whole session, so it MUST sound like a ' +
-        'person saying hi, not a recorded announcement. Shape: a short warm hello ("Hey — thanks ' +
-        'for making the time."), one casual line about what you two will do ("we\'ll chat about ' +
-        'something you\'ve built, then write a bit of code"), then the invitation as its own short ' +
-        'question ("So — what\'s the most technically hairy thing you\'ve built lately?"). Three ' +
-        'short beats, contractions throughout, no sentence over ~12 words, no formal phrases like ' +
-        '"I am the technical interviewer for this session" or "we will commence". Do not use any ' +
-        'name or company.'
+        // D6a: introduce by name exactly once here; never repeat the introduction.
+        // D5: name the two sections ("walkthrough … then coding") in the greeting line.
+        `OPENING turn — introduce yourself by name and set the human tone. Shape: ` +
+        `a short warm hello that includes your name ("Hey — I'm ${name}, thanks for making the time."), ` +
+        `one casual line naming the two sections ("we'll start with a walkthrough of something you've built, ` +
+        `then move into a coding problem"), then the invitation as its own short question ` +
+        `("So — what's the most technically interesting thing you've worked on recently?"). ` +
+        `Three short beats, contractions throughout, no sentence over ~12 words. ` +
+        `No formal phrases like "I am the technical interviewer for this session" or "we will commence". ` +
+        `Do not use any company name.`
       );
     case 'ask_oral':
       if (effect.pivot) {
@@ -612,13 +633,19 @@ function effectGuidance(effect: Effect): string {
     case 'handoff':
       if (effect.pivot) {
         return (
+          // D5: name the transition even on pivot; no implication of failure.
           'The candidate has dodged the last oral question multiple times. Transition gracefully ' +
-          'to the coding section with ONE warm line that acknowledges the move without implying ' +
-          'failure (e.g. "No problem — let\'s shift to the coding section"). Do NOT say anything ' +
-          'negative about the previous answer.'
+          'to the coding section with ONE warm line that names both sides of the handoff — ' +
+          'end of the oral section and start of coding (e.g. "No problem — walkthrough\'s done, ' +
+          'let\'s get into the coding round"). Do NOT say anything negative about the previous answer.'
         );
       }
-      return 'Transition warmly from the discussion to the coding portion in one short line.';
+      // D5: explicitly label the oral→coding boundary in one short spoken clause.
+      return (
+        'Signal the end of the oral section and the start of coding in one short warm line that ' +
+        'names both: "that\'s the walkthrough done — now the coding round." ≤12 words, ' +
+        'contractions fine. No headings, no lists.'
+      );
     case 'coding_ack':
       // D2: verbal remark during coding when no follow-up will be fired. ONE very short
       // (≤ 10 words) warm line that keeps the floor with the candidate — e.g. "Got it —
@@ -632,7 +659,8 @@ function effectGuidance(effect: Effect): string {
         'Do NOT advance the problem. The candidate is still working.'
       );
     case 'wrap_up':
-      return 'Wrap up warmly in one or two sentences.';
+      // D5: explicitly label this as the last section.
+      return 'Signal this is the last part of the interview ("last part") and close warmly in one or two sentences. Spoken register — no headings, no lists.';
     default:
       return '';
   }
@@ -685,22 +713,41 @@ function buildEvaluatePrompt(req: EvaluateRequest): string {
     .join('\n\n');
 }
 
-const CLARIFIER_SYSTEM =
-  'You are the technical interviewer in a live interview. The candidate just said something. ' +
-  'Decide its INTENT: "question" if they are asking YOU to clarify the problem, an assumption, ' +
-  'scope, or your prior question; "answer" if they are answering or attempting (even partially, ' +
-  'even thinking aloud). Return ONLY JSON: {"intent":"question"|"answer","reply":"..."}. ' +
-  'If intent is "question": reply = a brief (1-2 sentence), warm, direct answer using ONLY the ' +
-  'problem statement, your prior question, and role context given. NEVER reveal or hint the ' +
-  'intended solution, algorithm, data structure, complexity, or the hidden tests — if asked for ' +
-  'any of those, warmly decline and tell them to state a reasonable assumption and proceed. This ' +
-  'is spoken aloud: plain sentences, no code, no identifiers, no markdown. ' +
-  'If intent is "answer": reply must be "" (empty string).';
+/** D6b: built per-call to include the interviewer name. Replaces the old const CLARIFIER_SYSTEM. */
+function clarifierSystem(): string {
+  const name = interviewerName();
+  return (
+    `You are the technical interviewer named ${name} in a live interview. ` +
+    'Classify the candidate\'s last message and — if it\'s a question — answer it warmly and directly.\n\n' +
+    'Return ONLY JSON: {"intent":"question"|"answer","reply":"..."}.\n\n' +
+    'INTENT rules:\n' +
+    '- "question": they are asking YOU something — to clarify the problem, an assumption, scope, your prior question, time remaining, or they address you by name with a request.\n' +
+    '- "answer": they are answering, attempting (even partial or thinking aloud), or their message is a statement.\n\n' +
+    'If intent is "question", your reply MUST:\n' +
+    '1. ANSWER what they actually asked — NEVER re-ask your previous question (even partly) in the same reply.\n' +
+    '2. Handle these specific cases:\n' +
+    '   - "can you repeat that?" or "say that again?" → restate YOUR PREVIOUS QUESTION using completely fresh wording (same meaning, different words).\n' +
+    '   - "what do you mean by [X]?" → clarify that specific term or phrase in 1 sentence.\n' +
+    `   - "can I use [library/function/built-in]?" → yes, or state a reasonable constraint; do NOT reveal the solution.\n` +
+    '   - "how much time do I have?" / "how long left?" → answer factually using the time info provided in the prompt.\n' +
+    `   - Addressed by name (e.g. "Hey ${name}, …") → acknowledge naturally, then answer their actual request.\n` +
+    '3. Be 1–2 sentences, warm, plain spoken English (no code identifiers, no markdown, no backticks).\n' +
+    '4. NEVER reveal: the intended solution, the algorithm, expected complexity, or the hidden tests. ' +
+    'If asked for any of those, warmly decline: "Make a reasonable assumption and state it — I\'m more interested in your reasoning."\n\n' +
+    'If intent is "answer": reply must be "" (empty string).'
+  );
+}
 
 function buildClarifyPrompt(req: ClarifyRequest): string {
   const lastInterviewer = [...req.transcript].reverse().find((t) => t.role === 'interviewer');
+  // D6b: provide factual time info so the clarifier can answer "how much time do I have?" correctly.
+  const timeInfo =
+    req.elapsedSeconds != null && req.remainingSeconds != null
+      ? `Time info (answer factually if the candidate asks): ${Math.round(req.elapsedSeconds / 60)} min elapsed, ${Math.round(req.remainingSeconds / 60)} min remaining.`
+      : null;
   return [
     req.roleBrief ? `Role context: ${req.roleBrief}` : '',
+    timeInfo,
     lastInterviewer
       ? `Your previous question/prompt was:\n"${lastInterviewer.text.slice(0, 800)}"`
       : '',
