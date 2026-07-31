@@ -619,6 +619,18 @@ function effectGuidance(effect: Effect): string {
         );
       }
       return 'Transition warmly from the discussion to the coding portion in one short line.';
+    case 'coding_ack':
+      // D2: verbal remark during coding when no follow-up will be fired. ONE very short
+      // (≤ 10 words) warm line that keeps the floor with the candidate — e.g. "Got it —
+      // keep going" or "Take your time." Do NOT ask a question, do NOT probe their approach,
+      // do NOT advance the problem. The candidate is still working.
+      return (
+        'The candidate made a verbal remark while coding. Respond with exactly ONE short ' +
+        '(≤ 10 words), warm, supportive line that keeps the floor with them — for example: ' +
+        '"Got it — keep going" or "Take your time" or "Sounds good — carry on." ' +
+        'Do NOT ask any question. Do NOT probe their approach or mention the problem. ' +
+        'Do NOT advance the problem. The candidate is still working.'
+      );
     case 'wrap_up':
       return 'Wrap up warmly in one or two sentences.';
     default:

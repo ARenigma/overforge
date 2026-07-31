@@ -1,4 +1,4 @@
-import { scoreInterview, validateScorecard, fallbackScorecard, buildScoringPrompt } from './scorer';
+import { scoreInterview, validateScorecard, fallbackScorecard, buildScoringPrompt, PENALIZABLE_KINDS } from './scorer';
 import { MinimaxClient } from '../interview/minimax';
 
 const stub = (raw: string): MinimaxClient => ({ complete: async () => raw });
@@ -129,5 +129,40 @@ describe('injection fencing in buildScoringPrompt (FIX 2)', () => {
     expect(prompt).toContain('<<<CANDIDATE_DATA');
     expect(prompt).toContain('CANDIDATE_DATA>>>');
     expect(prompt).toContain('def solution(): return 42');
+  });
+});
+
+// ─────────────── D2: coding_ack is never penalized ───────────────────────────
+// coding_ack is an advisory, non-advancing acknowledgment (D2 fix). It carries no `assist`
+// tag on the transcript turn, so it is already excluded from PENALIZABLE_KINDS. This test
+// locks that contract so a future change to the scoring path can't accidentally add it.
+
+describe('PENALIZABLE_KINDS — coding_ack is advisory (D2)', () => {
+  test('coding_ack is NOT in PENALIZABLE_KINDS', () => {
+    expect(PENALIZABLE_KINDS.has('coding_ack')).toBe(false);
+  });
+
+  test('all penalizable kinds are the expected set (no accidental additions)', () => {
+    // Locked: only these three kinds may penalize the candidate.
+    expect([...PENALIZABLE_KINDS].sort()).toEqual(['counter_question', 'hint', 'probe']);
+  });
+
+  test('advisory kinds (offer, nudge, encourage, coding_ack) are all absent from PENALIZABLE_KINDS', () => {
+    for (const advisory of ['offer', 'nudge', 'encourage', 'coding_ack']) {
+      expect(PENALIZABLE_KINDS.has(advisory)).toBe(false);
+    }
+  });
+
+  test('coding_ack transcript turn (no assist tag) produces no ASSISTANCE-GIVEN section', () => {
+    // coding_ack turns are persisted without an assist tag — the scorer never sees them
+    // as interventions and therefore never penalizes them.
+    const prompt = buildScoringPrompt({
+      transcript: [
+        { role: 'candidate', text: 'just thinking out loud' },
+        { role: 'interviewer', text: 'Got it — keep going.' }, // no assist tag = coding_ack style
+      ],
+      codeRuns: [],
+    });
+    expect(prompt).not.toContain('ASSISTANCE GIVEN');
   });
 });

@@ -1213,8 +1213,12 @@ export async function submitAnswer(
       const { ctx: newCtx, effect } = advance(ctx, { type: 'answer', decision, intent });
       // A real answer advanced the FSM → reset the per-question clarify budget + hint-offer state so the
       // next question starts fresh.
-      newCtx.clarifyCount = 0;
-      newCtx.hintOffer = undefined;
+      // D2: coding_ack is non-advancing (ctx unchanged) — do NOT reset hintOffer (a pending offer
+      // stays open) or clarifyCount (candidate is still on the same question).
+      if (effect.kind !== 'coding_ack') {
+        newCtx.clarifyCount = 0;
+        newCtx.hintOffer = undefined;
+      }
 
       // Record the candidate's answer as an event.
       await appendEvent(interviewId, 'answer', {
@@ -1376,6 +1380,58 @@ export async function submitAnswer(
         assist,
         snapshotToPersist
       );
+
+      // D1: handoff → ask_code chain (server-driven, no candidate event required).
+      //
+      // In voice mode the machine's `handoff` state waits for a candidate `answer` before
+      // emitting `ask_code`, producing 7+ min of dead air (SESSION_FINDINGS_2026-07-26, D1).
+      // Fix: after persisting the handoff utterance, immediately advance the fresh `handoff`
+      // context to `ask_code(0)` with a synthetic event, persist that transition too, and
+      // return the ask_code utterance as the one the voice layer speaks. Both turns appear
+      // in the transcript (room renders both bubbles); the candidate hears the coding intro
+      // without having to say anything. All of this is inside the existing withInterviewLock
+      // region — one persisted transition per advance(), no double-append.
+      if (effect.kind === 'handoff') {
+        // Re-fetch inside the lock to get the updated transcript/phase from the handoff persist.
+        const freshInterview = requireInterview(await getById(interviewId), interviewId);
+        const freshCtx = freshInterview.fsm_state as InterviewContext;
+        const { ctx: codingCtx, effect: askCodeEffect } = advance(freshCtx, { type: 'answer' });
+        // Fresh problem → reset per-question state (same as any normal advance).
+        codingCtx.clarifyCount = 0;
+        codingCtx.hintOffer = undefined;
+
+        const askCodeProblem =
+          askCodeEffect.kind === 'ask_code'
+            ? assignedProblem(freshInterview, askCodeEffect.index)
+            : null;
+        const askCodeReq: UtteranceRequest = {
+          effect: askCodeEffect,
+          ctx: codingCtx,
+          transcript: freshInterview.transcript ?? [],
+          level: freshInterview.level,
+          roleBrief: freshInterview.role_brief,
+          problemStatement: askCodeProblem?.statement ?? null,
+        };
+        let askCodeUtterance: Utterance;
+        try {
+          askCodeUtterance = await withCostContext(
+            { interviewId, kind: 'brain', phase: codingCtx.phase },
+            () => oracle.generateUtterance(askCodeReq)
+          );
+        } catch (err) {
+          console.error(`[orchestrator] ask_code utterance generation failed for ${interviewId}:`, err);
+          askCodeUtterance = await new DeterministicOracle().generateUtterance(askCodeReq);
+        }
+        // Persist the chained ask_code transition (no candidate answer; no requestId so
+        // idempotency is not double-applied on retry — the handoff persist already wrote it).
+        await persistTransition(freshInterview, codingCtx, askCodeEffect, askCodeUtterance);
+        // Voice layer speaks the ask_code utterance; room renders both handoff + ask_code bubbles.
+        return {
+          utterance: { ...askCodeUtterance, text: stripSpeechTags(askCodeUtterance.text) },
+          phase: codingCtx.phase,
+          state: codingCtx,
+        };
+      }
 
       // Observer note: fire-and-forget after answer transitions in the coding phase.
       if (interventionsEnabled() && (ctx.phase === 'coding' || newCtx.phase === 'coding')) {

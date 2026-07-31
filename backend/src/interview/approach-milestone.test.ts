@@ -140,12 +140,13 @@ describe('machine: codeApproachDone lifecycle', () => {
     expect(next.codeApproachDone).toBe(false);
   });
 
-  test('advanceCoding (via answer after cap) resets codeApproachDone=false', () => {
+  test('advanceCoding (via submit after cap) resets codeApproachDone=false', () => {
+    // D2: verbal answers (intent absent) at the cap emit coding_ack — only explicit submit/move_on
+    // advances. Use submit intent to exercise the advanceCoding → codeApproachDone reset path.
     let ctx = toCoding();
     ctx = { ...ctx, codeApproachDone: true };
-    // Drive to advance without more follow-ups (followUps already at cap)
     ctx = { ...ctx, followUps: 2 }; // cap (codeMaxFollowUps=2)
-    const { ctx: next, effect } = advance(ctx, { type: 'answer' });
+    const { ctx: next, effect } = advance(ctx, { type: 'answer', intent: 'submit' }); // D2: was { type: 'answer' }
     expect(effect.kind).toBe('ask_code');
     expect(next.codeApproachDone).toBe(false);
   });
@@ -171,10 +172,12 @@ describe('machine: codeApproachDone lifecycle', () => {
   });
 
   test('per-problem reset: codeApproachDone=false after advancing to problem 1', () => {
+    // D2: verbal answers never advance coding — use submit for both events so the machine
+    // actually moves from problem 0 to problem 1.
     let ctx = toCoding();
-    // Complete problem 0 (submit → mandatory CQ → answer → next problem)
-    ctx = advance(ctx, { type: 'answer', intent: 'submit' }).ctx; // CQ at depth=1
-    ctx = advance(ctx, { type: 'answer' }).ctx; // answer CQ → advance (followUps=1 → cap logic)
+    // Complete problem 0: submit → mandatory CQ (depth=1) → second submit → advance
+    ctx = advance(ctx, { type: 'answer', intent: 'submit' }).ctx; // mandatory CQ, followUps=1
+    ctx = advance(ctx, { type: 'answer', intent: 'submit' }).ctx; // D2: was { type: 'answer' }; followUps=1, no oracle → advance
     // Now at problem 1
     expect(ctx.codeIndex).toBe(1);
     expect(ctx.codeApproachDone).toBe(false);

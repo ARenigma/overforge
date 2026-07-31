@@ -200,12 +200,14 @@ describe('orchestrator end-to-end (offline)', () => {
     expect(typeof begun.startedAt).toBe('string');
     expect(Number.isNaN(new Date(begun.startedAt).getTime())).toBe(false);
 
-    // Long answers avoid coding follow-ups so the flow advances briskly (defined at describe scope).
+    // D2: verbal coding answers (intent absent) never advance; use 'submit' intent in the coding
+    // phase so the E2E drive terminates. The mandatory counter-question still fires on first submit.
     let phase = begun.phase;
     let guard = 0;
     while (phase !== 'done' && guard < 30) {
       guard++;
-      const res = await orch.submitAnswer(id, longAnswer);
+      const intent = phase === 'coding' ? 'submit' : 'answer';
+      const res = await orch.submitAnswer(id, longAnswer, undefined, intent as 'submit' | 'answer');
       phase = res.phase;
     }
 
@@ -240,9 +242,10 @@ describe('orchestrator end-to-end (offline)', () => {
     });
     await orch.begin(id, { tncAccepted: true });
 
-    // FIX 3: recordRun now requires phase='coding'. Drive greeting→oral→oral→handoff→coding
-    // with long answers (DeterministicOracle advances without follow-ups at >120 chars).
-    for (let i = 0; i < 4; i++) await orch.submitAnswer(id, longAnswer);
+    // FIX 3: recordRun requires phase='coding'. Drive greeting→oral(0)→oral(1)→handoff.
+    // D1: the handoff auto-chains to ask_code(0) server-side, so 3 answers land in coding
+    // (not 4 as before — the 4th would be a verbal coding_ack, also fine but unnecessary).
+    for (let i = 0; i < 3; i++) await orch.submitAnswer(id, longAnswer);
 
     const result = await orch.recordRun(id, { language: 'python', source: 'print(1)\n' });
     expect(result.status).toBe('Accepted');
@@ -546,9 +549,9 @@ describe('orchestrator end-to-end (offline)', () => {
       candidateEmail: 'struggler@example.com',
     });
     await orch.begin(id, { tncAccepted: true });
-    // Drive greeting → oral(0) → oral(1) → handoff → coding (4 answers).
-    // Use longAnswer (>120 chars) so the DeterministicOracle returns followUp=false for oral
-    // questions — we don't want nudges here, just a clean path to the coding phase.
+    // Drive greeting → oral(0) → oral(1) → handoff [D1: auto-chains to coding] = 3 answers.
+    // The 4th verbal answer is a coding_ack (D2: verbal never advances), so phase stays coding.
+    // Use longAnswer (>120 chars) so the DeterministicOracle returns followUp=false for oral.
     for (let i = 0; i < 4; i++) await orch.submitAnswer(id, longAnswer);
     let row = (await db.getById(id)) as Record<string, unknown>;
     expect((row.fsm_state as { phase: string }).phase).toBe('coding');
@@ -595,6 +598,81 @@ describe('orchestrator end-to-end (offline)', () => {
     expect(finalTx.length).toBe(codingTxLen);
 
     mockRun.result = accepted; // reset for any later tests
+  });
+
+  // ── D1: handoff auto-chains to ask_code (SESSION_FINDINGS_2026-07-26) ─────────────────────
+
+  test('D1: handoff auto-chains to ask_code — phase lands at coding with no extra candidate event', async () => {
+    // Before D1, the orchestrator waited for a candidate answer in `handoff` state, producing
+    // 7+ min of dead air (no coding cue spoken). Now it chains server-side: after persisting
+    // the handoff utterance it immediately advances to ask_code(0) within the same lock region.
+    const { id } = await orch.createInterview({
+      interviewerId: 'u-d1',
+      candidateEmail: 'd1@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true }); // greeting
+
+    await orch.submitAnswer(id, longAnswer); // greeting → ask_oral(0)
+    await orch.submitAnswer(id, longAnswer); // oral → ask_oral(1)
+    // This third answer crosses the oral→handoff boundary; the chain must fire ask_code(0)
+    // server-side without any further candidate event.
+    const res = await orch.submitAnswer(id, longAnswer);
+
+    // Phase must already be 'coding' — the chain advanced past 'handoff'.
+    expect(res.phase).toBe('coding');
+
+    // Both the handoff utterance AND the ask_code intro must appear in the transcript,
+    // in order. The DeterministicOracle emits deterministic strings we can check.
+    const row = (await db.getById(id)) as Record<string, unknown>;
+    const transcript = (row.transcript as Array<{ role: string; text: string }>) ?? [];
+    const aiTurns = transcript.filter((t) => t.role === 'interviewer');
+    // greet + ask_oral(0) + ask_oral(1) + handoff + ask_code(0) = 5 AI turns
+    expect(aiTurns.length).toBe(5);
+    const handoffIdx = aiTurns.findIndex((t) => /shift to some coding/i.test(t.text));
+    const askCodeIdx = aiTurns.findIndex((t, i) => i > handoffIdx && /screen/i.test(t.text));
+    expect(handoffIdx).toBeGreaterThanOrEqual(0); // handoff utterance persisted
+    expect(askCodeIdx).toBeGreaterThan(handoffIdx); // ask_code follows it in order
+
+    // Two transition events must have fired for the single submitAnswer call that crossed
+    // the oral→handoff→coding boundary: one for handoff, one for ask_code.
+    const myTransitions = (db.__events as Array<{ id: string; kind: string }>).filter(
+      (e) => e.id === id && e.kind === 'transition'
+    );
+    // begin(greet=1) + ans1(ask_oral0=1) + ans2(ask_oral1=1) + ans3(handoff+ask_code0=2) = 5
+    expect(myTransitions.length).toBe(5);
+  });
+
+  // ── D2: verbal coding answers never advance (SESSION_FINDINGS_2026-07-26) ───────────────────
+
+  test('D2: verbal coding answer past the follow-up budget yields coding_ack — no phase/codeIndex change', async () => {
+    // Before D2, every verbal reply consumed the per-problem follow-up budget; once exhausted
+    // the machine called advanceCoding and ended the interview with 0 code runs. Now verbal
+    // answers (intent='answer') emit coding_ack and leave codeIndex/followUps/phase untouched.
+    const { id } = await orch.createInterview({
+      interviewerId: 'u-d2',
+      candidateEmail: 'd2@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true });
+    await orch.submitAnswer(id, longAnswer); // oral(0)
+    await orch.submitAnswer(id, longAnswer); // oral(1)
+    await orch.submitAnswer(id, longAnswer); // handoff → [D1 chain] → coding
+
+    // SUBMIT fires the mandatory counter-question (followUps 0→1).
+    await orch.submitAnswer(id, longAnswer, undefined, 'submit');
+    // A short verbal answer triggers the oracle's followUp=true → followUps 1→2 (cap=2).
+    await orch.submitAnswer(id, 'short verbal', undefined, 'answer');
+    // followUps=2 === cap=2. Another verbal answer must yield coding_ack, NOT advance.
+    const res = await orch.submitAnswer(id, 'still talking', undefined, 'answer');
+
+    expect(res.phase).toBe('coding'); // still in coding
+    const ctx = (await db.getById(id) as Record<string, unknown>).fsm_state as {
+      codeIndex: number;
+      followUps: number;
+      phase: string;
+    };
+    expect(ctx.codeIndex).toBe(0); // still on problem 0
+    expect(ctx.followUps).toBe(2); // budget unchanged
+    expect(ctx.phase).toBe('coding');
   });
 });
 
@@ -643,10 +721,12 @@ describe('coding submit/move-on (orchestrator)', () => {
     expect(res.state.codeIndex).toBe(0); // did NOT get misread as a clarifying question + skipped
   });
 
-  test('after answering the mandatory CQ (no further follow-up) → advances to the next problem', async () => {
+  test('after answering the mandatory CQ, a second SUBMIT advances to the next problem', async () => {
+    // D2: only explicit submit/move_on advances coding — a verbal answer gives coding_ack.
+    // Use 'submit' intent for the second call so the problem actually advances.
     const id = await toCoding();
-    await orch.submitAnswer(id, '', undefined, 'submit', 'def a():\n    return 1'); // mandatory CQ
-    const res = await orch.submitAnswer(id, longAnswer); // answer the CQ substantively → advance
+    await orch.submitAnswer(id, '', undefined, 'submit', 'def a():\n    return 1'); // mandatory CQ → followUps=1
+    const res = await orch.submitAnswer(id, longAnswer, undefined, 'submit'); // cap not hit, but oracle says no followUp → advance
     expect(res.state.codeIndex).toBe(1);
     expect(res.state.followUps).toBe(0);
   });

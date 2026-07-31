@@ -200,6 +200,13 @@ export class DeterministicOracle implements Oracle {
           text: `Follow-up ${e.depth}: why this approach over the alternatives?`,
           expects: 'code',
         };
+      case 'coding_ack':
+        // D2: brief non-advancing acknowledgment — keeps the floor with the candidate without
+        // probing or advancing the problem. Not oracle-generated; deterministic is always used.
+        return {
+          text: "Got it — keep going; let me know when you want to run it.",
+          expects: 'code',
+        };
       case 'wrap_up':
         return { text: 'Thanks — that concludes the interview.', expects: 'text' };
       case 'score':

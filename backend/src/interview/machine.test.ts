@@ -30,14 +30,16 @@ const answer = (followUp?: boolean): InterviewEvent =>
 
 describe('interview machine', () => {
   test('happy path: 2 oral + 2 core, no follow-ups', () => {
+    // D2: verbal answers (intent absent/='answer') never advance coding — only explicit
+    // submit/move_on may. Use move_on for the cleanest "no follow-ups" coding path.
     const { effects, ctx } = run([
       { type: 'start' },
       answer(), // greeting -> ask_oral(0)
       answer(), // oral -> ask_oral(1)
       answer(), // oral done -> handoff
       answer(), // handoff -> ask_code(0)
-      answer(false), // code0 -> ask_code(1)
-      answer(false), // code1 -> wrap_up
+      moveOn(), // code0 -> ask_code(1)  [D2: was answer(false), now requires explicit intent]
+      moveOn(), // code1 -> wrap_up      [D2: was answer(false), now requires explicit intent]
       answer(), // wrap_up -> score
       answer(), // scoring -> done
     ]);
@@ -58,20 +60,23 @@ describe('interview machine', () => {
   });
 
   test('coding follow-ups are capped at codeMaxFollowUps (default 2) even if the oracle keeps asking', () => {
+    // D2: verbal answers at the cap emit coding_ack (not advance). The advance only fires on
+    // an explicit submit/move_on. Use submit at the cap point to show the cap-then-advance path.
     const { effects } = run([
       { type: 'start' },
       answer(), // ask_oral(0)
       answer(), // ask_oral(1)
       answer(), // handoff
       answer(), // ask_code(0)
-      answer(true), // ask_followup depth 1
-      answer(true), // ask_followup depth 2
-      answer(true), // CAP (codeMaxFollowUps=2): must advance to ask_code(1), not a 3rd follow-up
+      answer(true), // ask_followup depth 1   (verbal, oracle wants followUp, followUps=0→1)
+      answer(true), // ask_followup depth 2   (verbal, oracle wants followUp, followUps=1→2)
+      // D2: verbal at cap → coding_ack; use submit so the cap-then-advance fires instead.
+      { type: 'answer', intent: 'submit', decision: { followUp: true, reason: '', signal: 0 } } as InterviewEvent,
     ]);
     const followups = effects.filter((e) => e.kind === 'ask_followup');
     expect(followups).toHaveLength(2);
     expect(followups.map((e) => (e as { depth: number }).depth)).toEqual([1, 2]);
-    // The event after the cap advances to the second coding question.
+    // The event after the cap (explicit submit) advances to the second coding question.
     expect(effects[effects.length - 1]).toEqual({ kind: 'ask_code', index: 1 });
   });
 
@@ -198,13 +203,21 @@ describe('interview machine', () => {
 
     // Simulate a candidate who gives short answers in coding (triggers follow-ups,
     // capped by the machine), until the machine reaches 'done'.
+    // D2: verbal answers (intent absent) never advance coding; use 'submit' intent so this
+    // simulation terminates. The invariant under test (ask_followup appears) still holds because
+    // the mandatory counter-question fires on the first submit (followUps===0).
     while (effect.kind !== 'done' && turns < 50) {
       turns++;
       let decision: OracleDecision | undefined;
       if (ctx.phase === 'coding') {
         decision = await oracle.evaluateAnswer({ answer: 'short', ctx, transcript: [] });
       }
-      res = advance(ctx, { type: 'answer', decision });
+      res = advance(ctx, {
+        type: 'answer',
+        decision,
+        // Only explicit submit/move_on advances coding — use submit to drive the simulation.
+        ...(ctx.phase === 'coding' ? { intent: 'submit' as const } : {}),
+      });
       ctx = res.ctx;
       effect = res.effect;
       seen.push(effect.kind);
@@ -270,21 +283,26 @@ describe('coding: SUBMIT mandatory counter-question', () => {
     expect((effect as { mandatory: boolean }).mandatory).toBe(true);
   });
 
-  test('after the mandatory CQ is answered (no further follow-up) → advances to the next problem', () => {
+  test('after the mandatory CQ, a second SUBMIT (no further oracle follow-up) advances to the next problem', () => {
+    // D2: the answer to the CQ must be an explicit submit/move_on — a verbal answer gives coding_ack.
     let ctx = toCoding();
     ctx = advance(ctx, submit(false)).ctx; // mandatory CQ, followUps=1
-    const { ctx: next, effect } = advance(ctx, codeAnswer(false)); // answer the CQ
+    // submit with followUps=1, oracle declines → mandatoryProbe=false, no followUp → advanceCoding.
+    const { ctx: next, effect } = advance(ctx, submit(false)); // D2: was codeAnswer(false)
     expect(effect).toEqual({ kind: 'ask_code', index: 1 });
     expect(next.codeIndex).toBe(1);
     expect(next.followUps).toBe(0);
   });
 
-  test('a plain coding answer (intent absent) does NOT trigger the mandate', () => {
+  test('a plain coding answer (intent absent) does NOT trigger the mandate and emits coding_ack', () => {
+    // D2: before D2 this gave ask_code (straight advance); now verbal answers give coding_ack.
+    // The mandatory counter-question invariant is unchanged: it only fires on intent='submit'.
     const { effect } = advance(toCoding(), codeAnswer(false));
-    expect(effect).toEqual({ kind: 'ask_code', index: 1 }); // straight advance, no counter-question
+    expect(effect.kind).toBe('coding_ack'); // D2: verbal → coding_ack, never ask_code or mandate
   });
 
-  test('coding follow-ups cap at codeMaxFollowUps (default 2): mandatory + 1 oracle, then advance', () => {
+  test('coding follow-ups cap at codeMaxFollowUps (default 2): mandatory + 1 oracle, then advance on submit', () => {
+    // D2: verbal answer at the cap gives coding_ack (not advance). Use submit at the cap point.
     let ctx = toCoding();
     const kinds: string[] = [];
     ctx = (() => {
@@ -293,9 +311,10 @@ describe('coding: SUBMIT mandatory counter-question', () => {
       return r.ctx;
     })(); // depth 1 (mandatory)
     const r2 = advance(ctx, codeAnswer(true));
-    kinds.push(r2.effect.kind); // depth 2 (oracle)
-    const r3 = advance(r2.ctx, codeAnswer(true));
-    kinds.push(r3.effect.kind); // CAP → advance
+    kinds.push(r2.effect.kind); // depth 2 (oracle — verbal within cap, followUp=true → ask_followup)
+    // D2: verbal at cap → coding_ack; use submit so the cap-then-advance fires.
+    const r3 = advance(r2.ctx, submit(true));
+    kinds.push(r3.effect.kind); // CAP + submit → advance
     expect(kinds).toEqual(['ask_followup', 'ask_followup', 'ask_code']);
     expect(r3.effect).toEqual({ kind: 'ask_code', index: 1 });
   });
@@ -466,5 +485,80 @@ describe('mustFireCounter predicate', () => {
   test('never fires outside the coding phase', () => {
     expect(mustFireCounter('oral', 'submit', 0)).toBe(false);
     expect(mustFireCounter('wrap_up', 'submit', 0)).toBe(false);
+  });
+});
+
+// ─────────────────────── D2 — verbal answers never advance coding ───────────────────────
+//
+// Only explicit SUBMIT or MOVE-ON may call advanceCoding. A verbal answer (intent absent
+// or 'answer') that would otherwise fall through to advanceCoding must instead emit
+// coding_ack — a brief, non-advancing, non-penalizable acknowledgment.
+
+describe('coding: D2 — verbal answers never advance the coding problem', () => {
+  test('verbal answer with no oracle follow-up (would have advanced before D2) emits coding_ack', () => {
+    // Pre-D2 this path called advanceCoding; now it must return coding_ack unchanged.
+    const ctx = toCoding();
+    const { ctx: next, effect } = advance(ctx, codeAnswer(false)); // oracle says no follow-up
+    expect(effect.kind).toBe('coding_ack');
+    expect(next.codeIndex).toBe(0); // problem unchanged
+    expect(next.followUps).toBe(0); // budget unchanged
+    expect(next.phase).toBe('coding');
+  });
+
+  test('verbal answer with intent="answer" also emits coding_ack, not advance', () => {
+    const ctx = toCoding();
+    const { ctx: next, effect } = advance(ctx, {
+      type: 'answer',
+      intent: 'answer',
+      decision: { followUp: false, reason: '', signal: 0.9 },
+    });
+    expect(effect.kind).toBe('coding_ack');
+    expect(next.codeIndex).toBe(0);
+    expect(next.followUps).toBe(0);
+  });
+
+  test('verbal answer with budget exhausted (followUps===cap) emits coding_ack, not advance', () => {
+    // Exhaust the budget: SUBMIT fires the mandatory CQ (followUps=1), then a verbal answer
+    // with oracle followUp=true pushes followUps to cap (2).
+    let ctx = toCoding();
+    ctx = advance(ctx, submit(false)).ctx; // mandatory CQ → followUps=1
+    ctx = advance(ctx, codeAnswer(true)).ctx; // oracle follow-up → followUps=2 (cap hit)
+    // Now followUps=2===cap. A verbal answer must emit coding_ack, NOT advanceCoding.
+    const { ctx: next, effect } = advance(ctx, codeAnswer(false));
+    expect(effect.kind).toBe('coding_ack');
+    expect(next.codeIndex).toBe(0); // still on problem 0
+    expect(next.followUps).toBe(2); // budget unchanged
+    expect(next.phase).toBe('coding');
+  });
+
+  test('SUBMIT with budget exhausted advances normally (not coding_ack) — only verbal is blocked', () => {
+    let ctx = toCoding();
+    ctx = advance(ctx, submit(false)).ctx; // mandatory CQ → followUps=1
+    ctx = advance(ctx, codeAnswer(true)).ctx; // oracle follow-up → followUps=2 (cap)
+    // Explicit submit at cap: intent='submit' is NOT a verbal answer → advanceCoding.
+    const { ctx: next, effect } = advance(ctx, submit(false));
+    expect(effect).toEqual({ kind: 'ask_code', index: 1 });
+    expect(next.codeIndex).toBe(1);
+    expect(next.followUps).toBe(0);
+  });
+
+  test('MOVE-ON still advances immediately regardless of budget', () => {
+    const ctx = toCoding();
+    const { effect } = advance(ctx, moveOn());
+    expect(effect).toEqual({ kind: 'ask_code', index: 1 });
+  });
+
+  test('coding_ack does not appear in the effects when SUBMIT is used throughout', () => {
+    // Regression guard: a submit-driven session must never produce coding_ack.
+    let ctx = toCoding();
+    const effects: string[] = [];
+    // Two problems × (mandatory CQ + advance) = 4 submit events to reach wrap_up.
+    for (let i = 0; i < 6 && ctx.phase !== 'wrap_up'; i++) {
+      const r = advance(ctx, submit(false));
+      effects.push(r.effect.kind);
+      ctx = r.ctx;
+    }
+    expect(effects).not.toContain('coding_ack');
+    expect(ctx.phase).toBe('wrap_up');
   });
 });

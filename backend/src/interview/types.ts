@@ -104,6 +104,7 @@ export type Effect =
   | { kind: 'handoff'; pivot?: true } // pivot=true when the handoff is a forced advance from dodge #3 on the last oral question
   | { kind: 'ask_code'; index: number } // 0-based core question
   | { kind: 'ask_followup'; codeIndex: number; depth: number; mandatory?: boolean } // depth 1..codeMaxFollowUps; mandatory=the format counter-question fired on SUBMIT
+  | { kind: 'coding_ack' } // non-advancing acknowledgment for verbal answers during coding (D2): keeps the floor with the candidate without consuming follow-up budget or advancing the problem
   | { kind: 'wrap_up' }
   | { kind: 'score' }
   | { kind: 'done' };

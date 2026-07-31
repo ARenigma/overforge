@@ -11,9 +11,14 @@
 //   oral      +answer-> ask_oral_followup (if decision.followUp && oralFollowUps===0, ONCE per question)
 //                       else next ask_oral, or handoff after the last question
 //   oral done +answer-> handoff
-//   handoff   +answer-> ask_code(0)
+//   handoff   +answer-> ask_code(0)   [orchestrator auto-chains on entry: no candidate event needed]
 //   coding    +answer-> ask_followup (if decision.followUp && under cap)
+//                       coding_ack  (if verbal intent absent/'answer' and cap hit or oracle silent)
+//                       [ONLY explicit submit/move_on or the time cap may advance a coding problem]
+//   coding    +submit-> ask_followup mandatory (first submit, followUps===0)
+//                       ask_followup oracle (followUp && under cap)
 //                       else next ask_code, or wrap_up after the last question
+//   coding    +move_on-> ask_code(next) or wrap_up (instant firm skip, no probe)
 //   wrap_up   +answer-> score
 //   scoring   +answer-> done   (the "answer" here is the driver's synthetic
 //                               post-scoring tick; scoring takes no candidate input)
@@ -159,7 +164,14 @@ export function advance(ctx: InterviewContext, event: InterviewEvent): StepResul
           },
         };
       }
-      // No (more) follow-ups: advance to the next core question, or wrap up.
+      // D2: verbal answers (intent absent or 'answer') must NEVER advance the coding problem.
+      // Only an explicit SUBMIT or MOVE-ON may call advanceCoding — not a voice transcript or
+      // typed remark. Emit coding_ack: a brief, non-advancing, non-penalizable acknowledgment
+      // that keeps the floor with the candidate while they are still working.
+      if (!event.intent || event.intent === 'answer') {
+        return { ctx, effect: { kind: 'coding_ack' } };
+      }
+      // Explicit submit with follow-up budget exhausted → advance to the next problem or wrap up.
       return advanceCoding(ctx);
     }
 

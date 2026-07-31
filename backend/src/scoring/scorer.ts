@@ -41,8 +41,10 @@ export interface ScoringInput {
 }
 
 /** Intervention kinds that count against the candidate (assistance that reveals approach/answer).
- *  Advisory kinds ('offer', 'nudge', 'encourage') are never penalized — they are fairness
- *  check-ins or positive reinforcement, not hints that reduce the difficulty of the problem. */
+ *  Advisory kinds ('offer', 'nudge', 'encourage', 'coding_ack') are never penalized — they are
+ *  fairness check-ins, positive reinforcement, or non-advancing verbal acknowledgments (D2),
+ *  not hints that reduce the difficulty of the problem. coding_ack turns carry no assist tag
+ *  so they are already absent from this set; listed here for documentation completeness. */
 export const PENALIZABLE_KINDS = new Set(['probe', 'hint', 'counter_question']);
 
 // Level-relative grading: the same answer should score differently by seniority.
