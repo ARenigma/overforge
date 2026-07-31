@@ -188,3 +188,54 @@ describe('pass #5 prod fixtures — cluster cap', () => {
     expect(clusterCount(loadQ, P5)).toBe(0);
   });
 });
+
+// ─────────── D3: the REAL prod coding follow-ups (session 843ef70a turns 15/17/19/21) ───────────
+// These are the verbatim turns Amit saw: the same "point me to the line where you check the
+// dictionary" question asked four ways. The shipped guard used limit 2 for follow-ups (inherited
+// from the oral path) and let EVERY one of them through — measured cluster counts are 1 and 2.
+// The coding path therefore uses limit 0, which these fixtures pin: true repeats cluster ≥1 while
+// legitimately different questions about the same code cluster 0.
+
+const PROD_T15 =
+  'Your use of the empty dictionary called seen suggests you were planning a hash-lookup for ' +
+  'complements — can you walk me through exactly where in the loop you check whether the needed ' +
+  'partner value is already in that dictionary?';
+const PROD_T17 =
+  'Hmm, can you walk me through what happens after you read the input—specifically, does the code ' +
+  'ever reach the part where you build the list and start iterating, or is something stopping it ' +
+  'before that?';
+const PROD_T19 =
+  'Hmm… can you point me to the exact line where you check the dictionary for a complement, and ' +
+  'what condition you use there?';
+const PROD_T21 =
+  'Okay — can you tell me exactly what the condition looks like on that line when you check the ' +
+  'dictionary for the needed complement? What expression are you using?';
+
+describe('D3: real prod coding follow-ups must trip the limit-0 coding guard', () => {
+  test('the genuine repeats cluster ≥1 (so limit 0 fires on them)', () => {
+    expect(clusterCount(PROD_T19, [PROD_T15])).toBeGreaterThan(0);
+    expect(clusterCount(PROD_T19, [PROD_T15, PROD_T17])).toBeGreaterThan(0);
+    expect(clusterCount(PROD_T21, [PROD_T19])).toBeGreaterThan(0);
+    expect(clusterCount(PROD_T21, [PROD_T15, PROD_T17, PROD_T19])).toBeGreaterThan(0);
+  });
+
+  test('legitimately different questions about the same code cluster 0 (no false fire)', () => {
+    // A different code region — this is the one turn in the prod sequence that was fair.
+    expect(clusterCount(PROD_T17, [PROD_T15])).toBe(0);
+    // Standard follow-up axes that must always stay available.
+    expect(
+      clusterCount('What happens to your solution if the input array is empty, or has one element?', [
+        PROD_T15,
+        PROD_T17,
+        PROD_T19,
+      ])
+    ).toBe(0);
+    expect(
+      clusterCount('What is the time and space complexity of that approach, and could you do better?', [
+        PROD_T15,
+        PROD_T17,
+        PROD_T19,
+      ])
+    ).toBe(0);
+  });
+});

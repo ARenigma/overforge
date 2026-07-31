@@ -1387,7 +1387,13 @@ export async function submitAnswer(
         // (DeterministicOracle.generateIntervention with mandatory=true) — the CQ must never drop.
         if (effect.kind === 'ask_followup') {
           const priors = priorAiQuestions(transcriptWithAnswer);
-          const limit = 2;
+          // Limit 0, NOT the oral path's 2. Measured against the four real coding follow-ups from
+          // prod session 843ef70a: the genuine repeats ("point me to the exact line where you check
+          // the dictionary" asked four ways) cluster at exactly 1, while legitimately different
+          // questions about the SAME code (edge cases, complexity, a different code region) cluster
+          // at 0. A limit of 2 therefore let every observed repeat through — the ladder already caps
+          // follow-ups at codeMaxFollowUps per problem, so re-asking is never correct.
+          const limit = 0;
           const firstCount = clusterCount(utterance.text, priors);
           if (firstCount > limit) {
             const retried = await withCostContext(
