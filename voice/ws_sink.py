@@ -77,6 +77,18 @@ class WsTtsSink:
             self._first_audio_ms[request_id] = first_audio_ms
             event.set()
 
+    async def barge_in(self, request_id: str) -> None:
+        """Interrupt the current utterance: notify the browser and resolve the pending ack early.
+
+        Sends ``{type:"barge_in"}`` so the browser stops playback immediately, then sets the
+        internal speak-wait event so :meth:`speak` unblocks.  Safe to call multiple times (the
+        second call is a no-op on the event, and the send is best-effort).
+        """
+        await self._safe_send({"type": "barge_in"})
+        event = self._pending.get(request_id)
+        if event is not None:
+            event.set()
+
     async def _safe_send(self, payload: dict[str, object]) -> None:
         """Send a cue; a closed/broken socket is non-fatal (the turn loop must not crash on it)."""
         try:

@@ -100,6 +100,18 @@ class ServerClosing(TypedDict):
     reason: Literal["terminal", "idle", "shutdown"]
 
 
+class ServerBargeIn(TypedDict):
+    """Sent server→client when the candidate interrupts the interviewer mid-speech.
+
+    The browser must: stop all queued/in-flight TTS audio, bump its speak-sequence counter so
+    late chunks are ignored, and re-arm the mic for the next candidate turn.  No ``requestId``
+    is carried — the browser tracks the current turn via its own ``pendingVoiceRequestRef``.
+    No ``{spoken}`` ack is required in response; the server resolves the speak wait internally.
+    """
+
+    type: Literal["barge_in"]
+
+
 def decode_frame(buf: bytes) -> npt.NDArray[np.float32]:
     """Decode one uplink binary audio frame into a FRESH 512-sample float32 array in [-1, 1).
 

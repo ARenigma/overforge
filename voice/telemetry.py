@@ -52,6 +52,8 @@ class TurnTelemetry:
     #: Browser-measured TTFB: performance.now() delta from turn_ready receipt to first PCM sample
     #: scheduled for playback (ms).  None when the client didn't report it or TTS failed entirely.
     first_audio_ms: float | None = None
+    #: True when the candidate barged in mid-utterance, cutting the interviewer short.
+    barge_in: bool = False
 
 
 class TelemetrySink(Protocol):
@@ -129,6 +131,7 @@ class RestTelemetrySink:
                 "shadowEndpointMs": t.shadow_endpoint_ms,
                 "shadowEndpointCount": t.shadow_endpoint_count,
                 "firstAudioMs": t.first_audio_ms,
+                "bargeIn": t.barge_in,
             }
             resp = await self._client.post(path, json=body)
             if resp.status_code not in (200, 204):

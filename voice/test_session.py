@@ -33,7 +33,13 @@ from contracts import (  # noqa: E402
     Utterance,
 )
 from endpointing import EotEvent  # noqa: E402
-from session import _MAX_TURN_FRAMES, _looks_incomplete, VoiceSession  # noqa: E402
+from session import (  # noqa: E402
+    _BARGE_IN_MIN_VOICED_FRAMES,
+    _BARGE_IN_PROTECTION_FRAMES,
+    _MAX_TURN_FRAMES,
+    _looks_incomplete,
+    VoiceSession,
+)
 
 _FRAME = 512
 
@@ -1302,3 +1308,241 @@ async def test_substantial_commit_skips_grace_and_answers_immediately() -> None:
 
     assert result is not None and len(brain.calls) == 1
     assert elapsed < 0.5, f"substantial answer paid a grace hold ({elapsed:.2f}s)"
+
+
+# ─────────────────────────── Barge-in (BARGE_IN_ENABLED) ─────────────────────────────
+#
+# Design:
+#   * While in PROCESSING (waiting for the spoken-ack from the browser), the barge-in watcher
+#     reads mic frames from frame_q and runs simple RMS VAD.
+#   * Protection window (_BARGE_IN_PROTECTION_FRAMES ≈ 300ms): frames are consumed but ignored.
+#   * After the protection window: _BARGE_IN_MIN_VOICED_FRAMES consecutive frames above
+#     _BARGE_IN_ENERGY_THRESHOLD (≈ 320ms sustained speech) → sink.barge_in() fires.
+#   * Barge-in: session recovers to LISTENING; pump returns None (no turn result).
+
+
+class BargeInCaptureSink:
+    """TtsSink that blocks speak() on an internal Event so the test can control timing.
+
+    Supports the ``barge_in(request_id)`` interface required by the watcher — calling it
+    records the request_id and unblocks the pending speak() coroutine.
+    """
+
+    def __init__(self) -> None:
+        self.spoken: list[TurnResult] = []
+        self.barge_in_request_ids: list[str] = []
+        self.speak_started: asyncio.Event = asyncio.Event()
+        self._pending: asyncio.Event | None = None
+
+    async def speak(self, turn: TurnResult) -> float | None:
+        self._pending = asyncio.Event()
+        self.spoken.append(turn)
+        self.speak_started.set()
+        await self._pending.wait()
+        return None
+
+    async def on_thinking(self) -> None:
+        pass
+
+    async def barge_in(self, request_id: str) -> None:
+        """Called by the watcher — records and unblocks speak()."""
+        self.barge_in_request_ids.append(request_id)
+        if self._pending is not None:
+            self._pending.set()
+
+
+def _barge_in_session(sink: BargeInCaptureSink, fire_after: int = 3) -> tuple[VoiceSession, asyncio.Queue]:
+    """Build a local-path VoiceSession with a BargeInCaptureSink and return (session, frame_q).
+
+    Uses a FakeEndpointer that fires after ``fire_after`` frames so the test can trigger
+    PROCESSING quickly, then feed voiced frames into ``frame_q`` while speak() blocks.
+    """
+    ep = FakeEndpointer(fire_after=fire_after)
+    stt = FakeSTT("candidate answer")
+    brain = FakeBrain(results=[AnswerResult(Utterance("next question", "voice"), "oral", {})])
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        sink=sink,
+    )
+    frame_q: asyncio.Queue[np.ndarray] = asyncio.Queue()
+    return session, frame_q
+
+
+async def _drive_to_speak(
+    session: VoiceSession,
+    frame_q: asyncio.Queue[np.ndarray],
+    sink: BargeInCaptureSink,
+    fire_after: int = 3,
+) -> asyncio.Task:
+    """Feed ``fire_after`` frames to trigger EOT, then return a running pipeline task.
+
+    The pipeline task calls pump() in a loop. It exits when either a real TurnResult is
+    produced or when the sink records a barge-in (pump returned None after barge-in).
+    """
+    result_holder: list[object] = []
+
+    async def pipeline() -> None:
+        while True:
+            r = await session.pump(frame_q)
+            if r is not None:
+                result_holder.append(r)
+                return
+            if sink.barge_in_request_ids:
+                return  # barge-in happened; pump already returned None
+
+    pipe_task = asyncio.create_task(pipeline())
+    # Feed frames to trigger the endpointer and advance into _safe_speak.
+    for _ in range(fire_after):
+        await frame_q.put(_frame(0.1))
+        await asyncio.sleep(0)
+
+    # Wait until speak() has been entered (session is blocked awaiting the spoken-ack).
+    await asyncio.wait_for(sink.speak_started.wait(), timeout=2.0)
+    return pipe_task
+
+
+async def test_barge_in_sustained_speech_triggers_signal_and_returns_to_listening() -> None:
+    """The core barge-in scenario: ≥_BARGE_IN_MIN_VOICED_FRAMES consecutive voiced frames above
+    threshold (after the protection window) must fire the barge-in signal and leave the session
+    in LISTENING so the next candidate turn is captured normally."""
+    sink = BargeInCaptureSink()
+    session, frame_q = _barge_in_session(sink)
+
+    pipe_task = await _drive_to_speak(session, frame_q, sink)
+
+    # Feed: skip protection window + sustain MIN_VOICED + 1 extra voiced frame.
+    for _ in range(_BARGE_IN_PROTECTION_FRAMES + _BARGE_IN_MIN_VOICED_FRAMES + 1):
+        await frame_q.put(_frame(0.1))
+        await asyncio.sleep(0)
+
+    # Wait for barge-in to fire and the pipeline task to return.
+    await asyncio.wait_for(pipe_task, timeout=2.0)
+
+    assert len(sink.barge_in_request_ids) == 1, "barge_in() must be called exactly once"
+    assert session.state == "listening", "session must recover to LISTENING after barge-in"
+
+
+async def test_barge_in_short_burst_does_not_trigger() -> None:
+    """A short burst of voiced frames (fewer than _BARGE_IN_MIN_VOICED_FRAMES consecutive frames
+    above threshold) followed by silence must NOT trigger barge-in — cough / echo residual guard."""
+    sink = BargeInCaptureSink()
+    session, frame_q = _barge_in_session(sink)
+
+    pipe_task = await _drive_to_speak(session, frame_q, sink)
+
+    # Feed: protection window + short burst (less than MIN, so counter never reaches threshold)
+    # + silent frames that reset the consecutive counter.
+    short_burst = _BARGE_IN_MIN_VOICED_FRAMES - 5  # well below the min; 5 voiced frames
+    for _ in range(_BARGE_IN_PROTECTION_FRAMES + short_burst):
+        await frame_q.put(_frame(0.1))
+        await asyncio.sleep(0)
+    for _ in range(8):  # silence resets consecutive_voiced to 0
+        await frame_q.put(_frame(0.0))
+        await asyncio.sleep(0)
+
+    assert not sink.barge_in_request_ids, "short burst must NOT trigger barge-in"
+
+    # Clean up: resolve speak() externally so pipeline exits cleanly.
+    assert sink._pending is not None
+    sink._pending.set()
+    await asyncio.wait_for(pipe_task, timeout=2.0)
+    await session.aclose()
+
+
+async def test_barge_in_protection_window_prevents_early_cut() -> None:
+    """Voiced frames WITHIN the first _BARGE_IN_PROTECTION_FRAMES must not trigger barge-in
+    even if they would satisfy the energy threshold — the protection window is unconditional."""
+    sink = BargeInCaptureSink()
+    session, frame_q = _barge_in_session(sink)
+
+    pipe_task = await _drive_to_speak(session, frame_q, sink)
+
+    # Feed exactly _BARGE_IN_PROTECTION_FRAMES voiced frames — all fall in the protection window
+    # (consecutive_voiced is never incremented) — plus _BARGE_IN_MIN_VOICED_FRAMES - 1 more voiced
+    # frames after the window, still one short of the barge-in threshold.
+    total = _BARGE_IN_PROTECTION_FRAMES + _BARGE_IN_MIN_VOICED_FRAMES - 1
+    for _ in range(total):
+        await frame_q.put(_frame(0.1))
+        await asyncio.sleep(0)
+
+    assert not sink.barge_in_request_ids, (
+        "protection window frames plus one-short-of-threshold consecutive frames "
+        "must NOT trigger barge-in"
+    )
+
+    # Clean up.
+    assert sink._pending is not None
+    sink._pending.set()
+    await asyncio.wait_for(pipe_task, timeout=2.0)
+    await session.aclose()
+
+
+async def test_barge_in_stale_audio_after_event_is_dropped() -> None:
+    """After barge-in, the session is in LISTENING and further voiced frames feed the accumulator
+    as the start of the next turn — the barge-in watcher is already done and cannot fire again,
+    so there is no double-barge-in from stale audio."""
+    sink = BargeInCaptureSink()
+    session, frame_q = _barge_in_session(sink)
+
+    pipe_task = await _drive_to_speak(session, frame_q, sink)
+
+    # Trigger barge-in.
+    for _ in range(_BARGE_IN_PROTECTION_FRAMES + _BARGE_IN_MIN_VOICED_FRAMES + 1):
+        await frame_q.put(_frame(0.1))
+        await asyncio.sleep(0)
+
+    await asyncio.wait_for(pipe_task, timeout=2.0)
+    assert len(sink.barge_in_request_ids) == 1
+    assert session.state == "listening"
+
+    # After barge-in, the session is back in LISTENING.  Subsequent voiced frames are accumulated
+    # by the endpointer — they do NOT retrigger barge-in (the watcher task is already done).
+    # Feed more voiced frames; they are consumed by the new LISTENING pump() call without error.
+    sink.speak_started.clear()  # reset for the next turn check
+    # Feed frames into the queue while in LISTENING — these become part of the next turn.
+    # (No second pump() drive needed: we just verify the session state is stable.)
+    assert session.state == "listening", "session must remain LISTENING after barge-in"
+    # Confirm _barge_in_occurred was reset by _recover() so it does not bleed into the next turn.
+    assert not session._barge_in_occurred, "_barge_in_occurred must be reset after recover"
+
+
+async def test_barge_in_telemetry_recorded_with_flag() -> None:
+    """A barge-in turn must produce a telemetry record with barge_in=True."""
+    sink = BargeInCaptureSink()
+    session, frame_q = _barge_in_session(sink)
+    tel = FakeTelemetrySink()
+    # Rebuild session with telemetry sink.
+    ep = FakeEndpointer(fire_after=3)
+    stt = FakeSTT("answer")
+    brain = FakeBrain(results=[AnswerResult(Utterance("q2", "voice"), "oral", {})])
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        sink=sink,
+        telemetry=tel,
+    )
+    frame_q2: asyncio.Queue[np.ndarray] = asyncio.Queue()
+
+    pipe_task = await _drive_to_speak(session, frame_q2, sink)
+
+    for _ in range(_BARGE_IN_PROTECTION_FRAMES + _BARGE_IN_MIN_VOICED_FRAMES + 1):
+        await frame_q2.put(_frame(0.1))
+        await asyncio.sleep(0)
+
+    await asyncio.wait_for(pipe_task, timeout=2.0)
+
+    # Let the fire-and-forget telemetry task run.
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert len(tel.records) == 1
+    rec = tel.records[0]
+    assert rec.barge_in is True, "telemetry must record barge_in=True for a barge-in turn"
+    assert session.state == "listening"

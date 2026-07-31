@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  ServerBargeIn,
   ServerReady,
   ServerThinking,
   ServerTurnReady,
@@ -24,6 +25,8 @@ interface UseVoiceSocketOptions {
   onTurnReady: (cue: ServerTurnReady) => void;
   onError: (cue: ServerError) => void;
   onClosing: (cue: ServerClosing) => void;
+  /** Called when the server signals the candidate interrupted the interviewer mid-speech. */
+  onBargeIn: (cue: ServerBargeIn) => void;
   /** Called when all retry attempts are exhausted — caller reverts to typed mode. */
   onFatal: () => void;
 }
@@ -52,6 +55,7 @@ export function useVoiceSocket({
   onTurnReady,
   onError,
   onClosing,
+  onBargeIn,
   onFatal,
 }: UseVoiceSocketOptions): UseVoiceSocketResult {
   const [socketStatus, setSocketStatus] = useState<SocketStatus>('disconnected');
@@ -67,6 +71,7 @@ export function useVoiceSocket({
   const onTurnReadyRef = useRef(onTurnReady);
   const onErrorRef = useRef(onError);
   const onClosingRef = useRef(onClosing);
+  const onBargeInRef = useRef(onBargeIn);
   const onFatalRef = useRef(onFatal);
   const tokenRef = useRef(token);
 
@@ -85,6 +90,9 @@ export function useVoiceSocket({
   useEffect(() => {
     onClosingRef.current = onClosing;
   }, [onClosing]);
+  useEffect(() => {
+    onBargeInRef.current = onBargeIn;
+  }, [onBargeIn]);
   useEffect(() => {
     onFatalRef.current = onFatal;
   }, [onFatal]);
@@ -159,6 +167,9 @@ export function useVoiceSocket({
           break;
         case 'closing':
           onClosingRef.current(cue);
+          break;
+        case 'barge_in':
+          onBargeInRef.current(cue);
           break;
       }
     };

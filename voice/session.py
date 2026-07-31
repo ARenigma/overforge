@@ -78,6 +78,27 @@ _MAX_TURN_FRAMES = int(_MAX_TURN_S * _SR / _VAD_FRAME)
 _STREAM_PAUSE_S = 0.4
 _STREAM_MIN_SEG_FRAMES = int(2.5 * _SR / _VAD_FRAME)
 
+# ── Barge-in detection (flag-gated via BARGE_IN_ENABLED=1) ────────────────────────────────────
+# While the interviewer speaks, the local VAD runs on incoming mic frames so the candidate can
+# interrupt mid-sentence — the "feels like a machine" gap where the candidate must wait for the
+# interviewer to finish. False barge-in (cough/echo) is WORSE than no barge-in, so we require
+# BOTH a sustained voiced-frame count above a minimum AND a protection window at utterance start.
+
+# Simple RMS energy threshold above which a frame is considered voiced. Chosen well above
+# typical AEC residual (~0.001–0.01 RMS) and room noise (~0.001–0.005 RMS) but below normal
+# speech (0.03–0.15 RMS). Stage-1 AEC ships echo cancellation so residual must clear this bar.
+_BARGE_IN_ENERGY_THRESHOLD = 0.025
+
+# Consecutive voiced frames required to commit a barge-in (≈ 320 ms at 32 ms/frame). Meets the
+# ≥250–400 ms spec requirement; combined with the energy threshold, burst noise/echo residual
+# that is shorter or quieter cannot trigger a false cut.
+_BARGE_IN_MIN_VOICED_FRAMES = 10
+
+# Frames at utterance start during which barge-in is suppressed (≈ 288 ms ≈ 300 ms spec).
+# AEC needs a brief adaptation window after TTS begins; this also prevents a random audio
+# transient coinciding with the very first playback moment from triggering a false cut.
+_BARGE_IN_PROTECTION_FRAMES = 9
+
 # Continuation grace: how long to hold a SHORT/incomplete end-of-turn before treating it as the
 # candidate's answer. Only short commits pay this (see _looks_incomplete), so a normal answer keeps
 # today's latency. 0.6 s is the pause a person leaves mid-sentence without ceding the floor.
@@ -283,6 +304,15 @@ class VoiceSession:
         self._shadow = shadow
         self._shadow_started = False
         self._shadow_close_task: asyncio.Task[None] | None = None
+        # Barge-in detection (BARGE_IN_ENABLED). _frame_q is set by pump() so the watcher can
+        # read mic frames from the same queue as the pipeline, without extra plumbing. It is None
+        # on the local whisper path until the first pump() call, which is fine — barge-in is only
+        # active during SPEAKING (which can only be reached after at least one pump() call).
+        # _barge_in_occurred is a per-speak-call flag: set by the watcher when sustained speech is
+        # detected; checked by _complete_turn to recover to LISTENING instead of SPEAKING.
+        self._barge_in_enabled: bool = os.environ.get("BARGE_IN_ENABLED", "1") == "1"
+        self._frame_q: asyncio.Queue[AudioArray] | None = None
+        self._barge_in_occurred: bool = False
 
     @property
     def state(self) -> str:
@@ -390,6 +420,9 @@ class VoiceSession:
         Returns / raises exactly like :meth:`feed_frame` (``TurnResult`` for a committed turn,
         ``None`` otherwise; brain errors propagate after the session has re-armed itself).
         """
+        # Store reference so the barge-in watcher (started inside _safe_speak) can consume
+        # frames from the same queue during SPEAKING without additional transport plumbing.
+        self._frame_q = frame_q
         if self._streamer is None or self._fell_back:
             frame = await self._next_frame(frame_q)
             return await self.feed_frame(frame)
@@ -819,6 +852,21 @@ class VoiceSession:
         t_oracle = time.perf_counter()
         first_audio_ms = await self._safe_speak(turn)
         tts_ms = (time.perf_counter() - t_oracle) * 1000.0
+
+        # Barge-in: the candidate interrupted mid-utterance. The interviewer's transcript is already
+        # persisted server-side (DO NOT retro-edit). Recover to LISTENING so the candidate's next
+        # speech is captured as the following turn. Return None so the pipeline re-arms without
+        # sending arm_next_turn (which would be a no-op on LISTENING anyway).
+        if self._barge_in_occurred:
+            logger.info("voice.barge_in_applied rid=%s — recovering to LISTENING.", rid)
+            self._log_turn(
+                rid, reason, audio_s, stt_ms, oracle_ms, tts_ms, result.phase,
+                transcript=transcript, terminal=False, first_audio_ms=first_audio_ms,
+                barge_in=True,
+            )
+            self._recover()
+            return None
+
         self._state = _State.TERMINAL if is_terminal else _State.SPEAKING
         self._log_turn(
             rid, reason, audio_s, stt_ms, oracle_ms, tts_ms, result.phase,
@@ -840,6 +888,7 @@ class VoiceSession:
         empty: bool = False,
         terminal: bool = False,
         first_audio_ms: float | None = None,
+        barge_in: bool = False,
     ) -> None:
         """Emit one structured per-turn telemetry line at INFO.
 
@@ -852,7 +901,7 @@ class VoiceSession:
         gap_ms = stt_ms + (oracle_ms or 0.0) + (tts_ms or 0.0)
         logger.info(
             "voice.turn rid=%s commit=%s audio_s=%.1f stt_ms=%.0f oracle_ms=%s tts_ms=%s "
-            "gap_ms=%.0f phase=%s first_audio_ms=%s%s%s",
+            "gap_ms=%.0f phase=%s first_audio_ms=%s%s%s%s",
             rid,
             commit,
             audio_s,
@@ -864,6 +913,7 @@ class VoiceSession:
             f"{first_audio_ms:.0f}" if first_audio_ms is not None else "na",
             " empty=1" if empty else "",
             " terminal=1" if terminal else "",
+            " barge_in=1" if barge_in else "",
         )
         # Consume the shadow's per-turn observation (A/B). Once per turn, aligned to this commit.
         shadow_engine, snap = self._snapshot_shadow()
@@ -885,6 +935,7 @@ class VoiceSession:
             shadow_endpoint_ms=snap.endpoint_ms if snap else None,
             shadow_endpoint_count=snap.endpoint_count if snap else None,
             first_audio_ms=first_audio_ms,
+            barge_in=barge_in,
         )
         self._safe_telemetry(t)
 
@@ -893,12 +944,52 @@ class VoiceSession:
 
         A TTS failure is non-fatal (the room degrades to text) and must never derail the session
         state — so we swallow + log it rather than let it propagate.
+
+        When barge-in is enabled and the sink supports it (has a ``barge_in`` method), a
+        concurrent watcher task reads mic frames from ``_frame_q`` and calls ``sink.barge_in()``
+        on sustained candidate speech, which sends ``{barge_in}`` to the browser and unblocks
+        ``speak()`` early. The watcher is cancelled when ``speak()`` resolves normally.
+
+        Barge-in is suppressed for terminal turns (the session is closing) and when ``_frame_q``
+        is None (first pump call not yet made — impossible in practice since SPEAKING is only
+        reachable after at least one pump).
         """
+        run_barge_in = (
+            self._barge_in_enabled
+            and not turn.is_terminal
+            and self._frame_q is not None
+            and hasattr(self._sink, "barge_in")
+        )
+
+        if not run_barge_in:
+            try:
+                return await self._sink.speak(turn)
+            except Exception:
+                logger.exception("TTS sink failed for turn %s — continuing.", turn.request_id)
+                return None
+
+        # Barge-in path: cancel the persistent frame waiter (if any) so the watcher has exclusive
+        # queue access — concurrent frame consumers would interleave frames and break the
+        # consecutive-voiced-frame count.  The waiter is recreated on the next pump() call.
+        if self._pump_frame_task is not None:
+            self._pump_frame_task.cancel()
+            self._pump_frame_task = None
+
+        watcher = asyncio.create_task(
+            self._barge_in_watcher(turn.request_id),
+            name=f"barge-in-watcher-{turn.request_id}",
+        )
+        self._bg_tasks.add(watcher)
+        watcher.add_done_callback(self._bg_tasks.discard)
         try:
             return await self._sink.speak(turn)
         except Exception:
             logger.exception("TTS sink failed for turn %s — continuing.", turn.request_id)
             return None
+        finally:
+            # Cancel the watcher if speak() resolved normally (ack received); if barge-in
+            # already fired, the watcher is already done — cancel() is a no-op on done tasks.
+            watcher.cancel()
 
     def _safe_thinking(self) -> None:
         """Fire the EOT "thinking" backchannel cue WITHOUT blocking the STT pipeline.
@@ -916,6 +1007,66 @@ class VoiceSession:
         task = asyncio.create_task(_run(), name=f"thinking-cue-{self._request_id}")
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
+
+    async def _barge_in_watcher(self, request_id: str) -> None:
+        """Consume mic frames from ``_frame_q`` during SPEAKING and fire barge-in on sustained speech.
+
+        Runs concurrently with ``_safe_speak`` (as a tracked background task). The caller cancels
+        this task if the utterance ends normally (spoken ack received) before sustained speech is
+        detected — cancellation is the fast path, not the exception path.
+
+        Detection logic (all parameters are module-level constants):
+          * Frame RMS below ``_BARGE_IN_ENERGY_THRESHOLD`` → silent / echo residual → reset counter.
+          * Frame RMS at or above threshold → candidate may be speaking → increment counter.
+          * First ``_BARGE_IN_PROTECTION_FRAMES`` frames are skipped unconditionally — this covers
+            AEC adaptation at utterance start and prevents audio transients from triggering a cut.
+          * ``_BARGE_IN_MIN_VOICED_FRAMES`` consecutive voiced frames → barge-in confirmed.
+
+        On confirmation: sets ``_barge_in_occurred``, calls ``sink.barge_in(request_id)`` which
+        sends ``{barge_in}`` to the browser and unblocks ``_safe_speak``'s pending event.
+        """
+        frame_q = self._frame_q
+        if frame_q is None:
+            return
+
+        frames_elapsed = 0
+        consecutive_voiced = 0
+
+        while True:
+            try:
+                frame = await frame_q.get()
+            except asyncio.CancelledError:
+                return
+
+            frames_elapsed += 1
+
+            # Protection window: ignore frames at utterance start unconditionally.
+            if frames_elapsed <= _BARGE_IN_PROTECTION_FRAMES:
+                continue
+
+            rms = float(np.sqrt(np.mean(np.asarray(frame, dtype=np.float32) ** 2)))
+            if rms >= _BARGE_IN_ENERGY_THRESHOLD:
+                consecutive_voiced += 1
+            else:
+                consecutive_voiced = 0
+
+            if consecutive_voiced >= _BARGE_IN_MIN_VOICED_FRAMES:
+                logger.info(
+                    "voice.barge_in rid=%s frames_elapsed=%d rms_threshold=%.3f "
+                    "consecutive_voiced=%d — candidate interrupted; stopping utterance.",
+                    request_id,
+                    frames_elapsed,
+                    _BARGE_IN_ENERGY_THRESHOLD,
+                    consecutive_voiced,
+                )
+                self._barge_in_occurred = True
+                sink = self._sink
+                if hasattr(sink, "barge_in"):
+                    try:
+                        await sink.barge_in(request_id)  # type: ignore[union-attr]
+                    except Exception:
+                        logger.exception("Barge-in sink notification failed — continuing.")
+                return
 
     def _safe_telemetry(self, t: TurnTelemetry) -> None:
         """Persist turn telemetry via a fire-and-forget background task.
@@ -1032,6 +1183,7 @@ class VoiceSession:
         self._committed_frames = 0
         self._turn_gen += 1  # invalidate any in-flight streaming-STT segment from the prior turn
         self._stream_frames = 0
+        self._barge_in_occurred = False  # clear for the next speaking window
         self._drain_stream_events()  # streamed events from the prior listening window are stale
         if self._shadow is not None:
             self._shadow.reset()  # align the shadow's window to this fresh listening window

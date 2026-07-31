@@ -76,8 +76,21 @@ export interface ServerClosing {
   reason: 'terminal' | 'idle' | 'shutdown';
 }
 
+export interface ServerBargeIn {
+  /** Candidate interrupted mid-utterance. Browser must: stop TTS immediately (bump speakSeqRef,
+   *  call stopTtsStreamRef), clear voiceSpeakingRef, and re-arm the mic. No {spoken} ack needed —
+   *  the server already resolved the speak wait internally. */
+  type: 'barge_in';
+}
+
 /** Discriminated union of all server→client JSON cues. */
-export type VoiceCue = ServerReady | ServerThinking | ServerTurnReady | ServerError | ServerClosing;
+export type VoiceCue =
+  | ServerReady
+  | ServerThinking
+  | ServerTurnReady
+  | ServerError
+  | ServerClosing
+  | ServerBargeIn;
 
 // ── Protocol constants (consumers hardcode these values — kept here for reference only) ──
 // WebSocket close codes (4xxx = application-defined, mirrors ws_protocol.py):

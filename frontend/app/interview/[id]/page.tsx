@@ -74,7 +74,7 @@ import { PresenceCue } from '@/components/interview/presence-cue';
 import { ProblemDock } from '@/components/interview/problem-dock';
 import { useVoiceMic } from '@/lib/voice/use-voice-mic';
 import { useVoiceSocket } from '@/lib/voice/use-voice-socket';
-import type { ServerReady, ServerTurnReady } from '@/lib/voice/types';
+import type { ServerBargeIn, ServerReady, ServerTurnReady } from '@/lib/voice/types';
 import { useCameraProctor } from '@/lib/proctor/use-camera-proctor';
 
 const VOICE_WS_URL = process.env.NEXT_PUBLIC_VOICE_WS_URL ?? '';
@@ -574,14 +574,13 @@ export default function InterviewPage() {
   } = useVoiceMic({
     // Stable callback (deps []): the worklet captures it once. Gate via the live ref, not state.
     onFrame: useCallback((buf: ArrayBuffer) => {
-      // Half-duplex: also drop frames while the interviewer is speaking, else the mic captures our
-      // own greeting/reply as a phantom candidate turn (self-echo → false-fire → "stuck speaking").
-      if (
-        !micForwardingRef.current ||
-        voiceSpeakingRef.current ||
-        Date.now() < micCooldownUntilRef.current
-      )
-        return;
+      // Barge-in requires mic frames to flow to the server while TTS is playing so the Python
+      // service can detect sustained candidate speech and interrupt the utterance. The
+      // voiceSpeakingRef gate has been removed: frames flow whenever micForwarding is true and
+      // the short post-TTS echo tail has cleared (micCooldownUntilRef). The server-side VAD
+      // protects the first ~300ms of each utterance and requires 10 consecutive voiced frames
+      // above a 0.025 RMS threshold — well above AEC residual — before cutting.
+      if (!micForwardingRef.current || Date.now() < micCooldownUntilRef.current) return;
       sendFrameRef.current?.(buf);
     }, []),
   });
@@ -764,9 +763,12 @@ export default function InterviewPage() {
         if (cue.phase === 'done') setStage('done');
       }
 
-      // Stop mic capture and play the interviewer's TTS via the existing speak() path.
-      setMicForwarding(false);
+      // Mark TTS as active (used internally for half-duplex state tracking). We keep
+      // micForwarding TRUE so frames reach the server for barge-in VAD detection — the server
+      // only runs barge-in while in SPEAKING state, so this is safe. The prior {thinking} cue
+      // may have disarmed forwarding; re-arm it here so frames flow during TTS playback.
       voiceSpeakingRef.current = true;
+      setMicForwarding(true);
 
       const doSpeak = async () => {
         try {
@@ -808,6 +810,25 @@ export default function InterviewPage() {
     stopMic();
   }, [stopMic]);
 
+  // Called when the server sends {barge_in}: the candidate interrupted mid-utterance.
+  // Stop TTS immediately (bump the speak sequence so late chunks are ignored, cancel the
+  // in-flight fetch + stop Web Audio sources), clear the speaking flag, and reset the echo
+  // cooldown so the mic is ready for the candidate's next word without delay.
+  // No {spoken} ack is sent — the server already resolved the speak wait internally.
+  const handleVoiceBargeIn = useCallback((_cue: ServerBargeIn) => {
+    // Bump seq: makes isCancelled() return true in playPcmStream and guards all speak() seq checks.
+    speakSeqRef.current += 1;
+    // Abort the in-flight fetch and stop all scheduled Web Audio sources.
+    stopTtsStreamRef.current?.();
+    stopTtsStreamRef.current = null;
+    // Clear TTS-active flag (speak()'s finally won't clear it because seq !== current).
+    voiceSpeakingRef.current = false;
+    // Remove post-TTS echo cooldown so mic captures the candidate's next word immediately.
+    micCooldownUntilRef.current = 0;
+    // Ensure mic forwarding stays armed (it should already be true, but guard explicitly).
+    setMicForwarding(true);
+  }, []);
+
   // These are populated once the socket hook is instantiated below.
   const sendSpokenRef = useRef<((requestId: string, firstAudioMs?: number | null) => void) | null>(
     null
@@ -828,6 +849,7 @@ export default function InterviewPage() {
       setMicForwarding(false);
       stopMic();
     }, [stopMic]),
+    onBargeIn: handleVoiceBargeIn,
     onFatal: handleVoiceFatal,
   });
 
