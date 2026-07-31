@@ -17,9 +17,13 @@ import { recordTtsCost } from '../cost/ledger';
 import {
   synthesize,
   synthesizeStream,
+  synthesizeStreamSentences,
   isTtsConfigured,
   splitSentences,
   STREAM_SAMPLE_RATE,
+  prewarmTts,
+  hasPriorWarmSocket,
+  activeTtsProvider,
 } from '../voice/tts';
 import type { RunResult } from '../execution/types';
 
@@ -248,6 +252,10 @@ router.post('/:id/begin', async (req: Request, res: Response): Promise<void> => 
     await enforceRateLimit(`begin:${req.ip}`, { limit: 20, windowMs: 600_000 });
     await validateCandidate(id, token ?? '');
 
+    // Pre-warm the TTS WebSocket before the brain generates the greeting (~1–2 s LLM call).
+    // Fire-and-forget: never throws, never blocks the response.
+    prewarmTts();
+
     const result = await orchestrator.begin(id, { tncAccepted: tncAccepted === true });
     res.json(result);
   } catch (err) {
@@ -306,6 +314,11 @@ router.post('/:id/answer', async (req: Request, res: Response): Promise<void> =>
     if (validIntent === 'move_on') {
       await enforceRateLimit(`moveon:${hashToken(token ?? '')}`, { limit: 4, windowMs: 600_000 });
     }
+
+    // Pre-warm the TTS WebSocket while the brain processes the answer (oracle_ms ≈ 872–1590 ms
+    // measured in prod). By the time /speak-stream is called, the socket should be warm.
+    // Fire-and-forget: never throws, never blocks the response.
+    prewarmTts();
 
     const result = await orchestrator.submitAnswer(
       id,
@@ -670,8 +683,22 @@ router.post('/:id/speak-stream', async (req: Request, res: Response): Promise<vo
     }
 
     recordTtsCost(id, text.length);
-    const stream = synthesizeStream(text);
-    // If the candidate disconnects mid-stream, stop pulling from Cartesia (releases the upstream
+
+    // Task 3: record pre-warm hit/miss BEFORE acquiring the socket so the check is accurate.
+    const prewarmHit = hasPriorWarmSocket();
+
+    // Task 2: sentence streaming for Grok — send each sentence as a separate text.delta/text.done
+    // pair on one pooled socket so the first sentence's audio arrives before Grok finishes
+    // synthesising the full utterance. Controlled by GROK_SENTENCE_STREAMING (default ON).
+    // Non-Grok providers fall back to synthesizeStreamSentences' Cartesia path (unchanged).
+    const useSentenceStreaming = process.env.GROK_SENTENCE_STREAMING !== '0';
+    const sentences = splitSentences(text);
+    const stream: AsyncGenerator<Buffer, void, void> =
+      useSentenceStreaming && activeTtsProvider() === 'grok' && sentences.length > 1
+        ? synthesizeStreamSentences(sentences)
+        : synthesizeStream(text);
+
+    // If the candidate disconnects mid-stream, stop pulling from TTS (releases the upstream
     // connection via the generator's finally).
     res.on('close', () => {
       if (!res.writableEnded) void stream.return(undefined);
@@ -683,6 +710,17 @@ router.post('/:id/speak-stream', async (req: Request, res: Response): Promise<vo
         if (res.destroyed || res.writableEnded) break;
         if (!started) {
           started = true;
+          // Task 3: log pre-warm hit/miss + sentence count on first audio byte for prod telemetry.
+          console.info(
+            JSON.stringify({
+              event: 'tts.prewarm',
+              interviewId: id,
+              prewarmHit,
+              sentenceStreaming: useSentenceStreaming && activeTtsProvider() === 'grok',
+              sentenceCount: sentences.length,
+              ts: Date.now(),
+            })
+          );
           res.status(200);
           res.setHeader('Content-Type', 'application/octet-stream');
           res.setHeader('X-Sample-Rate', String(STREAM_SAMPLE_RATE));

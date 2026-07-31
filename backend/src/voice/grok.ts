@@ -125,6 +125,9 @@ interface PoolEntry {
 // Module-level pool — shared across all synthesizeStream calls. Keyed by config params so
 // a voice/language/speed change gets a fresh socket rather than sending mismatched params.
 const pool: PoolEntry[] = [];
+// Config keys for which a prewarm connect is currently in-flight. Prevents duplicate connects
+// when prewarmTts() is called rapidly (e.g. from /begin and /answer in quick succession).
+const _prewarmInFlight = new Set<string>();
 
 function configKey(cfg: GrokConfig): string {
   return `${cfg.voice}|${cfg.language}|${cfg.speed}`;
@@ -172,6 +175,165 @@ function releaseEntry(entry: PoolEntry): void {
 export function _resetPool(): void {
   const entries = [...pool];
   for (const e of entries) destroyEntry(e);
+  _prewarmInFlight.clear();
+}
+
+/** True when an idle, ready WebSocket for this config is already in the pool.
+ *  Use before synthesis to record a pre-warm hit/miss in telemetry logs. */
+export function hasIdleGrokSocket(cfg: GrokConfig = grokConfigFromEnv()): boolean {
+  const key = configKey(cfg);
+  return pool.some((e) => e.key === key && !e.leased && e.ws.readyState === WebSocket.OPEN);
+}
+
+/** Fire-and-forget: open one idle WebSocket for the active config so the next
+ *  synthesizeStream / synthesizeStreamSentences call finds a warm socket (~0 ms acquire
+ *  instead of ~978 ms cold connect). Idempotent: no-op when an idle socket already exists,
+ *  when a connect is already in-flight for this config, when the pool is at capacity, or
+ *  when the API key is absent. Never throws into the caller. */
+export function prewarmTts(cfg: GrokConfig = grokConfigFromEnv()): void {
+  if (!cfg.apiKey) return;
+  const key = configKey(cfg);
+  if (pool.some((e) => e.key === key && !e.leased && e.ws.readyState === WebSocket.OPEN)) return;
+  if (_prewarmInFlight.has(key)) return;
+  if (pool.length >= POOL_CAP) return;
+  _prewarmInFlight.add(key);
+  connectEntry(cfg, false)
+    .then(releaseEntry)
+    .catch(() => {
+      /* ignore: fire-and-forget, connection failures are non-fatal */
+    })
+    .finally(() => {
+      _prewarmInFlight.delete(key);
+    });
+}
+
+/** Stream multiple sentences over a SINGLE pooled WebSocket, synthesizing each independently.
+ *
+ *  Each sentence is sent as its own ``text.delta`` + ``text.done`` pair; Grok returns audio for
+ *  that sentence before the next one is enqueued. The first sentence's audio therefore arrives
+ *  as soon as Grok synthesises a short fragment — not the full utterance — yielding noticeably
+ *  lower TTFB on multi-sentence interviewer turns.
+ *
+ *  The socket is acquired once (pre-warmed → ~0 ms) and held across all sentences; audio bytes
+ *  are byte-identical in format to ``synthesizeStream`` (pcm_s16le mono 24 kHz via the same
+ *  Pcm16Aligner). Falls through to ``synthesizeStream`` when ``sentences.length <= 1``.
+ *
+ *  The generator's ``finally`` always releases or destroys the socket so a client disconnect
+ *  (``generator.return()``) never leaks a connection. */
+export async function* synthesizeStreamSentences(
+  sentences: string[],
+  cfg: GrokConfig = grokConfigFromEnv()
+): AsyncGenerator<Buffer, void, void> {
+  if (!cfg.apiKey) {
+    throw new Error('Grok TTS not configured: set XAI_API_KEY.');
+  }
+
+  const shaped = sentences
+    .map((s) => prepareTranscript(sanitizeSpeechTags(s)).slice(0, MAX_CHARS))
+    .filter((s) => s.trim());
+
+  if (shaped.length === 0) return;
+
+  // Single sentence: delegate to synthesizeStream for identical behaviour + simpler code path.
+  if (shaped.length === 1) {
+    yield* synthesizeStream(shaped[0], cfg);
+    return;
+  }
+
+  const entry = await acquireSocket(cfg);
+  const aligner = new Pcm16Aligner();
+
+  // Single-producer single-consumer queue (same pattern as synthesizeStream).
+  type QItem = { buf: Buffer } | { done: true } | { err: Error };
+  const queue: QItem[] = [];
+  let notify: (() => void) | null = null;
+
+  function pushItem(item: QItem): void {
+    queue.push(item);
+    if (notify) {
+      const fn = notify;
+      notify = null;
+      fn();
+    }
+  }
+  function waitForItem(): Promise<void> {
+    return new Promise<void>((r) => {
+      notify = r;
+    });
+  }
+
+  let firstAudioReceived = false;
+
+  const onMessage = (raw: WebSocket.RawData): void => {
+    let msg: WsMessage;
+    try {
+      msg = JSON.parse(rawToString(raw)) as WsMessage;
+    } catch {
+      return;
+    }
+    if (msg.type === 'audio.delta' && typeof msg.delta === 'string' && msg.delta) {
+      if (!firstAudioReceived) firstAudioReceived = true;
+      const aligned = aligner.push(Buffer.from(msg.delta, 'base64'));
+      if (aligned) pushItem({ buf: aligned });
+    } else if (msg.type === 'audio.done') {
+      pushItem({ done: true });
+    } else if (msg.type === 'error') {
+      pushItem({
+        err: new Error(`Grok stream error: ${String(msg.message ?? 'unknown').slice(0, 200)}`),
+      });
+    }
+  };
+  const onError = (err: Error): void => pushItem({ err });
+  const onClose = (): void => pushItem({ done: true });
+
+  entry.ws.on('message', onMessage);
+  entry.ws.on('error', onError);
+  entry.ws.on('close', onClose);
+
+  let healthy = false;
+  try {
+    for (const sentence of shaped) {
+      firstAudioReceived = false;
+
+      const firstAudioTimer = setTimeout(() => {
+        if (!firstAudioReceived) {
+          pushItem({
+            err: new Error('Grok TTS: first audio timeout (no audio received within timeout)'),
+          });
+        }
+      }, firstAudioTimeoutMs());
+
+      const utteranceTimer = setTimeout(
+        () => pushItem({ err: new Error('Grok TTS: utterance timeout (120s)') }),
+        UTTERANCE_TIMEOUT_MS
+      );
+
+      entry.ws.send(JSON.stringify({ type: 'text.delta', delta: sentence }));
+      entry.ws.send(JSON.stringify({ type: 'text.done' }));
+
+      try {
+        sentenceLoop: for (;;) {
+          while (queue.length > 0) {
+            const item = queue.shift()!;
+            if ('err' in item) throw item.err;
+            if ('done' in item) break sentenceLoop;
+            yield item.buf;
+          }
+          await waitForItem();
+        }
+      } finally {
+        clearTimeout(firstAudioTimer);
+        clearTimeout(utteranceTimer);
+      }
+    }
+    healthy = true;
+  } finally {
+    entry.ws.off('message', onMessage);
+    entry.ws.off('error', onError);
+    entry.ws.off('close', onClose);
+    if (healthy) releaseEntry(entry);
+    else destroyEntry(entry);
+  }
 }
 
 function connectEntry(cfg: GrokConfig, unpooled: boolean): Promise<PoolEntry> {
