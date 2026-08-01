@@ -936,6 +936,8 @@ class VoiceSession:
             shadow_endpoint_count=snap.endpoint_count if snap else None,
             first_audio_ms=first_audio_ms,
             barge_in=barge_in,
+            speaker_count=snap.speaker_count if snap else None,
+            non_primary_speaker_ms=snap.non_primary_speaker_ms if snap else None,
         )
         self._safe_telemetry(t)
 

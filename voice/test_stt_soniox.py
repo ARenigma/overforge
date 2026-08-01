@@ -330,6 +330,133 @@ async def test_session_tees_frames_and_records_both_transcripts() -> None:
     assert shadow.closed
 
 
+# ─────────────────────────── diarization ───────────────────────────
+# Tests for the advisory speaker-count feature on the Soniox shadow.
+# No live credentials required — FakeWs injects pre-built server messages.
+# Design rule: speaker labels are positional ("A"/"B"), never biometric voiceprints.
+
+
+def _diarized_msg(
+    *entries: tuple[str, str, float, float],
+    finished: bool = False,
+) -> str:
+    """One is_final token per entry: (text, speaker_label, start_time_s, end_time_s)."""
+    return json.dumps({
+        "tokens": [
+            {
+                "text": text,
+                "is_final": True,
+                "speaker": spk,
+                "start_time": start,
+                "end_time": end,
+            }
+            for text, spk, start, end in entries
+        ],
+        **({"finished": True} if finished else {}),
+    })
+
+
+async def test_two_speakers_in_turn_yields_speaker_count_2() -> None:
+    """Two distinct speaker labels in one turn → speaker_count=2, non_primary_speaker_ms set."""
+    cfg = SonioxConfig(api_key="k", enable_diarization=True)
+    ws = FakeWs([
+        _diarized_msg(
+            (" hello", "A", 0.0, 0.5),
+            (" world", "B", 0.5, 1.0),
+            finished=True,
+        )
+    ])
+    shadow = _shadow(ws, config=cfg)
+    await shadow.start()
+    assert shadow._recv_task is not None
+    await asyncio.wait_for(shadow._recv_task, timeout=1)
+
+    snap = shadow.take_snapshot()
+    assert snap.speaker_count == 2
+    assert snap.non_primary_speaker_ms is not None
+    # Both speakers contribute 500 ms each. Primary = the first-inserted dominant label ("A").
+    # Non-primary ("B") gets the remaining 500 ms.
+    assert abs(snap.non_primary_speaker_ms - 500.0) < 1.0
+    await shadow.close()
+
+
+async def test_one_speaker_in_turn_yields_speaker_count_1_and_zero_nonprimary() -> None:
+    """Single speaker label → speaker_count=1, non_primary_speaker_ms=0.0."""
+    cfg = SonioxConfig(api_key="k", enable_diarization=True)
+    ws = FakeWs([
+        _diarized_msg(
+            (" answer", "A", 0.0, 1.0),
+            (" more", "A", 1.0, 2.5),
+            finished=True,
+        )
+    ])
+    shadow = _shadow(ws, config=cfg)
+    await shadow.start()
+    assert shadow._recv_task is not None
+    await asyncio.wait_for(shadow._recv_task, timeout=1)
+
+    snap = shadow.take_snapshot()
+    assert snap.speaker_count == 1
+    assert snap.non_primary_speaker_ms == 0.0  # sole speaker is primary — no non-primary ms
+    await shadow.close()
+
+
+async def test_missing_speaker_labels_degrade_to_none() -> None:
+    """Tokens without a speaker field degrade gracefully: speaker_count=None, not an error."""
+    # Uses the plain _tokens_msg helper (no speaker/timing fields) even when diarization is on.
+    cfg = SonioxConfig(api_key="k", enable_diarization=True)
+    ws = FakeWs([_tokens_msg((" hello", True), (" world", True), finished=True)])
+    shadow = _shadow(ws, config=cfg)
+    await shadow.start()
+    assert shadow._recv_task is not None
+    await asyncio.wait_for(shadow._recv_task, timeout=1)
+
+    snap = shadow.take_snapshot()
+    # Provider returned no speaker labels → treat as "cannot determine", not "one speaker"
+    assert snap.speaker_count is None
+    assert snap.non_primary_speaker_ms is None
+    await shadow.close()
+
+
+async def test_diarization_off_yields_none_speaker_fields() -> None:
+    """With enable_diarization=False, speaker fields are always None (no diarization request sent)."""
+    cfg = SonioxConfig(api_key="k", enable_diarization=False)
+    # Even if the server hypothetically echoed speaker labels back, we ignore them.
+    ws = FakeWs([
+        _diarized_msg((" hi", "A", 0.0, 0.3), (" there", "B", 0.3, 0.6), finished=True)
+    ])
+    shadow = _shadow(ws, config=cfg)
+    await shadow.start()
+    assert shadow._recv_task is not None
+    await asyncio.wait_for(shadow._recv_task, timeout=1)
+
+    snap = shadow.take_snapshot()
+    assert snap.speaker_count is None  # diarization disabled — no speaker tracking
+    assert snap.non_primary_speaker_ms is None
+    await shadow.close()
+
+
+async def test_diarization_config_message_includes_flag_when_enabled() -> None:
+    """enable_diarization=True → enable_speaker_diarization in the opening config frame."""
+    cfg = SonioxConfig(api_key="k", enable_diarization=True)
+    assert cfg.config_message()["enable_speaker_diarization"] is True
+
+
+async def test_diarization_config_message_omits_flag_when_disabled() -> None:
+    """enable_diarization=False → enable_speaker_diarization omitted from the config frame."""
+    cfg = SonioxConfig(api_key="k", enable_diarization=False)
+    assert "enable_speaker_diarization" not in cfg.config_message()
+
+
+def test_from_env_reads_stt_shadow_diarize_flag() -> None:
+    """STT_SHADOW_DIARIZE=0 disables diarization; default (absent or 1) enables it."""
+    cfg_off = SonioxConfig.from_env({"SONIOX_API_KEY": "k", "STT_SHADOW_DIARIZE": "0"})
+    assert cfg_off.enable_diarization is False
+
+    cfg_on = SonioxConfig.from_env({"SONIOX_API_KEY": "k"})  # default ON
+    assert cfg_on.enable_diarization is True
+
+
 async def test_session_shadow_snapshot_failure_never_breaks_turn() -> None:
     # A shadow that raises on snapshot must not derail the turn — telemetry still lands, without
     # shadow fields.

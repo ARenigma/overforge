@@ -94,6 +94,12 @@ class SonioxConfig:
     #: token where IT thinks the turn ended (pauses/intonation/context, not pure silence). We
     #: capture that timing to compare Soniox's turn detection vs the AAI primary's — log-only.
     enable_endpoint_detection: bool = True
+    #: Speaker diarization (default ON). When True, ``enable_speaker_diarization`` is sent in the
+    #: config frame so Soniox returns a ``speaker`` label on each token (e.g. "A", "B"). We use
+    #: this ONLY to count distinct speakers and measure non-primary speaker time per turn — we
+    #: NEVER store or compare speaker labels across sessions (that would be a biometric voiceprint).
+    #: Disable via ``STT_SHADOW_DIARIZE=0`` if the provider API changes or costs increase.
+    enable_diarization: bool = True
     url: str = _DEFAULT_WS_URL
 
     @classmethod
@@ -108,6 +114,8 @@ class SonioxConfig:
         - ``SONIOX_MODEL``             model override (default ``stt-rt-v5``).
         - ``SONIOX_ENDPOINT_DETECTION`` set to ``0`` to disable Soniox's semantic endpointing
           (default on — it's how we A/B Soniox's turn detection against the primary).
+        - ``STT_SHADOW_DIARIZE``       set to ``0`` to disable speaker diarization on the shadow
+          (default on — advisory second-voice detection without identity/voiceprint storage).
         """
         e: Mapping[str, str] = env if env is not None else os.environ
         keyterms = tuple(t.strip() for t in e.get("STT_KEYTERMS", "").split(",") if t.strip())
@@ -116,6 +124,7 @@ class SonioxConfig:
             model=e.get("SONIOX_MODEL", "stt-rt-v5"),
             keyterms=keyterms,
             enable_endpoint_detection=e.get("SONIOX_ENDPOINT_DETECTION", "1") != "0",
+            enable_diarization=e.get("STT_SHADOW_DIARIZE", "1") != "0",
             language_hints=(language,),
         )
 
@@ -133,6 +142,8 @@ class SonioxConfig:
             msg["context"] = {"terms": list(self.keyterms)}
         if self.enable_endpoint_detection:
             msg["enable_endpoint_detection"] = True
+        if self.enable_diarization:
+            msg["enable_speaker_diarization"] = True
         return msg
 
 
@@ -190,6 +201,16 @@ class SonioxShadow:
         self._last_final_t: float | None = None
         # perf_counter timestamps of Soniox's own semantic endpoints (<end>) in this window.
         self._endpoints: list[float] = []
+        # Speaker diarization — advisory only, never biometric identity.
+        # Session-level: cumulative speech time (ms) per speaker label across ALL turns.
+        # "Primary" speaker = the label with the most accumulated ms in _session_speaker_ms.
+        # This is a positional label (e.g. "A"/"B"), NOT a named or enrolled voiceprint —
+        # we use it only to distinguish which mic participant is dominant across the session
+        # so that a brief secondary voice in one turn is attributed correctly.
+        self._session_speaker_ms: dict[str, float] = {}
+        # Per-turn: per-label speech time (ms) within the current listening window only.
+        # Cleared on reset() and consumed+cleared by take_snapshot().
+        self._turn_speaker_ms: dict[str, float] = {}
 
     # ── lifecycle ────────────────────────────────────────────────────────────────
 
@@ -252,19 +273,26 @@ class SonioxShadow:
         """Begin a new per-turn listening window: clear the accumulator + window clock.
 
         Called by :class:`~session.VoiceSession` on every re-arm so the shadow window aligns
-        to the primary's listening window.
+        to the primary's listening window. Session-level speaker totals are retained across
+        resets — they accumulate across all turns to keep the primary-speaker determination stable.
         """
         self._finals.clear()
         self._window_start = None
         self._last_final_t = None
         self._endpoints.clear()
+        self._turn_speaker_ms.clear()
 
     def take_snapshot(self) -> ShadowSnapshot:
-        """Consume the current window's shadow observation (transcript + latency + endpoints).
+        """Consume the current window's shadow observation (transcript + latency + endpoints +
+        speaker diarization).
 
         ``endpoint_ms`` is when Soniox FIRST decided the turn ended (its own semantic EOT),
         relative to the window start — compare it against when the primary actually cut the
-        turn. Clears the accumulators so the next window starts clean even before :meth:`reset`.
+        turn. ``speaker_count`` is the number of distinct speaker labels observed in this turn's
+        window (None when the provider returned no labels); ``non_primary_speaker_ms`` is the
+        total ms attributable to non-primary speakers (0.0 when only one speaker was heard).
+        Clears the per-turn accumulators so the next window starts clean even before
+        :meth:`reset`. Session-level speaker totals are never cleared here.
         """
         text = "".join(self._finals).strip()
         latency_ms: float | None = None
@@ -277,11 +305,27 @@ class SonioxShadow:
         self._finals.clear()
         self._last_final_t = None
         self._endpoints.clear()
+
+        # Diarization: derive speaker_count + non-primary ms from this turn's window.
+        speaker_count: int | None = None
+        non_primary_speaker_ms: float | None = None
+        if self._turn_speaker_ms:
+            speaker_count = len(self._turn_speaker_ms)
+            # Primary = the session-dominant speaker label (by total ms across all turns so far).
+            # This is a positional label, NOT a named voiceprint — see class docstring.
+            primary = max(self._session_speaker_ms, key=lambda k: self._session_speaker_ms[k])
+            non_primary_speaker_ms = sum(
+                ms for label, ms in self._turn_speaker_ms.items() if label != primary
+            )
+        self._turn_speaker_ms.clear()
+
         return ShadowSnapshot(
             transcript=text,
             stt_ms=latency_ms,
             endpoint_ms=endpoint_ms,
             endpoint_count=endpoint_count,
+            speaker_count=speaker_count,
+            non_primary_speaker_ms=non_primary_speaker_ms,
         )
 
     async def close(self) -> None:
@@ -367,6 +411,27 @@ class SonioxShadow:
                         continue  # <fin> finalize sentinel — control token, not transcript
                     self._finals.append(text)
                     got_final = True
+                    # Speaker diarization (advisory). Accumulate per-label speech time using the
+                    # token's start_time/end_time (seconds from audio start, per Soniox stt-rt-v5
+                    # API). When speaker or timing fields are absent, degrade silently — speaker_count
+                    # stays None for this turn rather than raising.
+                    if self._config.enable_diarization:
+                        speaker = tok.get("speaker")
+                        if isinstance(speaker, str) and speaker:
+                            start = tok.get("start_time")
+                            end = tok.get("end_time")
+                            dur_ms = (
+                                max(0.0, (float(end) - float(start)) * 1000.0)
+                                if isinstance(start, (int, float))
+                                and isinstance(end, (int, float))
+                                else 0.0
+                            )
+                            self._turn_speaker_ms[speaker] = (
+                                self._turn_speaker_ms.get(speaker, 0.0) + dur_ms
+                            )
+                            self._session_speaker_ms[speaker] = (
+                                self._session_speaker_ms.get(speaker, 0.0) + dur_ms
+                            )
                 if got_final:
                     self._last_final_t = time.perf_counter()
                 if msg.get("finished"):

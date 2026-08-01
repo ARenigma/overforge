@@ -12,9 +12,8 @@ import {
 } from '../interview/minimax';
 import { TranscriptTurn } from '../interview/oracle';
 import { Scorecard, ScoreDimension, RECOMMENDATIONS, Recommendation } from './types';
-// Single source of truth: the proctor aggregate IS the shape getProctorSignalsForInterview returns.
-// Type-only import (erased at runtime) so the pure scorer never pulls in the Supabase client.
-import type { ProctorAggregate } from '../db/interviews';
+// Type-only imports (erased at runtime) so the pure scorer never pulls in the Supabase client.
+import type { ProctorAggregate, SecondVoiceSummary } from '../db/interviews';
 
 export interface CodeRunSummary {
   language: string;
@@ -38,6 +37,10 @@ export interface ScoringInput {
   /** Advisory proctoring signals from the candidate camera. Present only when data exists.
    *  Must NOT affect the numeric score — grader is instructed to note anomalies in summary only. */
   proctor?: ProctorAggregate;
+  /** Advisory second-voice integrity signals from the shadow STT diarization pass. Present only
+   *  when signals exist. Must NOT affect the numeric score — structural isolation enforced by
+   *  the scorer-isolation test (byte-identical score with and without signals). */
+  integritySignals?: SecondVoiceSummary;
 }
 
 /** Intervention kinds that count against the candidate (assistance that reveals approach/answer).
@@ -172,6 +175,20 @@ export function buildScoringPrompt(input: ScoringInput): string {
       `looking-away ${toS(p.gazeOffMs)}s`;
   }
 
+  // Advisory second-voice context (do NOT penalize score — note in summary only if relevant).
+  let integrityLine = '';
+  if (input.integritySignals && input.integritySignals.turnCount > 0) {
+    const sv = input.integritySignals;
+    const toS = (ms: number): string => (ms / 1000).toFixed(1);
+    integrityLine =
+      `INTEGRITY SIGNALS (advisory context only — do NOT penalize the score; ` +
+      `note in your summary if relevant): ` +
+      `two or more distinct speakers detected across ${sv.turnCount} turn(s); ` +
+      `non-primary speaker attributed ${toS(sv.totalDurationMs)}s total. ` +
+      `This may indicate a second person present in the room; treat as neutral contextual ` +
+      `information only — never as grounds for a score deduction.`;
+  }
+
   return [
     levelLine,
     brief ? `ROLE CONTEXT (judge relevance to this role):\n${brief.slice(0, 4000)}` : '',
@@ -181,6 +198,7 @@ export function buildScoringPrompt(input: ScoringInput): string {
     correctnessLine,
     assistLine,
     proctorLine,
+    integrityLine,
     'Grade per the rubric, calibrated to the candidate level above. Return the JSON only.',
   ]
     .filter(Boolean)

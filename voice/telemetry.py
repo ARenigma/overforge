@@ -54,6 +54,13 @@ class TurnTelemetry:
     first_audio_ms: float | None = None
     #: True when the candidate barged in mid-utterance, cutting the interviewer short.
     barge_in: bool = False
+    #: Distinct speaker labels detected in this turn's shadow-diarization window. None when the
+    #: shadow provider returned no speaker labels (diarization off, provider omitted labels, or no
+    #: shadow running). Advisory only — NEVER a biometric voiceprint; label identity not stored.
+    speaker_count: int | None = None
+    #: Total ms in this turn attributed to non-primary speakers (positional label, not identity).
+    #: 0.0 when only the primary speaker was heard; None when no speaker labels were returned.
+    non_primary_speaker_ms: float | None = None
 
 
 class TelemetrySink(Protocol):
@@ -132,6 +139,8 @@ class RestTelemetrySink:
                 "shadowEndpointCount": t.shadow_endpoint_count,
                 "firstAudioMs": t.first_audio_ms,
                 "bargeIn": t.barge_in,
+                "speakerCount": t.speaker_count,
+                "nonPrimarySpeakerMs": t.non_primary_speaker_ms,
             }
             resp = await self._client.post(path, json=body)
             if resp.status_code not in (200, 204):

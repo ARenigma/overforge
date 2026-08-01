@@ -137,6 +137,61 @@ describe('injection fencing in buildScoringPrompt (FIX 2)', () => {
 // tag on the transcript turn, so it is already excluded from PENALIZABLE_KINDS. This test
 // locks that contract so a future change to the scoring path can't accidentally add it.
 
+// ─────────────────────── Integrity signal isolation ───────────────────────────
+// LEGAL REQUIREMENT: integritySignals must be STRUCTURALLY INCAPABLE of altering the numeric
+// score (GDPR Art 22 + SCHUFA logic). This test asserts byte-identical scores with and without
+// second-voice signals so any future change that accidentally routes integrity data into the
+// score path will fail loudly here.
+
+describe('scorer isolation — integritySignals NEVER alters numeric score', () => {
+  const rawScorecard = JSON.stringify({
+    overall: 3,
+    recommendation: 'lean_hire',
+    dimensions: [{ name: 'problem_solving', score: 3, notes: 'decent' }],
+    summary: 'reasonable',
+  });
+
+  test('overall score is byte-identical with and without second-voice signals', async () => {
+    const baseInput = { transcript: [{ role: 'candidate' as const, text: 'my answer' }], codeRuns: [] };
+    const withSignals = { ...baseInput, integritySignals: { turnCount: 5, totalDurationMs: 60_000 } };
+
+    const [base, withSig] = await Promise.all([
+      scoreInterview(baseInput, stub(rawScorecard)),
+      scoreInterview(withSignals, stub(rawScorecard)),
+    ]);
+
+    // Numeric score must be identical — signals are advisory text only.
+    expect(withSig.overall).toBe(base.overall);
+    expect(withSig.recommendation).toBe(base.recommendation);
+    expect(withSig.scoringFailed).toBe(false);
+  });
+
+  test('integrityLine contains the non-penalize directive', () => {
+    const prompt = buildScoringPrompt({
+      transcript: [],
+      codeRuns: [],
+      integritySignals: { turnCount: 3, totalDurationMs: 45_000 },
+    });
+    expect(prompt).toContain('do NOT penalize the score');
+    expect(prompt).toContain('3 turn(s)');
+    expect(prompt).toContain('45.0s');
+  });
+
+  test('integrityLine is absent when no signals exist', () => {
+    const prompt = buildScoringPrompt({ transcript: [], codeRuns: [] });
+    expect(prompt).not.toContain('INTEGRITY SIGNALS');
+  });
+
+  test('integrityLine is absent when turnCount is 0', () => {
+    const prompt = buildScoringPrompt({
+      transcript: [],
+      codeRuns: [],
+      integritySignals: { turnCount: 0, totalDurationMs: 0 },
+    });
+    expect(prompt).not.toContain('INTEGRITY SIGNALS');
+  });
+});
+
 describe('PENALIZABLE_KINDS — coding_ack is advisory (D2)', () => {
   test('coding_ack is NOT in PENALIZABLE_KINDS', () => {
     expect(PENALIZABLE_KINDS.has('coding_ack')).toBe(false);

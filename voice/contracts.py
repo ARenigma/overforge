@@ -136,19 +136,28 @@ class SttStreamerLike(Protocol):
 class ShadowSnapshot:
     """One shadow engine's per-turn observation, consumed at the primary's end-of-turn.
 
-    - ``transcript``      the shadow's text for this turn window (for cross-engine WER).
-    - ``stt_ms``          window-start → last final token (rough finalization latency).
-    - ``endpoint_ms``     window-start → the shadow's FIRST semantic endpoint decision
-                          (its own EOT), or None if it never fired one. Compare against when
-                          the PRIMARY actually cut the turn to A/B turn-detection.
-    - ``endpoint_count``  how many endpoints the shadow fired in the window (0 = never ended;
-                          >=2 = it would have SPLIT the primary's single turn).
+    - ``transcript``            the shadow's text for this turn window (for cross-engine WER).
+    - ``stt_ms``                window-start → last final token (rough finalization latency).
+    - ``endpoint_ms``           window-start → the shadow's FIRST semantic endpoint decision
+                                (its own EOT), or None if it never fired one. Compare against when
+                                the PRIMARY actually cut the turn to A/B turn-detection.
+    - ``endpoint_count``        how many endpoints the shadow fired in the window (0 = never ended;
+                                >=2 = it would have SPLIT the primary's single turn).
+    - ``speaker_count``         distinct speaker labels observed in this turn's window (advisory
+                                diarization only — NEVER a biometric voiceprint). None when the
+                                provider returned no speaker labels (diarization off or labels absent).
+    - ``non_primary_speaker_ms`` total ms in this turn attributed to non-primary speakers,
+                                where "primary" = the label with the most accumulated speech across
+                                the whole session (a positional label, not an identity). 0.0 when
+                                there was only one speaker; None when no speaker labels were returned.
     """
 
     transcript: str
     stt_ms: float | None
     endpoint_ms: float | None
     endpoint_count: int
+    speaker_count: int | None = None
+    non_primary_speaker_ms: float | None = None
 
 
 class ShadowSttLike(Protocol):

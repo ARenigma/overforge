@@ -79,6 +79,7 @@ import {
   insertOutbox,
   makeOutboxStore,
   getProctorSignalsForInterview,
+  getSecondVoiceSignals,
   updateLastRunIntervention,
   Interview,
   InterviewStatus,
@@ -2255,7 +2256,7 @@ export async function finishAndScore(
         : {}),
     }));
 
-  // Best-effort: a proctor-fetch failure must never block scoring.
+  // Best-effort: advisory-signal fetches must never block scoring.
   let proctorData: import('../db/interviews').ProctorAggregate | undefined;
   try {
     proctorData = await getProctorSignalsForInterview(interviewId);
@@ -2263,6 +2264,18 @@ export async function finishAndScore(
     if (proctorData.monitoredMs === 0) proctorData = undefined;
   } catch (err) {
     console.error(`[orchestrator] proctor fetch failed for ${interviewId} (non-fatal):`, err);
+  }
+
+  let secondVoiceData: import('../db/interviews').SecondVoiceSummary | undefined;
+  try {
+    secondVoiceData = await getSecondVoiceSignals(interviewId);
+    // Omit when no second-voice events were recorded for this interview.
+    if (secondVoiceData.turnCount === 0) secondVoiceData = undefined;
+  } catch (err) {
+    console.error(
+      `[orchestrator] second-voice signal fetch failed for ${interviewId} (non-fatal):`,
+      err
+    );
   }
 
   const scorecard = await withCostContext({ interviewId, kind: 'scorer', phase: 'scoring' }, () =>
@@ -2274,6 +2287,7 @@ export async function finishAndScore(
         level: interview.level,
         roleBrief: interview.role_brief,
         proctor: proctorData,
+        integritySignals: secondVoiceData,
       },
       minimaxClient
     )

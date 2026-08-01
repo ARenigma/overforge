@@ -590,6 +590,86 @@ export async function getProctorSignalsForInterview(
   return { monitoredMs, faceAbsentMs, multiFaceMs, gazeOffMs, maxFaces, everMultiFace };
 }
 
+// ─────────────────────── Integrity signals ───────────────────────
+
+/** The full set of valid integrity signal kinds (must match the DB CHECK constraint). */
+export const INTEGRITY_SIGNAL_KINDS = new Set([
+  'second_voice',
+  'blur',
+  'hidden',
+  'fullscreen_exit',
+  'paste_blocked',
+  'multi_monitor',
+] as const);
+
+export type IntegritySignalKind = typeof INTEGRITY_SIGNAL_KINDS extends Set<infer T> ? T : never;
+
+export interface IntegritySignalRecord {
+  kind: string;
+  /** Duration of the signal event in ms (e.g. non-primary speaker ms for second_voice). */
+  durationMs?: number | null;
+  /** Opaque advisory detail — max 2 KB; never contains audio, video, or biometric data. */
+  detail?: Record<string, unknown>;
+}
+
+export interface SecondVoiceSummary {
+  /** Number of turns in which more than one speaker was detected. */
+  turnCount: number;
+  /** Total ms attributed to non-primary speakers across all turns. */
+  totalDurationMs: number;
+}
+
+/** Insert one integrity-signal row. Throws on DB error (the route/handler swallows it). */
+export async function recordIntegritySignal(
+  interviewId: string,
+  s: IntegritySignalRecord
+): Promise<void> {
+  const db = createServiceClient();
+
+  // Defensive: reject unknown kinds at the application layer before hitting the DB constraint.
+  if (!INTEGRITY_SIGNAL_KINDS.has(s.kind as IntegritySignalKind)) {
+    throw new Error(`recordIntegritySignal: unknown kind "${s.kind}"`);
+  }
+
+  // Cap detail payload to prevent runaway blobs (advisory info only; detail is never load-bearing).
+  const rawDetail = s.detail ?? {};
+  const detailStr = JSON.stringify(rawDetail);
+  const detail = detailStr.length <= 2048 ? rawDetail : {};
+
+  const { error } = await db.from('integrity_signals').insert({
+    interview_id: interviewId,
+    kind: s.kind,
+    ...(s.durationMs != null && isFinite(s.durationMs)
+      ? { duration_ms: Math.max(0, Math.round(s.durationMs)) }
+      : {}),
+    detail,
+  });
+
+  if (error) throw new Error(`recordIntegritySignal: ${error.message}`);
+}
+
+/** Aggregate all 'second_voice' integrity signals for an interview into a summary for the scorecard.
+ *  Best-effort: callers swallow the error so a fetch failure never blocks scoring. */
+export async function getSecondVoiceSignals(
+  interviewId: string
+): Promise<SecondVoiceSummary> {
+  const db = createServiceClient();
+
+  const { data, error } = await db
+    .from('integrity_signals')
+    .select('duration_ms')
+    .eq('interview_id', interviewId)
+    .eq('kind', 'second_voice');
+
+  if (error) throw new Error(`getSecondVoiceSignals: ${error.message}`);
+
+  const rows = (data ?? []) as Array<{ duration_ms: number | null }>;
+  return {
+    turnCount: rows.length,
+    totalDurationMs: rows.reduce((sum, r) => sum + (r.duration_ms ?? 0), 0),
+  };
+}
+
 // ─────────────────────── Outbox store implementation ───────────────────────
 
 /** Insert a pending outbox row for the given interview. */

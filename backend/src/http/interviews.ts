@@ -10,7 +10,14 @@ import type { SubmitIntent, InterviewContext } from '../interview/types';
 import { ingestSnapshot } from '../interview/engagement';
 import { SUPPORTED_LANGUAGES } from '../execution/docker';
 import * as orchestrator from '../interview/orchestrator';
-import { getById, recordVoiceTurn, recordProctorSignal, updateInterview } from '../db/interviews';
+import {
+  getById,
+  recordVoiceTurn,
+  recordProctorSignal,
+  recordIntegritySignal,
+  INTEGRITY_SIGNAL_KINDS,
+  updateInterview,
+} from '../db/interviews';
 import { validateSpeakText } from './speak-validation';
 import { captureException } from '../observability/sentry';
 import { recordTtsCost } from '../cost/ledger';
@@ -838,6 +845,8 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       shadowEndpointMs,
       shadowEndpointCount,
       firstAudioMs,
+      speakerCount,
+      nonPrimarySpeakerMs,
     } = req.body as {
       token?: string;
       requestId?: string;
@@ -857,6 +866,8 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       shadowEndpointMs?: unknown;
       shadowEndpointCount?: unknown;
       firstAudioMs?: unknown;
+      speakerCount?: unknown;
+      nonPrimarySpeakerMs?: unknown;
     };
 
     await validateCandidate(id, token ?? '');
@@ -911,6 +922,25 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       firstAudioMs: toFirstAudioMs(firstAudioMs),
     });
 
+    // Second-voice integrity signal: when shadow diarization detected >1 speaker in this turn,
+    // write an advisory integrity_signals row. Best-effort — a write failure must never break
+    // the turn (the voice service fires-and-forgets the telemetry POST).
+    const speakerCountNum = toNum(speakerCount);
+    if (speakerCountNum !== null && speakerCountNum > 1) {
+      try {
+        await recordIntegritySignal(id, {
+          kind: 'second_voice',
+          durationMs: toNum(nonPrimarySpeakerMs),
+          detail: { speaker_count: Math.round(speakerCountNum) },
+        });
+      } catch (integrityErr) {
+        console.error(
+          '[voice-turn] second_voice integrity signal write failed (non-fatal):',
+          integrityErr
+        );
+      }
+    }
+
     res.status(204).end();
   } catch (err) {
     sendError(res, err);
@@ -958,6 +988,72 @@ router.post('/:id/proctor', async (req: Request, res: Response): Promise<void> =
       multiFaceMs: toInt(multiFaceMs),
       gazeOffMs: toInt(gazeOffMs),
       maxFaces: toInt(maxFaces),
+    });
+
+    res.status(204).end();
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
+// ─────────────────────── POST /api/interviews/:id/integrity-signal ───────────────────────
+// Durable sink for discrete integrity signals emitted by the browser proctoring module.
+// The frontend has no Supabase credentials; it POSTs here and the backend writes the row.
+// Best-effort: fires-and-forgets, so a 500 is harmless. Rate-limited 60 req/10 min per token
+// (conservative — these are discrete events, not per-window aggregates like /proctor).
+// Currently only 'second_voice' is wired (from the /voice-turn path). This route is the
+// future entry-point for browser-side signals: blur, hidden, fullscreen_exit, paste_blocked,
+// multi_monitor — none of those are wired to a client yet (see docs/GATED_FEATURES.md).
+
+router.post('/:id/integrity-signal', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { token, kind, durationMs, detail } = req.body as {
+      token?: string;
+      kind?: unknown;
+      durationMs?: unknown;
+      detail?: unknown;
+    };
+
+    await validateCandidate(id, token ?? '');
+    await enforceRateLimit(`integrity:${hashToken(token ?? '')}`, {
+      limit: 60,
+      windowMs: 600_000,
+    });
+
+    // Validate kind against the allowed enum (same set as the DB CHECK constraint).
+    if (typeof kind !== 'string' || !INTEGRITY_SIGNAL_KINDS.has(kind as never)) {
+      res.status(400).json({
+        error: `kind must be one of: ${[...INTEGRITY_SIGNAL_KINDS].join(', ')}`,
+      });
+      return;
+    }
+
+    // Coerce numeric durationMs.
+    const toNum = (v: unknown): number | null => {
+      if (v == null) return null;
+      const n = Number(v);
+      return isFinite(n) ? Math.max(0, n) : null;
+    };
+
+    // Validate detail: must be a plain object if present; reject oversized payloads.
+    let safeDetail: Record<string, unknown> | undefined;
+    if (detail != null) {
+      if (typeof detail !== 'object' || Array.isArray(detail)) {
+        res.status(400).json({ error: 'detail must be a plain object' });
+        return;
+      }
+      if (JSON.stringify(detail).length > 2048) {
+        res.status(413).json({ error: 'detail is too large (max 2 KB)' });
+        return;
+      }
+      safeDetail = detail as Record<string, unknown>;
+    }
+
+    await recordIntegritySignal(id, {
+      kind,
+      durationMs: toNum(durationMs),
+      detail: safeDetail,
     });
 
     res.status(204).end();
