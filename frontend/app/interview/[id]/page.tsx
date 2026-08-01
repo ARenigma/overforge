@@ -72,6 +72,7 @@ import { Wordmark } from '@/components/marketing/wordmark';
 import { MarkdownMessage } from '@/components/interview/markdown-message';
 import { PresenceCue } from '@/components/interview/presence-cue';
 import { ProblemDock } from '@/components/interview/problem-dock';
+import { StageModal } from '@/components/interview/stage-modal';
 import { useVoiceMic } from '@/lib/voice/use-voice-mic';
 import { useVoiceSocket } from '@/lib/voice/use-voice-socket';
 import type { ServerBargeIn, ServerReady, ServerTurnReady } from '@/lib/voice/types';
@@ -396,6 +397,20 @@ function DeviceIndicator({
   );
 }
 
+/** Human-readable label for the persistent stage chip in the header. */
+function stageChipLabel(
+  phase: InterviewPhase,
+  meta: { index: number; total: number }
+): string {
+  if (phase === 'coding' && meta.total > 0) {
+    return `Coding Round — Problem ${meta.index + 1} of ${meta.total}`;
+  }
+  if (phase === 'coding') return 'Coding Round';
+  if (phase === 'wrap_up') return 'Wrap-up';
+  if (phase === 'done') return 'Done';
+  return 'Walkthrough'; // greeting | oral | handoff
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function InterviewPage() {
@@ -452,6 +467,14 @@ export default function InterviewPage() {
   const [submitting, setSubmitting] = useState(false);
   const [moveOnOpen, setMoveOnOpen] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  // ── Stage modals (visual stage guidance) ─────────────────────────────────────
+  // Each modal fires ONCE per session; persistence via sessionStorage prevents re-show on reload.
+  const [codingModalOpen, setCodingModalOpen] = useState(false);
+  const [wrapUpModalOpen, setWrapUpModalOpen] = useState(false);
+  // Escalation note shown inside the coding modal after 30 s unacknowledged.
+  const [codingEscalationNote, setCodingEscalationNote] = useState<string | undefined>(undefined);
+  // Per-problem transition banner (non-modal, polite live region).
+  const [problemBannerText, setProblemBannerText] = useState<string | undefined>(undefined);
   // Voice (P1): the interviewer speaks its turns (always audible — the candidate can't mute it).
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const speakSeqRef = useRef(0); // bumped to cancel in-flight playback on a new turn
@@ -506,6 +529,24 @@ export default function InterviewPage() {
 
   // Transcript scroll ref
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  // Transcript log container ref — focus target after stage modal dismissal (programmatic focus
+  // requires tabIndex={-1} on the div, which we set in JSX below).
+  const transcriptLogRef = useRef<HTMLDivElement>(null);
+
+  // ── Stage modal once-per-session guards ───────────────────────────────────────
+  // In-memory guard (prevents the effect re-running on extra renders) + sessionStorage key
+  // (survives reloads within the same browser tab session).
+  const codingModalShownRef = useRef(false);
+  const wrapUpModalShownRef = useRef(false);
+  // Coding modal escalation timer refs (30 s → note; 90 s → telemetry, see effect comment).
+  const escalation30Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const escalation90Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Per-problem transition banner: tracks the previous codingMeta.index so we only show
+  // the banner when the problem ADVANCES, not on first load.
+  const prevCodingIndexRef = useRef(-1);
+  const problemBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Read inside handleCodeChange (deps []) to dismiss the banner on first keystroke.
+  const problemBannerActiveRef = useRef(false);
 
   // Chat panel collapse — Supabase-style SLIDE. react-resizable-panels' collapse sets flex→0, which
   // squishes the content; to slide instead, we freeze the content at its current pixel width and
@@ -720,6 +761,75 @@ export default function InterviewPage() {
   useEffect(() => {
     if ((phase === 'wrap_up' || phase === 'done') && chatCollapsed) animateChatPanel('expand');
   }, [phase, chatCollapsed, animateChatPanel]);
+
+  // ── Stage modal triggers (visual stage guidance) ──────────────────────────────
+  // Each fires ONCE per session. The ref prevents double-trigger on extra renders;
+  // sessionStorage prevents re-show on reload (same-tab session persistence).
+
+  useEffect(() => {
+    if (phase !== 'coding' || codingModalShownRef.current) return;
+    codingModalShownRef.current = true;
+    if (sessionStorage.getItem(`of_stage_coding_${id}`)) return; // already shown this tab session
+    sessionStorage.setItem(`of_stage_coding_${id}`, '1');
+    setCodingModalOpen(true);
+    // Escalation tier 1 — 30 s unacknowledged: show a note inside the modal.
+    escalation30Ref.current = setTimeout(() => {
+      setCodingEscalationNote("Take your time — click the button below when you're ready.");
+    }, 30_000);
+    // Escalation tier 2 — 90 s unacknowledged: telemetry skipped.
+    // sendProctorSignal() requires { windowMs, samples, faceAbsentMs, multiFaceMs, gazeOffMs,
+    // maxFaces } and cannot carry a stage_ack_timeout marker without a backend schema change.
+    // Per spec: skip and report — the escalation note remains; never auto-dismiss.
+    escalation90Ref.current = setTimeout(() => {
+      escalation90Ref.current = null;
+    }, 90_000);
+  }, [phase, id]);
+
+  useEffect(() => {
+    if (phase !== 'wrap_up' || wrapUpModalShownRef.current) return;
+    wrapUpModalShownRef.current = true;
+    if (sessionStorage.getItem(`of_stage_wrapup_${id}`)) return;
+    sessionStorage.setItem(`of_stage_wrapup_${id}`, '1');
+    setWrapUpModalOpen(true);
+  }, [phase, id]);
+
+  // Per-problem transition banner: shown when the problem index ADVANCES mid-coding.
+  // First load (prevCodingIndexRef === -1) is silent; only a problem change gets the banner.
+  useEffect(() => {
+    if (phase !== 'coding' || codingMeta.total === 0) return;
+    const prev = prevCodingIndexRef.current;
+    prevCodingIndexRef.current = codingMeta.index;
+    if (prev < 0 || codingMeta.index <= prev) return; // first load or no advance
+    const text = `Problem ${codingMeta.index + 1} of ${codingMeta.total} loaded — take a moment to read it before you start.`;
+    setProblemBannerText(text);
+    problemBannerActiveRef.current = true;
+    if (problemBannerTimerRef.current) clearTimeout(problemBannerTimerRef.current);
+    problemBannerTimerRef.current = setTimeout(() => {
+      problemBannerActiveRef.current = false;
+      setProblemBannerText(undefined);
+      problemBannerTimerRef.current = null;
+    }, 8_000);
+  }, [phase, codingMeta.index, codingMeta.total]);
+
+  // Acknowledge handlers — clear escalation timers and return focus to transcript log.
+  const handleCodingModalAck = useCallback(() => {
+    if (escalation30Ref.current) {
+      clearTimeout(escalation30Ref.current);
+      escalation30Ref.current = null;
+    }
+    if (escalation90Ref.current) {
+      clearTimeout(escalation90Ref.current);
+      escalation90Ref.current = null;
+    }
+    setCodingEscalationNote(undefined);
+    setCodingModalOpen(false);
+    requestAnimationFrame(() => transcriptLogRef.current?.focus());
+  }, []);
+
+  const handleWrapUpModalAck = useCallback(() => {
+    setWrapUpModalOpen(false);
+    requestAnimationFrame(() => transcriptLogRef.current?.focus());
+  }, []);
 
   const handleVoiceReady = useCallback((cue: ServerReady) => {
     lastExpectsRef.current = cue.expects;
@@ -1013,7 +1123,20 @@ export default function InterviewPage() {
       try {
         const s = await getInterviewState(id, tok);
         const done = s.status === 'scored' || s.phase === 'done' || s.phase === 'scoring';
-        setPhase(done ? 'done' : (s.phase as InterviewPhase));
+
+        // Pre-seed sessionStorage for any stage the candidate already passed so that the
+        // phase-change effects never re-open a modal for a stage they've already seen.
+        // Must run BEFORE setPhase so the effects see the keys when they fire.
+        const resumedPhase: InterviewPhase = done ? 'done' : (s.phase as InterviewPhase);
+        const resumedIdx = PHASE_ORDER.indexOf(resumedPhase);
+        if (resumedIdx >= PHASE_ORDER.indexOf('coding')) {
+          sessionStorage.setItem(`of_stage_coding_${id}`, '1');
+        }
+        if (resumedIdx >= PHASE_ORDER.indexOf('wrap_up')) {
+          sessionStorage.setItem(`of_stage_wrapup_${id}`, '1');
+        }
+
+        setPhase(resumedPhase);
         const resumed: Message[] = s.transcript
           .filter((t) => t.role !== 'system')
           .map((t) => ({
@@ -1439,6 +1562,15 @@ export default function InterviewPage() {
   const handleCodeChange = useCallback((value: string) => {
     const now = Date.now();
     lastKeystrokeRef.current = now;
+    // Dismiss the per-problem banner on the first editor keystroke after a new problem loads.
+    if (problemBannerActiveRef.current) {
+      problemBannerActiveRef.current = false;
+      if (problemBannerTimerRef.current) {
+        clearTimeout(problemBannerTimerRef.current);
+        problemBannerTimerRef.current = null;
+      }
+      setProblemBannerText(undefined);
+    }
     setCode(value);
 
     const sinceLast = now - lastSnapshotTimeRef.current;
@@ -1840,16 +1972,19 @@ export default function InterviewPage() {
             <Clock className="h-3.5 w-3.5" aria-hidden="true" />
             {formatTime(elapsed)}
           </span>
-          {/* Live FSM state — the product being honest about where the machine is. */}
+          {/* Persistent stage chip — visible on all screen sizes (the old ghost label was
+              hidden on mobile). Replaces the raw "state: <phase>" text with a human-readable
+              label: Walkthrough / Coding Round — Problem N of M / Wrap-up. */}
           <span
-            className="hidden items-center gap-1.5 font-mono text-[11px] text-foreground-subtle sm:flex"
-            title="Current interview state"
+            data-testid="stage-chip"
+            aria-label={`Current section: ${stageChipLabel(phase, codingMeta)}`}
+            className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] font-medium text-foreground"
           >
             <span
               className="inline-block h-1.5 w-1.5 rounded-full bg-primary/70"
               aria-hidden="true"
             />
-            state: <span className="text-foreground">{phase}</span>
+            <span aria-hidden="true">{stageChipLabel(phase, codingMeta)}</span>
           </span>
         </div>
 
@@ -1938,6 +2073,26 @@ export default function InterviewPage() {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* ── Stage modals — system-initiated, blocking, once-per-session ─────────── */}
+      {/* Fires when the FSM reaches 'coding' for the first time. Ensures the candidate
+          never misses the coding cue (the 7m22s dead-air incident). */}
+      <StageModal
+        open={codingModalOpen}
+        title="Time to write some code."
+        body="The walkthrough's done. Your editor is ready below — RUN to test your solution, SUBMIT when you're happy with it."
+        buttonLabel="Start coding"
+        onAcknowledge={handleCodingModalAck}
+        escalationNote={codingEscalationNote}
+      />
+      {/* Fires when the FSM reaches 'wrap_up' for the first time. */}
+      <StageModal
+        open={wrapUpModalOpen}
+        title="That's the coding section — you're nearly there."
+        body="The interviewer has a few closing questions. Reply in the chat on the right."
+        buttonLabel="Continue"
+        onAcknowledge={handleWrapUpModalAck}
+      />
+
       {/* Phase progress — fills as the interview advances greeting → done */}
       <div className="h-0.5 shrink-0 bg-border" aria-hidden="true">
         <div
@@ -2016,16 +2171,46 @@ export default function InterviewPage() {
                       minSize={20}
                       maxSize={55}
                     >
-                      <ProblemDock
-                        problem={codingProblem}
-                        index={codingMeta.index}
-                        total={codingMeta.total}
-                        clock={formatTime(Math.max(0, elapsed - problemStartElapsedRef.current))}
-                        overBudget={
-                          elapsed - problemStartElapsedRef.current > PROBLEM_SOFT_BUDGET_S
-                        }
-                        onCollapseAction={() => setProblemOpen(false)}
-                      />
+                      <div className="flex h-full flex-col overflow-hidden">
+                        {/* Per-problem transition banner — polite live region, auto-hides after 8 s
+                            or on the first editor keystroke. Deliberately light: the candidate is
+                            already oriented; this is a gentle "new problem" nudge only. */}
+                        {problemBannerText && (
+                          <div
+                            role="status"
+                            aria-live="polite"
+                            data-testid="problem-banner"
+                            className="flex shrink-0 items-center justify-between gap-2 border-b border-border bg-primary/10 px-3 py-1.5 text-[11px] font-medium text-foreground"
+                          >
+                            <span>{problemBannerText}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                problemBannerActiveRef.current = false;
+                                if (problemBannerTimerRef.current) {
+                                  clearTimeout(problemBannerTimerRef.current);
+                                  problemBannerTimerRef.current = null;
+                                }
+                                setProblemBannerText(undefined);
+                              }}
+                              aria-label="Dismiss notice"
+                              className="shrink-0 rounded px-1 text-foreground-subtle hover:text-foreground"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        )}
+                        <ProblemDock
+                          problem={codingProblem}
+                          index={codingMeta.index}
+                          total={codingMeta.total}
+                          clock={formatTime(Math.max(0, elapsed - problemStartElapsedRef.current))}
+                          overBudget={
+                            elapsed - problemStartElapsedRef.current > PROBLEM_SOFT_BUDGET_S
+                          }
+                          onCollapseAction={() => setProblemOpen(false)}
+                        />
+                      </div>
                     </ResizablePanel>
                     <ResizableHandle
                       withHandle
@@ -2312,10 +2497,12 @@ export default function InterviewPage() {
               {/* Transcript scroll area. (The coding problem no longer lives here — it's the
                   ProblemDock split beside the editor, in the left pane.) */}
               <div
+                ref={transcriptLogRef}
                 role="log"
                 aria-live="polite"
                 aria-label="Interview transcript"
-                className="flex-1 space-y-4 overflow-y-auto p-4"
+                tabIndex={-1}
+                className="flex-1 space-y-4 overflow-y-auto p-4 focus:outline-none"
               >
                 {messages.map((msg, idx) => {
                   const isCandidate = msg.role === 'candidate';

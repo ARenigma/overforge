@@ -438,7 +438,7 @@ async function main(): Promise<void> {
   // ── C4: No sub-800ms oral replies ────────────────────────────────────────────
   const fastDodgeReplies = dodgeReplies.filter((dr) => dr.underMs);
   const fastOralTurns = allAiTurns.filter(
-    (t) => t.kind === 'oral' && t.ms < 800 && t.kind !== 'greeting',
+    (t) => t.kind === 'oral' && t.ms < 800,
   );
 
   step(
@@ -464,7 +464,7 @@ async function main(): Promise<void> {
         extras.push(`acks=${acknowledgesDodge(t.text)}`);
         extras.push(`pivot=${isPivotLine(t.text)}`);
         if (hasSpeechTag(t.text)) extras.push(`SPEECH_TAG_LEAK`);
-        if (t.ms < 800 && t.kind !== 'greeting') extras.push(`UNDER_800ms`);
+        if (t.ms < 800) extras.push(`UNDER_800ms`);
       }
       const meta = extras.length ? `  [${extras.join(', ')}]` : '';
       return `#${i + 1}  ${prefix} (+${t.ms}ms):${meta}\n  "${t.text.slice(0, 600)}"`;
