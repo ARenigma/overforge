@@ -16,6 +16,7 @@ import {
   ClarifyResult,
 } from './oracle';
 import { OracleDecision, InterventionKind, Effect, ObserverNote } from './types';
+import { isSectionEffect } from './section-cue';
 import { recordLlmUsage } from '../cost/ledger';
 
 // NOTE: MinimaxConfig + createMinimaxClient are OpenAI-compatible (Bearer auth, request shape, and
@@ -682,16 +683,26 @@ function buildUtterancePrompt(req: UtteranceRequest): string {
         `BANNED — the new question must not touch any of them: ${req.bannedTopics.join(', ')}. ` +
         'Pick a completely different technical area.'
       : '',
+    req.sectionRetryNote ?? '',
     req.problemStatement
       ? "The coding problem is ALREADY on the candidate's screen (do NOT read it verbatim — give " +
         `only a one-line gist):\n${req.problemStatement.slice(0, 1500)}`
       : '',
     req.code ? `Candidate code so far:\n${req.code.slice(0, 1500)}` : '',
     recent ? `Recent transcript:\n${recent}` : '',
-    lastCandidate
+    // The dodge-press instruction is for CONTENT turns only. At a section boundary it directly
+    // contradicts the transition guidance — and demonstrably wins (2026-08-03 dress rehearsal:
+    // handoff, ask_code and wrap_up all came out as re-asks of an unresolved oral thread, so
+    // the candidate never heard the coding round start). At transitions the thread is closed.
+    lastCandidate && !isSectionEffect(req.effect.kind)
       ? `The candidate's LAST reply was:\n"${lastCandidate.slice(0, 1200)}"\n` +
         'First decide: did this genuinely answer your previous question? If it dodged, was ' +
         'non-substantive, or off-topic, press for the specific instead of thanking them and moving on.'
+      : '',
+    isSectionEffect(req.effect.kind)
+      ? 'SECTION BOUNDARY: every earlier thread is CLOSED, answered or not. Do NOT revisit, ' +
+        'reference, or re-ask ANY previous question — a human interviewer lets an unresolved ' +
+        'thread go when the section changes. Your ONLY job this turn is the transition above.'
       : '',
     "Produce only the interviewer's next utterance.",
   ]

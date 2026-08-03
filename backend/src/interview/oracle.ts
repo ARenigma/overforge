@@ -27,6 +27,9 @@ export interface UtteranceRequest {
   /** Repeat-guard retry (ask_oral only): topical terms from questions already asked — the wording
    *  prompt lists them as banned so the model cannot re-tread an unresolved thread. */
   bannedTopics?: string[] | null;
+  /** Section-cue retry (handoff/ask_code/wrap_up only): appended verbatim to the wording prompt
+   *  after the first draft failed to announce the section (see section-cue.ts). */
+  sectionRetryNote?: string | null;
 }
 
 export interface Utterance {

@@ -39,6 +39,7 @@ import {
   recordInterventionFired,
 } from './engagement';
 import { clusterCount, isSemanticRepeat, priorAiQuestions, bannedTopicTerms } from './repeat-guard';
+import { announcesSection, isSectionEffect, sectionRetryNote } from './section-cue';
 import { maybeFireObserverNote } from './notes';
 import { stripSpeechTags } from '../voice/speech-tags';
 import {
@@ -233,6 +234,30 @@ export function getPendingRunIntervention(interviewId: string): PendingRunInterv
 }
 
 // ─────────────────────── Helpers ───────────────────────
+
+/** Section-cue guard (see section-cue.ts): a boundary utterance that fails to announce its
+ *  section gets ONE corrective retry, then the deterministic template (which always announces).
+ *  Runs for handoff/ask_code/wrap_up only; returns other utterances untouched. */
+async function ensureSectionCue(
+  oracle: Oracle,
+  req: UtteranceRequest,
+  utterance: Utterance,
+  interviewId: string
+): Promise<Utterance> {
+  const kind = req.effect.kind;
+  if (!isSectionEffect(kind) || announcesSection(kind, utterance.text)) return utterance;
+  const retried = await withCostContext(
+    { interviewId, kind: 'brain', phase: req.ctx.phase },
+    () => oracle.generateUtterance({ ...req, sectionRetryNote: sectionRetryNote(kind) })
+  ).catch(() => null);
+  const retryOk = retried !== null && announcesSection(kind, retried.text);
+  const final = retryOk ? retried : await new DeterministicOracle().generateUtterance(req);
+  // Greppable proof the guard acted (same observability contract as [repeat-guard]).
+  console.log(
+    `[section-cue] fired interview=${interviewId} effect=${kind} action=${retryOk ? 'retry-ok' : 'fallback'}`
+  );
+  return final;
+}
 
 function requireInterview(interview: Interview | null, id: string): Interview {
   if (!interview) throw Object.assign(new Error(`Interview ${id} not found`), { status: 404 });
@@ -1424,6 +1449,9 @@ export async function submitAnswer(
             ? await fallback.generateIntervention(interventionReq)
             : await fallback.generateUtterance(req);
       }
+      // Section-cue guard: boundary turns (handoff / ask_code / wrap_up) must audibly open
+      // their section; a momentum-captured draft is retried once, then templated.
+      utterance = await ensureSectionCue(oracle, req, utterance, interviewId);
       if (effect.kind === 'ask_followup') {
         // M1: the mandatory CQ is labeled for the room (counter_question) but flagged `mandatory` so the
         // scorer excludes it from the assistance penalty. A NON-mandatory follow-up is oracle-chosen
@@ -1485,6 +1513,8 @@ export async function submitAnswer(
           console.error(`[orchestrator] ask_code utterance generation failed for ${interviewId}:`, err);
           askCodeUtterance = await new DeterministicOracle().generateUtterance(askCodeReq);
         }
+        // The chained coding intro is the one cue the candidate must never miss (D1).
+        askCodeUtterance = await ensureSectionCue(oracle, askCodeReq, askCodeUtterance, interviewId);
         // Persist the chained ask_code transition (no candidate answer; no requestId so
         // idempotency is not double-applied on retry — the handoff persist already wrote it).
         await persistTransition(freshInterview, codingCtx, askCodeEffect, askCodeUtterance);
