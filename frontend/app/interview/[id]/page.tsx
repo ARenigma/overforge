@@ -858,10 +858,15 @@ export default function InterviewPage() {
       lastExpectsRef.current = cue.utterance.expects;
       pendingVoiceRequestRef.current = cue.requestId;
 
-      // Append candidate transcript bubble + interviewer utterance bubble.
+      // Append candidate transcript bubble + interviewer utterance bubble. A commit whose text
+      // was stripped to nothing (filler-only / hallucination-filtered turn) renders no bubble —
+      // an empty candidate bubble reads as a glitch to the candidate (seen in the voice-mimic QA
+      // run; the server persists nothing for these either).
       setMessages((prev) => [
         ...prev,
-        { role: 'candidate' as const, text: cue.transcript },
+        ...(cue.transcript.trim()
+          ? [{ role: 'candidate' as const, text: cue.transcript }]
+          : []),
         { role: 'ai' as const, text: cue.utterance.text },
       ]);
       // Adopt ONLY real FSM phases. The voice service also emits synthetic phases (the oral idle

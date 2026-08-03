@@ -48,15 +48,29 @@ test.describe('stage cues: blocking modals + chip', () => {
     const ackBtn = page.getByTestId('stage-modal-ack');
     await expect(ackBtn).toBeFocused();
 
-    // The transcript textarea and editor must not be interactable (overlay covers them).
-    // The simplest check: clicking the composer doesn't move focus away from the modal overlay.
+    // The composer and editor must not be reachable while the modal is open. A click aimed at
+    // the composer lands on the overlay (topmost element), so: the modal survives the click,
+    // and the composer never receives focus. (Focus falling to <body> is fine — that IS the
+    // overlay swallowing the click; what matters is the page underneath stayed untouchable.)
     await page.getByPlaceholder('Type your answer…').click({ force: true }).catch(() => undefined);
-    // Focus must NOT have left the modal — ack button or the modal itself is still focused.
-    const focusedTestId = await page.evaluate(() => {
+    await expect(modal, 'outside click must not dismiss the stage modal').toBeVisible();
+    await expect(
+      page.getByPlaceholder('Type your answer…'),
+      'composer must not receive focus through the overlay'
+    ).not.toBeFocused();
+
+    // Esc must not dismiss it either (non-standard exit, declared in the description).
+    await page.keyboard.press('Escape');
+    await expect(modal, 'Escape must not dismiss the stage modal').toBeVisible();
+
+    // Tab traps: focus stays inside the modal when tabbing.
+    await ackBtn.focus();
+    await page.keyboard.press('Tab');
+    const tabStaysInside = await page.evaluate(() => {
       const el = document.activeElement as HTMLElement | null;
-      return el?.closest('[data-testid="stage-modal"]') !== null;
+      return el !== null && el.closest('[data-testid="stage-modal"]') !== null;
     });
-    expect(focusedTestId, 'focus must stay inside the stage modal while it is open').toBe(true);
+    expect(tabStaysInside, 'Tab must keep focus inside the stage modal').toBe(true);
 
     // Acknowledge dismisses the modal.
     await ackBtn.click();

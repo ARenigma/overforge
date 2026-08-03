@@ -32,7 +32,8 @@ const baseUse = {
   headless: process.env.HEADLESS === '1',
   permissions: ['camera', 'microphone', 'clipboard-read', 'clipboard-write'],
   trace: 'retain-on-failure' as const,
-  video: 'retain-on-failure' as const,
+  // PW_VIDEO=on records every test (visual QA runs); default records failures only.
+  video: (process.env.PW_VIDEO === 'on' ? 'on' : 'retain-on-failure') as 'on' | 'retain-on-failure',
   screenshot: 'only-on-failure' as const,
 };
 
@@ -48,7 +49,7 @@ export default defineConfig({
   projects: [
     {
       name: 'mimic',
-      testMatch: /(mimic-full-e2e|submit-controls)\.spec\.ts/,
+      testMatch: /(mimic-full-e2e|submit-controls|stage-cues)\.spec\.ts/,
       // Silent mic: the mimic types its answers; a silent stream keeps the voice STT path quiet so
       // it can't race the text composer. Falls back to the default fake device if silence.wav is
       // absent (a low-level tone, still harmless for a text-driven run).

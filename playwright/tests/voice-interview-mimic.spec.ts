@@ -209,8 +209,9 @@ test.afterEach(async () => {
 test('multi-turn voice interview: spoken oral turns drive STT → voice_turn_telemetry', async ({
   page,
 }) => {
-  // 10-minute budget: interviewer TTS turns take 10–30 s each; oral + coding = ~6 clips.
-  test.setTimeout(600_000);
+  // 15-minute budget: interviewer TTS turns take 10–30 s each; up to 8 oral clips, then the
+  // full coding round (runs + submit + counter-question + move-on) and wrap-up Q&A to done.
+  test.setTimeout(900_000);
 
   // ── 1. Install getUserMedia override + __speakClip BEFORE any navigation ──────
   // addInitScript fires before every page.goto() — must be called before room.enter().
@@ -268,13 +269,20 @@ test('multi-turn voice interview: spoken oral turns drive STT → voice_turn_tel
   console.log(`[voice-mimic] room is listening — starting oral turns`);
 
   // ── 6. Oral turns: inject clips, wait for STT commit + interviewer reply ───────
-  // We use the first 4 clips for the oral round (deep-dive, specifics, conceptual, clarifying).
-  // Clips 5 and 6 are reserved for coding-phase voice probes (if the WS stays in voice mode).
-  const oralClips = CLIPS.slice(0, 4);
+  // First pass: deep-dive, specifics, conceptual, clarifying (clips 1-4). The interviewer
+  // probes and answers clarifying questions rather than advancing on them (that's the product
+  // working — a 4-clip hard stop failed here on 2026-08-03), so past 4 turns we keep answering
+  // by cycling substantive clips (specifics, conceptual, wrap-up) until the FSM leaves oral,
+  // exactly like the text mimic's advanceThroughOral rotation. Clip 5 (approach) stays reserved
+  // for the coding-phase voice probe.
+  const MAX_ORAL_TURNS = 8;
+  const cyclePool = [CLIPS[1], CLIPS[2], CLIPS[5]].filter(Boolean);
+  const clipFor = (i: number): string =>
+    i < 4 ? CLIPS[i] : cyclePool[(i - 4) % cyclePool.length];
   const oralPhases = new Set(['greeting', 'oral', 'handoff', '']);
   let candidateTurns = 0;
 
-  for (let i = 0; i < oralClips.length; i++) {
+  for (let i = 0; i < MAX_ORAL_TURNS; i++) {
     // Stop when the FSM has left oral phases.
     const currentPhase = await room.phase();
     if (!oralPhases.has(currentPhase)) {
@@ -295,11 +303,11 @@ test('multi-turn voice interview: spoken oral turns drive STT → voice_turn_tel
       }
     }
 
-    console.log(`[voice-mimic] turn ${i + 1}: playing ${oralClips[i].split('/').pop()}`);
+    console.log(`[voice-mimic] turn ${i + 1}: playing ${clipFor(i).split('/').pop()}`);
 
     // Play the clip and wait for the STT commit (candidate-message bubble appears).
     // 90 s covers: clip playback (up to ~55 s for the deep-dive) + STT processing (2–8 s).
-    const committed = await speakAndWaitCommit(page, oralClips[i], { transcriptTimeout: 90_000 });
+    const committed = await speakAndWaitCommit(page, clipFor(i), { transcriptTimeout: 90_000 });
     if (committed) {
       candidateTurns++;
       console.log(`[voice-mimic] turn ${i + 1}: transcript committed ✓ (total=${candidateTurns})`);
@@ -361,7 +369,35 @@ test('multi-turn voice interview: spoken oral turns drive STT → voice_turn_tel
   // ── 10. Invariant: no hidden-test data leaked to the candidate view ────────────
   await room.assertNoHiddenTestLeak();
 
-  // ── 11. Terminal state ─────────────────────────────────────────────────────────
+  // ── 11. Drive the flow to its natural end ──────────────────────────────────────
+  // devMode:false has no short time cap, so the interview only concludes by completing:
+  // SUBMIT (mandatory counter-question) → typed reply advances → MOVE ON through any
+  // remaining problems (forward-only) → wrap-up Q&A → done. The room helper acknowledges
+  // the blocking stage modals (coding / wrap-up) on the way, as a real candidate would.
+  await room.submitSolution();
+  const counterQ = await room.lastAiText();
+  console.log(`[voice-mimic] submit counter-question: "${counterQ.slice(0, 100)}"`);
+  expect(counterQ.length, 'SUBMIT must fire a counter-question').toBeGreaterThan(0);
+  await room.answer(
+    'I counted tokens from stdin as a first pass; with more time I would group anagrams by their ' +
+      'sorted character key in a hash map to make it correct for the actual problem.'
+  );
+
+  // Forward-only through any remaining coding problems.
+  for (let p = 0; p < 4 && !(await room.isDone()); p++) {
+    if ((await room.phase()) !== 'coding') break;
+    await room.moveOn();
+  }
+
+  // Wrap-up: answer closing questions until the FSM concludes (bounded).
+  for (let w = 0; w < 5 && !(await room.isDone()); w++) {
+    if ((await room.phase()) !== 'wrap_up') break;
+    await room.answer(
+      'Thanks — the rate-limiter walkthrough was a fair test, and the anagram problem was a nice ' +
+        'complexity check. No further questions from my side.'
+    );
+  }
+
   await room.waitForDone(140_000);
   console.log(`[voice-mimic] done. concludedByTime=${await room.concludedByTime()}`);
   expect(await room.isDone(), 'interview must reach done state').toBeTruthy();

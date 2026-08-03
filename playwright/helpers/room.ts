@@ -43,6 +43,24 @@ export class CandidateRoom {
     );
   }
 
+  /** The stage-guidance modal is system-initiated and blocking (fires once when the FSM reaches
+   *  coding / wrap_up). A real candidate acknowledges it; the mimic does the same before any
+   *  page interaction. Deliberately NOT called from waitForCoding()/phase() so the stage-cues
+   *  spec can still observe the modal itself. */
+  async acknowledgeStageModalIfOpen(): Promise<void> {
+    const ack = this.page.getByTestId('stage-modal-ack');
+    try {
+      if ((await ack.count()) === 0 || !(await ack.isVisible())) return;
+      await ack.click();
+      await this.page
+        .getByTestId('stage-modal')
+        .waitFor({ state: 'hidden', timeout: 5_000 });
+    } catch {
+      // Raced a close (or the modal never fully opened) — interaction below will surface any
+      // genuine blockage as its own timeout.
+    }
+  }
+
   /** Wait until the interviewer has finished producing its turn (thinking spinner gone). */
   async waitForSettled(timeout = 60_000): Promise<void> {
     await this.page
@@ -68,6 +86,7 @@ export class CandidateRoom {
   /** Type an answer into the always-on composer and submit (Enter). Waits for the interviewer's
    *  reply (a new ai bubble) so the caller can keep the conversation going. */
   async answer(text: string, timeout = 60_000): Promise<void> {
+    await this.acknowledgeStageModalIfOpen(); // wrap-up modal blocks the composer
     const before = await this.aiCount();
     const box = this.page.getByPlaceholder('Type your answer…');
     await box.waitFor({ state: 'visible', timeout: 15_000 });
@@ -143,6 +162,7 @@ export class CandidateRoom {
   /** Replace the editor contents. Uses the real paste path (devMode allows it → verbatim insert,
    *  so Python indentation survives), with an execCommand('insertText') fallback. */
   async typeCode(source: string): Promise<void> {
+    await this.acknowledgeStageModalIfOpen(); // coding modal blocks the editor
     const editor = this.page.locator('.cm-content');
     await editor.waitFor({ state: 'visible', timeout: 20_000 });
     await editor.click();
@@ -187,6 +207,7 @@ export class CandidateRoom {
 
   /** Click RUN and return the candidate-visible outcome (status + stdout/stderr). */
   async run(timeout = 40_000): Promise<{ status: string; stdout: string }> {
+    await this.acknowledgeStageModalIfOpen();
     const before = await this.aiCount();
     await this.page.getByRole('button', { name: 'RUN' }).click();
     const out = this.page.getByTestId('run-output');
@@ -238,6 +259,7 @@ export class CandidateRoom {
    *  reply (the mandatory counter-question). */
   async submitSolution(code?: string): Promise<void> {
     if (code !== undefined) await this.typeCode(code);
+    await this.acknowledgeStageModalIfOpen();
     const before = await this.aiCount();
     await this.page.getByTestId('submit-code').click();
     await this.page
@@ -252,6 +274,7 @@ export class CandidateRoom {
 
   /** Click MOVE ON and confirm the forward-only dialog. */
   async moveOn(): Promise<void> {
+    await this.acknowledgeStageModalIfOpen();
     await this.page.getByTestId('move-on').click();
     await this.page
       .getByRole('alertdialog')
