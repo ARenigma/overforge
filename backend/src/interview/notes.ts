@@ -3,8 +3,8 @@
 // Triggered AFTER appendCodeRun lands in recordRun AND after submitAnswer's transition persists —
 // NEVER awaited under withInterviewLock or inside a response path.
 //
-// Each note: one LLM call with reasoningEffort:'high' and AbortSignal.timeout(5_000) wrapping
-// the whole call. Input: last 5 notes + line-capped code diff summary + latest run result.
+// Each note: one LLM call with reasoningEffort:'low' (see runObserverNote for why not 'high')
+// raced against a 5s timeout. Input: last 5 notes + line-capped code diff summary + latest run result.
 // Output: strict JSON {approach, transition, diagnosis} ≤400 tokens.
 // Storage: ring buffer (engagement.ts) + interview_events (type 'observer_note').
 //
@@ -34,8 +34,7 @@ function interventionsEnabled(): boolean {
 
 // ─────────────────────── LLM client for notes ───────────────────────
 
-/** Minimal failover client for observer notes. Uses Groq primary (high reasoning effort) or
- *  MiniMax as fallback. Notes use 'high' per-call reasoning effort. */
+/** Minimal failover client for observer notes. Uses Groq primary or MiniMax as fallback. */
 function getNotesClient(): MinimaxClient {
   const entries: { name: string; client: MinimaxClient }[] = [];
   if (process.env.GROQ_API_KEY) {
@@ -136,8 +135,15 @@ async function runObserverNote(
   ];
 
   // 5-second total budget — if the LLM is slow, drop silently. Notes are best-effort.
+  //
+  // reasoningEffort 'low' + a generous ceiling, NOT 'high' + 400: with response_format
+  // json_object, Groq VALIDATES the output as JSON, and gpt-oss's hidden reasoning at 'high'
+  // ate the whole 400-token budget → empty/truncated JSON → HTTP 400 json_validate_failed on
+  // 7/7 calls in prod interview e3c07b8f (silent failover to MiniMax every time). Same bug
+  // class as the scorer's old 512-cap. A 3-sentence note needs no deep reasoning; 'low'
+  // returns in ~650ms (verified live 2026-08-09), which also fits the 5s race.
   const raw = await Promise.race([
-    client.complete(messages, { json: true, maxTokens: 400, reasoningEffort: 'high' }),
+    client.complete(messages, { json: true, maxTokens: 1024, reasoningEffort: 'low' }),
     new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('observer-note timeout (5s)')), 5_000)
     ),
