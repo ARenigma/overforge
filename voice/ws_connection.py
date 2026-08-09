@@ -40,10 +40,11 @@ logger = logging.getLogger(__name__)
 _HANDSHAKE_TIMEOUT_S = 5.0
 _FRAME_Q_MAX = 64  # ~2 s of 32 ms frames; full → drop (backpressure, never unbounded)
 
-#: Builds a VoiceSession for one connection: (interview_id, token, language, sink) -> VoiceSession.
+#: Builds a VoiceSession for one connection:
+#: (interview_id, token, language, phase, sink) -> VoiceSession.
 #: ws_app wires the real one (per-connection endpointer over shared warm models + RestBrainClient);
 #: tests inject a fake-backed factory so the WS layer is exercised with no models/network.
-SessionFactory = Callable[[str, str, str, WsTtsSink], VoiceSession]
+SessionFactory = Callable[[str, str, str, str, WsTtsSink], VoiceSession]
 
 
 class WebSocketLike(Protocol):
@@ -83,7 +84,7 @@ class WsConnection:
 
         self._sink = WsTtsSink(self._ws.send_json)
         self._session = self._deps.build_session(
-            self._interview_id, self._token, ready.language, self._sink
+            self._interview_id, self._token, ready.language, ready.phase, self._sink
         )
         await self._ws.send_json(
             {
@@ -194,6 +195,11 @@ class WsConnection:
                     if v > 0.0 and v < 120_000.0:
                         first_audio_ms = v
                 self._sink.ack(request_id, first_audio_ms)
+        elif mtype == "greeting_done":
+            # Browser signals that the greeting TTS finished playing — arm the initial idle
+            # watchdog.  Advisory: if this message never arrives the 45 s fallback activates.
+            if self._session is not None:
+                self._session.greeting_done()
         elif mtype == "bye":
             return True
         # 'mute' / 'mic_off' are advisory in B.4a (the browser stops sending frames itself).

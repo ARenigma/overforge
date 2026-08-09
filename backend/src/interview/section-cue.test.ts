@@ -46,6 +46,34 @@ describe('announcesSection — real failing prod turns (interview 22b3f3f7)', ()
   });
 });
 
+describe('announcesSection — handoff acknowledgment beat (choreography A2)', () => {
+  // An ack prefix must NOT break handoff validation — the regex scans the whole text
+  // so "Got it — fair approach. That's the walkthrough done — now the coding round." passes.
+  test('ack beat + boundary text passes announcesSection handoff', () => {
+    expect(
+      announcesSection(
+        'handoff',
+        "Got it — that's a fair approach. That's the walkthrough done — now the coding round."
+      )
+    ).toBe(true);
+  });
+
+  test('ack beat variant + boundary passes', () => {
+    expect(
+      announcesSection(
+        'handoff',
+        "Okay, caching and row limits — makes sense. That wraps the walkthrough; coding round is next."
+      )
+    ).toBe(true);
+  });
+
+  test('bare ack with no boundary line fails (would confuse the candidate)', () => {
+    expect(
+      announcesSection('handoff', "Got it — fair approach.")
+    ).toBe(false);
+  });
+});
+
 describe('announcesSection — genuine section openings pass', () => {
   test('every deterministic template announces its section', async () => {
     const oracle = new DeterministicOracle();

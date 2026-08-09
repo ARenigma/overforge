@@ -130,7 +130,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("STT shadow: soniox (A/B observer; log-only, never drives turns).")
 
     def build_session(
-        interview_id: str, token: str, language: str, sink: WsTtsSink
+        interview_id: str, token: str, language: str, phase: str, sink: WsTtsSink
     ) -> VoiceSession:
         # Each connection gets its OWN endpointer (VAD state is per-speaker) over the SHARED,
         # read-mostly warm models; one shared SemaphoreStt; a brain and telemetry sink both
@@ -159,6 +159,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             telemetry=telemetry_sink,
             streamer=streamer,
             shadow=shadow,
+            phase=phase,
         )
 
     app.state.deps = ConnectionDeps(http_client=http_client, build_session=build_session)

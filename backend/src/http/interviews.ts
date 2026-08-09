@@ -800,8 +800,11 @@ router.post('/:id/finish', async (req: Request, res: Response): Promise<void> =>
     await orchestrator.finishAndScore(id, {
       ...(validatedCode !== undefined ? { finalCode: validatedCode } : {}),
       ...(validatedLanguage !== undefined ? { finalLanguage: validatedLanguage } : {}),
+      endReason: 'candidate_ended',
     });
-    res.json({ ok: true });
+    const goodbye =
+      "Thanks for completing the interview — we'll review your session and be in touch. Best of luck!";
+    res.json({ ok: true, goodbye });
   } catch (err) {
     sendError(res, err);
   }
@@ -817,7 +820,14 @@ router.post('/:id/finish', async (req: Request, res: Response): Promise<void> =>
 // reasons a turn was committed — NOT the phase (false-fire / hallucination / done are phases).
 // assemblyai_eot MUST be here or the AAI streaming path's telemetry is silently 400-rejected;
 // soniox_eot covers the dev-only alternate-primary shadow path.
-const VALID_COMMITS = new Set(['smartturn', 'backstop', 'maxlen', 'assemblyai_eot', 'soniox_eot']);
+const VALID_COMMITS = new Set([
+  'smartturn',
+  'backstop',
+  'maxlen',
+  'assemblyai_eot',
+  'soniox_eot',
+  'idle_probe',
+]);
 
 // Candidate speech can be long; cap stored transcripts so a runaway turn can't bloat a telemetry
 // row. Generous — a normal spoken answer is well under this.

@@ -50,7 +50,7 @@ import {
   isRunInFlight,
   isAnswerInFlight,
 } from './inflight';
-import { selectProblems, getProblemBySlug, toPublicProblem, PublicProblem } from './problems';
+import { selectProblems, getProblemBySlug, toPublicProblem, sampleTestsOf, PublicProblem } from './problems';
 import {
   createMinimaxClient,
   MinimaxClient,
@@ -82,11 +82,13 @@ import {
   getProctorSignalsForInterview,
   getSecondVoiceSignals,
   updateLastRunIntervention,
+  clearLastRunInterventionPending,
   Interview,
   InterviewStatus,
 } from '../db/interviews';
 import { createDockerKernel } from '../execution/docker';
 import { RunRequest, RunResult } from '../execution/types';
+import { SampleResults } from './types';
 import { withCostContext } from '../cost/context';
 import { recordExecCost, rollupInterview } from '../cost/ledger';
 import { scoreInterview, CodeRunSummary } from '../scoring/scorer';
@@ -1549,6 +1551,7 @@ export async function submitAnswer(
 /** Cap hidden tests executed per Run — bounds container spend on the shared box (bank problems
  *  have ≤10; this is the ceiling regardless). */
 const MAX_HIDDEN_TESTS = 12;
+const MAX_SAMPLE_TESTS = 3;
 
 /** The coding problem assigned to a given coding question (codeIndex), or null (legacy/no bank). */
 function assignedProblem(interview: Interview, codeIndex: number): CodingProblem | null {
@@ -1616,6 +1619,78 @@ async function runHiddenTests(
   return { passed, total: tests.length, ...(incomplete ? { incomplete: true } : {}), cases };
 }
 
+/**
+ * Run the problem's PUBLIC sample tests against the candidate's code and return both the
+ * SampleResults (for scorer grounding) and the RunResult the candidate sees.  The visible result
+ * is derived from the FIRST sample test — same stdin the candidate used — so the status the UI
+ * shows can never contradict the hidden-test outcome.
+ */
+async function runSampleTests(
+  problem: CodingProblem,
+  language: string,
+  source: string
+): Promise<{ sample: SampleResults; visible: RunResult }> {
+  const kernel = getExecutionKernel();
+  const samples = sampleTestsOf(problem).slice(0, MAX_SAMPLE_TESTS);
+  const cases: SampleResults['cases'] = [];
+  let passed = 0;
+  let incomplete = false;
+  let visibleResult: RunResult | null = null;
+
+  for (let i = 0; i < samples.length; i++) {
+    let r: RunResult;
+    try {
+      r = await kernel.run({ language, source, stdin: samples[i].input });
+    } catch (err) {
+      incomplete = true;
+      if (i === 0) {
+        // Fabricate a visible result so the caller always has one to return.
+        r = {
+          status: 'Runtime Error',
+          stdout: '',
+          stderr: String(err),
+          compileOutput: '',
+          exitCode: null,
+          timeMs: null,
+          memoryKb: null,
+        };
+      } else {
+        break;
+      }
+    }
+    if (i === 0) visibleResult = r;
+    const ok = r!.status === 'Accepted' && r!.stdout.trim() === samples[i].expected.trim();
+    if (ok) passed++;
+    cases.push({
+      index: i,
+      input: samples[i].input,
+      expected: samples[i].expected,
+      stdout: r!.stdout,
+      stderr: r!.stderr,
+      status: r!.status,
+      passed: ok,
+      timeMs: r!.timeMs,
+    });
+    if (r!.status !== 'Accepted') {
+      incomplete = true;
+      break;
+    }
+  }
+
+  // Fall back to a no-stdin visible run only when there were no samples at all.
+  if (!visibleResult) {
+    visibleResult = await kernel.run({ language, source, stdin: '' });
+  }
+
+  const sample: SampleResults = {
+    passed,
+    total: samples.length,
+    ...(incomplete ? { incomplete: true } : {}),
+    cases,
+  };
+  return { sample, visible: visibleResult };
+}
+
 export async function recordRun(interviewId: string, req: RunRequest): Promise<RunResult> {
   markRunInFlight(interviewId);
   try {
@@ -1650,15 +1725,35 @@ async function _recordRunInner(interviewId: string, req: RunRequest): Promise<Ru
     throw Object.assign(new Error('Code runs open in the coding round.'), { status: 409 });
   }
 
-  const kernel = getExecutionKernel();
-  const result = await kernel.run(req);
+  const problem = assignedProblem(interview, runCtx.codeIndex);
+  let result: RunResult;
+
+  // When the problem has public sample tests, run against them so the candidate-visible status
+  // (stdout, stderr, timing) comes from a real execution on the same stdin they would use.
+  // This prevents the visible run from returning an empty-stdin 'Accepted' that contradicts the
+  // hidden-test 'Runtime Error' or wrong-output outcome stored on the same row.
+  const hasSamples = problem && sampleTestsOf(problem).length > 0;
+  if (hasSamples && problem) {
+    try {
+      const { sample, visible } = await runSampleTests(problem, req.language, req.source);
+      result = visible;
+      result.sampleResults = sample;
+    } catch (err) {
+      console.error(`[orchestrator] sample-test run failed for ${interviewId}:`, err);
+      const kernel = getExecutionKernel();
+      result = await kernel.run(req);
+    }
+  } else {
+    const kernel = getExecutionKernel();
+    result = await kernel.run(req);
+  }
+
   result.language = req.language;
   result.codeIndex = runCtx.codeIndex; // tag with the question in play, for signal scoping
 
   // Grade against the assigned problem's HIDDEN tests (server-injected stdin). Server-side only:
   // persisted on the run + used by the intervention engine + scorer, but STRIPPED from the /run
   // response so correctness is never leaked to the candidate live. Best-effort — never fail the run.
-  const problem = assignedProblem(interview, runCtx.codeIndex);
   if (problem && problem.hiddenTests.length > 0) {
     try {
       result.testResults = await runHiddenTests(problem, req.language, req.source);
@@ -1701,6 +1796,13 @@ async function _recordRunInner(interviewId: string, req: RunRequest): Promise<Ru
             /* best-effort */
           });
         } else {
+          // Clear the interventionPending flag so the next nudge check is not stuck.
+          await clearLastRunInterventionPending(interviewId).catch((err) => {
+            console.error(
+              `[orchestrator] clearLastRunInterventionPending failed for ${interviewId}:`,
+              err
+            );
+          });
           pendingRunInterventions.set(interviewId, { status: 'none' });
         }
       } catch (err) {
@@ -2211,7 +2313,12 @@ async function attachRunIntervention(
 
 export async function finishAndScore(
   interviewId: string,
-  opts: { rescore?: boolean; finalCode?: string; finalLanguage?: string } = {}
+  opts: {
+    rescore?: boolean;
+    finalCode?: string;
+    finalLanguage?: string;
+    endReason?: 'candidate_ended' | 'time_cap';
+  } = {}
 ): Promise<boolean> {
   // ── Phase 1: claim + capture snapshot (under lock) ──────────────────────────────────────────
   // withInterviewLock serialises this against concurrent submitAnswer calls so a late /answer
@@ -2278,9 +2385,17 @@ export async function finishAndScore(
       language: r.language ?? 'unknown',
       status: r.status,
       stderr: r.stderr,
+      ...(r.codeIndex !== undefined ? { codeIndex: r.codeIndex } : {}),
       ...(r.testResults
-        ? { testResults: { passed: r.testResults.passed, total: r.testResults.total } }
+        ? {
+            testResults: {
+              passed: r.testResults.passed,
+              total: r.testResults.total,
+              ...(r.testResults.incomplete ? { incomplete: true } : {}),
+            },
+          }
         : {}),
+      ...(r.sampleResults ? { sampleResults: r.sampleResults } : {}),
       ...(r.intervention
         ? { intervention: { kind: r.intervention.kind, text: r.intervention.text } }
         : {}),
@@ -2308,6 +2423,10 @@ export async function finishAndScore(
     );
   }
 
+  const durationSeconds = interview.tnc_accepted_at
+    ? Math.round((Date.now() - new Date(interview.tnc_accepted_at).getTime()) / 1000)
+    : undefined;
+
   const scorecard = await withCostContext({ interviewId, kind: 'scorer', phase: 'scoring' }, () =>
     scoreInterview(
       {
@@ -2318,6 +2437,8 @@ export async function finishAndScore(
         roleBrief: interview.role_brief,
         proctor: proctorData,
         integritySignals: secondVoiceData,
+        problemSlugs: interview.coding_problem_ids ?? [],
+        durationSeconds,
       },
       minimaxClient
     )
@@ -2343,6 +2464,16 @@ export async function finishAndScore(
       // interview permanently has phase='done' in the column but phase='scoring' in fsm_state,
       // causing the two sources of truth to diverge for every reader that inspects fsm_state.
       fsm_state: { ...(interview.fsm_state as InterviewContext), phase: 'done' },
+    });
+    // Terminal event: persists end-reason so the audit trail always carries why the interview
+    // ended (candidate pressed finish vs time-cap) and the abandoned-mandatory-CQ flag is
+    // determinable even after the FSM state has been overwritten. Non-fatal: an audit write
+    // must never break the terminal path (a kind-CHECK mismatch here would kill the End
+    // button outright — the 0014 failure mode; see migration 0017).
+    await appendEvent(interviewId, 'finish', {
+      reason: opts.endReason ?? 'candidate_ended',
+    }).catch((err: unknown) => {
+      console.error(`[orchestrator] finish event append failed for ${interviewId}:`, err);
     });
     await appendEvent(interviewId, 'score', { scorecard });
   });
@@ -2422,7 +2553,7 @@ export async function closeStaleInterviews(): Promise<{
     try {
       // claims, scores (with level), flags timeLimited/incomplete, emails. Returns false if a
       // concurrent /finish or sweep already claimed it — don't count that as our conclusion.
-      if (await finishAndScore(iv.id)) concluded++;
+      if (await finishAndScore(iv.id, { endReason: 'time_cap' })) concluded++;
     } catch (err) {
       console.error(`[sweep] time-up conclude failed for ${iv.id}:`, err);
     }

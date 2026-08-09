@@ -3,7 +3,7 @@
 
 // The kernel itself never sets `intervention` — the orchestrator attaches it (USP). The type is
 // imported only to keep the union strong end-to-end.
-import { InterventionKind, TestResults } from '../interview/types';
+import { InterventionKind, TestResults, SampleResults } from '../interview/types';
 
 export interface RunRequest {
   language: string; // canonical name, e.g. 'python', 'javascript', 'java'
@@ -36,6 +36,10 @@ export interface RunResult {
    *  persisted on the run + read by the scorer/intervention. MUST be stripped from the candidate's
    *  /run response (correctness is never leaked live). Absent when the question has no problem/tests. */
   testResults?: TestResults;
+  /** Sample-test (statement examples) outcome — candidate-VISIBLE. Present iff the run executed
+   *  against an assigned problem's public sample tests. NOT stripped by stripHiddenTests — it is
+   *  the truthful run outcome the candidate sees. */
+  sampleResults?: SampleResults;
   /** Set by the orchestrator when ENGAGEMENT_INTERVENTIONS is on and the wording is happening
    *  asynchronously (fire-and-forget). The room polls POST /run-intervention to fetch the text
    *  once ready. When absent/false, intervention (if any) is already on this result synchronously. */

@@ -1062,6 +1062,9 @@ async def test_idle_probe_fires_once_after_10s_no_speech(monkeypatch) -> None:
     pump_task = asyncio.create_task(session.pump(frame_q))
     await asyncio.sleep(0)  # let pump initialise (frame consumed, streamer started)
 
+    # Signal that the greeting TTS has finished — the initial watchdog is held back until this.
+    session.greeting_done()
+
     # Wait long enough for the idle probe to fire (0.05 s timeout + slack).
     await asyncio.sleep(0.15)
 
@@ -1098,9 +1101,12 @@ async def test_idle_probe_suppressed_when_speech_arrives_before_timeout(monkeypa
 
     pipeline = asyncio.create_task(_run_pipeline())
 
-    # Kick the first frame so the streamer starts and the watchdog arms.
+    # Kick the first frame so the streamer starts.
     await frame_q.put(_frame())
     await asyncio.sleep(0)
+
+    # Signal that the greeting finished — arms the watchdog — BEFORE speech arrives.
+    session.greeting_done()
 
     # Signal speech activity well before the 0.10 s timeout.
     await asyncio.sleep(0.02)
@@ -1133,6 +1139,7 @@ async def test_idle_probe_fires_at_most_once_per_turn(monkeypatch) -> None:
     await frame_q.put(_frame())
     pump_task = asyncio.create_task(session.pump(frame_q))
     await asyncio.sleep(0)
+    session.greeting_done()  # arm the initial watchdog
 
     # Wait for the probe to fire.
     await asyncio.sleep(0.20)
@@ -1176,6 +1183,9 @@ async def test_idle_probe_resets_on_new_turn_arm(monkeypatch) -> None:
     pipeline1 = asyncio.create_task(_pipeline_turn1())
     await frame_q.put(_frame())
     await asyncio.sleep(0)
+    # Signal greeting done so the initial watchdog is armed and _greeting_done stays True for
+    # subsequent windows (the belt-and-braces check in the watchdog body requires this).
+    session.greeting_done()
     streamer.speech_activity.set()
     streamer.events.put_nowait(
         TurnEvent(transcript="answer one", end_of_turn=True, formatted=True)
@@ -1213,7 +1223,10 @@ async def test_idle_probe_cancelled_on_session_close(monkeypatch) -> None:
     pump_task = asyncio.create_task(session.pump(frame_q))
     await asyncio.sleep(0)
 
-    # The watchdog should be running (the session armed after the first frame).
+    # Signal greeting done to arm the initial watchdog.
+    session.greeting_done()
+
+    # The watchdog should now be running (created synchronously by greeting_done).
     watchdog = session._idle_watchdog_task
     assert watchdog is not None and not watchdog.done()
 
@@ -1546,3 +1559,279 @@ async def test_barge_in_telemetry_recorded_with_flag() -> None:
     rec = tel.records[0]
     assert rec.barge_in is True, "telemetry must record barge_in=True for a barge-in turn"
     assert session.state == "listening"
+
+
+# ────────────── Phase-aware idle watchdog + greeting-done guard (2026-08-09) ──────────────
+
+
+async def test_coding_phase_turn_flows_to_speaking() -> None:
+    """A committed turn during phase='coding' must reach SPEAKING normally.
+
+    The session state machine is phase-agnostic: LISTENING → PROCESSING → SPEAKING is
+    unchanged in coding.  The only coding-specific behaviour is watchdog suppression.
+    """
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("the loop is O(n squared)")
+    brain = FakeBrain(
+        results=[AnswerResult(Utterance("Any better approach?", "code"), "coding", {})]
+    )
+    sink = CaptureSink()
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        sink=sink,
+        phase="coding",
+    )
+    assert session.state == "listening"
+    turn = await _drive(session, 5)
+    assert turn is not None
+    assert turn.phase == "coding"
+    assert session.state == "speaking"
+    assert len(sink.spoken) == 1
+    assert sink.spoken[0].utterance.text == "Any better approach?"
+    # Phase updated to 'coding' after the brain result.
+    assert session._phase == "coding"
+    # Whisper path has no watchdog — just verify there is no task leak.
+    assert session._idle_watchdog_task is None
+
+
+async def test_idle_watchdog_not_armed_after_coding_phase_recover(monkeypatch) -> None:
+    """After a turn lands the FSM in 'coding', _recover must NOT arm the idle watchdog."""
+    monkeypatch.setattr("session._IDLE_PROBE_S", 0.05)
+
+    brain = FakeBrain(results=[AnswerResult(Utterance("now solve it", "code"), "coding", {})])
+    sink = CaptureSink()
+    session, streamer = _stream_session(brain, sink=sink)
+
+    frame_q: asyncio.Queue[np.ndarray] = asyncio.Queue()
+
+    # Full pipeline: answer a turn whose result.phase='coding'.
+    pipeline_task = asyncio.create_task(session.pump(frame_q))
+    await frame_q.put(_frame())
+    await asyncio.sleep(0)
+    session.greeting_done()          # arm initial (oral) watchdog; must be cancelled on turn commit
+    streamer.speech_activity.set()
+    streamer.events.put_nowait(
+        TurnEvent(transcript="my approach is binary search", end_of_turn=True, formatted=True)
+    )
+    result = await asyncio.wait_for(pipeline_task, timeout=2.0)
+    assert result is not None and result.phase == "coding"
+
+    # arm_next_turn → _recover with _phase='coding' → watchdog must NOT start.
+    session.arm_next_turn()
+    await asyncio.sleep(0.20)        # well past the 0.05 s probe timeout
+
+    probe_turns = [t for t in sink.spoken if t.phase == "idle_probe"]
+    assert probe_turns == [], "idle probe must not fire when phase='coding'"
+    assert session._idle_watchdog_task is None
+
+    await session.aclose()
+
+
+async def test_initial_watchdog_not_armed_before_greeting_done(monkeypatch) -> None:
+    """The initial idle watchdog must not fire before greeting_done() is received."""
+    monkeypatch.setattr("session._IDLE_PROBE_S", 0.05)
+
+    brain = FakeBrain()
+    sink = CaptureSink()
+    session, streamer = _stream_session(brain, sink=sink)
+
+    frame_q: asyncio.Queue[np.ndarray] = asyncio.Queue()
+    await frame_q.put(_frame())
+    pump_task = asyncio.create_task(session.pump(frame_q))
+    await asyncio.sleep(0)   # streamer starts; fallback armed; watchdog NOT armed
+
+    # Wait well past the probe timeout WITHOUT calling greeting_done.
+    await asyncio.sleep(0.20)
+
+    probe_turns = [t for t in sink.spoken if t.phase == "idle_probe"]
+    assert probe_turns == [], "probe must not fire before greeting_done()"
+    assert session._idle_watchdog_task is None
+
+    pump_task.cancel()
+    await asyncio.gather(pump_task, return_exceptions=True)
+    await session.aclose()
+
+
+async def test_greeting_done_arms_watchdog_and_probe_fires(monkeypatch) -> None:
+    """greeting_done() arms the initial watchdog; the probe fires after the timeout."""
+    monkeypatch.setattr("session._IDLE_PROBE_S", 0.05)
+
+    brain = FakeBrain()
+    sink = CaptureSink()
+    session, streamer = _stream_session(brain, sink=sink)
+
+    frame_q: asyncio.Queue[np.ndarray] = asyncio.Queue()
+    await frame_q.put(_frame())
+    pump_task = asyncio.create_task(session.pump(frame_q))
+    await asyncio.sleep(0)  # streamer started; watchdog NOT armed yet
+
+    assert session._idle_watchdog_task is None, "watchdog must not be armed before greeting_done"
+
+    # greeting_done() creates the watchdog task synchronously.
+    session.greeting_done()
+    assert session._idle_watchdog_task is not None and not session._idle_watchdog_task.done()
+
+    await asyncio.sleep(0.20)  # let probe fire
+    probe_turns = [t for t in sink.spoken if t.phase == "idle_probe"]
+    assert len(probe_turns) == 1, "probe must fire after greeting_done() and timeout"
+
+    pump_task.cancel()
+    await asyncio.gather(pump_task, return_exceptions=True)
+    await session.aclose()
+
+
+async def test_greeting_done_idempotent(monkeypatch) -> None:
+    """Calling greeting_done() twice must not arm a second watchdog."""
+    monkeypatch.setattr("session._IDLE_PROBE_S", 1.0)
+
+    brain = FakeBrain()
+    sink = CaptureSink()
+    session, streamer = _stream_session(brain, sink=sink)
+
+    frame_q: asyncio.Queue[np.ndarray] = asyncio.Queue()
+    await frame_q.put(_frame())
+    pump_task = asyncio.create_task(session.pump(frame_q))
+    await asyncio.sleep(0)
+
+    session.greeting_done()
+    watchdog_first = session._idle_watchdog_task
+    assert watchdog_first is not None
+
+    session.greeting_done()  # second call — must be a no-op
+    assert session._idle_watchdog_task is watchdog_first  # same task, not replaced
+
+    pump_task.cancel()
+    await asyncio.gather(pump_task, return_exceptions=True)
+    await session.aclose()
+
+
+async def test_greeting_fallback_arms_watchdog_when_greeting_done_never_arrives(
+    monkeypatch,
+) -> None:
+    """The 45 s fallback arms the initial watchdog when greeting_done() is never called."""
+    monkeypatch.setattr("session._GREETING_FALLBACK_S", 0.05)
+    monkeypatch.setattr("session._IDLE_PROBE_S", 0.08)
+
+    brain = FakeBrain()
+    sink = CaptureSink()
+    session, streamer = _stream_session(brain, sink=sink)
+
+    frame_q: asyncio.Queue[np.ndarray] = asyncio.Queue()
+    await frame_q.put(_frame())
+    pump_task = asyncio.create_task(session.pump(frame_q))
+    await asyncio.sleep(0)
+
+    # Watchdog NOT armed; greeting_done NOT called.
+    assert session._idle_watchdog_task is None
+    assert not session._greeting_done
+
+    # Wait for fallback (0.05 s) + probe timeout (0.08 s) + slack.
+    await asyncio.sleep(0.30)
+
+    probe_turns = [t for t in sink.spoken if t.phase == "idle_probe"]
+    assert len(probe_turns) == 1, "probe must fire via the 45 s fallback arm"
+    assert session._greeting_done, "fallback must set _greeting_done=True"
+
+    pump_task.cancel()
+    await asyncio.gather(pump_task, return_exceptions=True)
+    await session.aclose()
+
+
+async def test_greeting_fallback_cancelled_when_greeting_done_arrives(monkeypatch) -> None:
+    """When greeting_done() is called, the fallback task must be cancelled (no double arm)."""
+    monkeypatch.setattr("session._GREETING_FALLBACK_S", 0.10)
+    monkeypatch.setattr("session._IDLE_PROBE_S", 1.0)
+
+    brain = FakeBrain()
+    sink = CaptureSink()
+    session, streamer = _stream_session(brain, sink=sink)
+
+    frame_q: asyncio.Queue[np.ndarray] = asyncio.Queue()
+    await frame_q.put(_frame())
+    pump_task = asyncio.create_task(session.pump(frame_q))
+    await asyncio.sleep(0)
+
+    fallback_task = session._greeting_fallback_task
+    assert fallback_task is not None and not fallback_task.done()
+
+    session.greeting_done()  # cancels the fallback
+
+    await asyncio.sleep(0)  # let cancellation propagate
+    assert fallback_task.cancelled() or fallback_task.done()
+
+    pump_task.cancel()
+    await asyncio.gather(pump_task, return_exceptions=True)
+    await session.aclose()
+
+
+async def test_probe_has_unique_request_id(monkeypatch) -> None:
+    """The probe must use a distinct request_id so its late {spoken} ack cannot prematurely
+    resolve the next real turn's speak() wait in the sink."""
+    monkeypatch.setattr("session._IDLE_PROBE_S", 0.05)
+
+    brain = FakeBrain()
+    sink = CaptureSink()
+    session, streamer = _stream_session(brain, sink=sink)
+
+    frame_q: asyncio.Queue[np.ndarray] = asyncio.Queue()
+    await frame_q.put(_frame())
+    pump_task = asyncio.create_task(session.pump(frame_q))
+    await asyncio.sleep(0)
+    session.greeting_done()
+
+    await asyncio.sleep(0.20)
+
+    assert len(sink.spoken) == 1
+    probe = sink.spoken[0]
+    assert probe.phase == "idle_probe"
+    session_rid = session.request_id  # still the same (no turn committed)
+    # Must be distinct from the session's request_id.
+    assert probe.request_id != session_rid
+    # Must encode the session rid so it's traceable.
+    assert probe.request_id.startswith(session_rid + ":probe")
+
+    pump_task.cancel()
+    await asyncio.gather(pump_task, return_exceptions=True)
+    await session.aclose()
+
+
+async def test_probe_telemetry_logged(monkeypatch) -> None:
+    """After a probe fires, _log_turn must be called with commit='idle_probe' and empty=True
+    so the probe is persisted to the DB (voice INFO logs don't reach docker logs)."""
+    monkeypatch.setattr("session._IDLE_PROBE_S", 0.05)
+
+    brain = FakeBrain()
+    tel = FakeTelemetrySink()
+    sink = CaptureSink()
+    session, streamer = _stream_session(brain, sink=sink, telemetry=tel)
+
+    frame_q: asyncio.Queue[np.ndarray] = asyncio.Queue()
+    await frame_q.put(_frame())
+    pump_task = asyncio.create_task(session.pump(frame_q))
+    await asyncio.sleep(0)
+    session.greeting_done()
+
+    await asyncio.sleep(0.20)
+    # Flush fire-and-forget telemetry tasks.
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    probe_records = [r for r in tel.records if r.commit == "idle_probe"]
+    assert len(probe_records) == 1, "one telemetry record per probe fire"
+    rec = probe_records[0]
+    assert rec.phase == "idle_probe"
+    assert rec.empty is True
+    assert rec.terminal is False
+    assert rec.audio_s == 0.0
+    assert rec.primary_transcript != "", "transcript must hold the probe line for mic-absorption analysis"
+    # The telemetry rid must match the probe's unique rid (not the session rid).
+    assert rec.request_id != session.request_id
+    assert rec.request_id.startswith(session.request_id + ":probe")
+
+    pump_task.cancel()
+    await asyncio.gather(pump_task, return_exceptions=True)
+    await session.aclose()

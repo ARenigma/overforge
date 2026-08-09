@@ -313,7 +313,10 @@ export class MinimaxOracle implements Oracle {
     // and truncated the visible hint mid-sentence (seen in prod E2E). Use the client's default
     // headroom (2048) like generateUtterance; the prompt already holds it to 1–2 sentences.
     const text = (await this.client.complete(messages, { temperature: 0.5 })).trim();
-    return { text, expects: 'code' };
+    // expects:'voice' — all interventions (counter-question, probe, hint, offer, nudge, encourage)
+    // invite a spoken response. Only coding_ack uses expects:'code' but that is a generateUtterance
+    // path, never generateIntervention.
+    return { text, expects: 'voice' };
   }
 
   async classifyAndAnswer(req: ClarifyRequest): Promise<ClarifyResult> {
@@ -330,7 +333,9 @@ export class MinimaxOracle implements Oracle {
       const text = typeof obj.reply === 'string' ? obj.reply.trim() : '';
       // A "question" with no usable reply degrades to an answer so the FSM still advances (never stall).
       if (!text) return { intent: 'answer' };
-      return { intent, reply: { text, expects: req.ctx.phase === 'coding' ? 'code' : 'voice' } };
+      // expects:'voice' — clarifying replies invite the candidate to SPEAK their answer/assumption.
+      // Phase-conditional 'code' would kill the mic in voice mode; see voice-deafness fix.
+      return { intent, reply: { text, expects: 'voice' } };
     } catch (err) {
       // Safe fallback: parse or transport failure → non-clarification so the FSM always advances.
       // External contract (ClarifyResult { intent: 'answer' }) is unchanged; orchestrator.ts
@@ -536,8 +541,13 @@ function buildInterventionPrompt(req: InterventionRequest): string {
 }
 
 function utteranceMode(kind: string): Utterance['expects'] {
-  if (kind === 'ask_code' || kind === 'ask_followup') return 'code';
+  // expects:'voice' — these turns invite or demand a SPOKEN answer; keeping the mic alive.
+  // ask_code: "tell me your approach before coding" → needs voice.
+  // ask_followup: follow-up question → needs voice.
+  if (kind === 'ask_code' || kind === 'ask_followup') return 'voice';
   if (kind === 'greet' || kind === 'ask_oral' || kind === 'ask_oral_followup') return 'voice';
+  // coding_ack: sole next action is typing — the one case where the mic stays off.
+  if (kind === 'coding_ack') return 'code';
   return 'text';
 }
 
@@ -641,11 +651,14 @@ function effectGuidance(effect: Effect): string {
           'let\'s get into the coding round"). Do NOT say anything negative about the previous answer.'
         );
       }
-      // D5: explicitly label the oral→coding boundary in one short spoken clause.
+      // D5: explicitly label the oral→coding boundary.
+      // Choreography A1: warm acknowledgment beat BEFORE the boundary line.
       return (
-        'Signal the end of the oral section and the start of coding in one short warm line that ' +
-        'names both: "that\'s the walkthrough done — now the coding round." ≤12 words, ' +
-        'contractions fine. No headings, no lists.'
+        'Two beats, ≤2 short sentences total: FIRST a brief warm acknowledgment of their last ' +
+        'answer ("Got it — that\'s a fair approach." or "Okay, caching and row limits — makes sense."), ' +
+        'THEN name both sides of the boundary — the walkthrough is done and the coding round starts now. ' +
+        'Vary your wording; do not copy these examples verbatim. Contractions fine. ' +
+        'No headings, no lists, no new questions.'
       );
     case 'coding_ack':
       // D2: verbal remark during coding when no follow-up will be fired. ONE very short
@@ -699,10 +712,18 @@ function buildUtterancePrompt(req: UtteranceRequest): string {
         'First decide: did this genuinely answer your previous question? If it dodged, was ' +
         'non-substantive, or off-topic, press for the specific instead of thanking them and moving on.'
       : '',
+    // Choreography A1: handoff only — supply the final answer so the model can warm-acknowledge it.
+    // Ask_code and wrap_up get NO lastCandidate (their "ONLY job" rule stays; thread is closed).
+    lastCandidate && req.effect.kind === 'handoff'
+      ? `The candidate's FINAL answer in this section was:\n"${lastCandidate.slice(0, 600)}"\n` +
+        'Open with ONE brief, warm acknowledgment beat of it — a half-sentence like "Got it — that\'s a fair approach." ' +
+        'or "Okay, caching and row limits — makes sense." NEVER evaluate correctness, NEVER ask anything about it, NEVER re-open the thread.'
+      : '',
     isSectionEffect(req.effect.kind)
       ? 'SECTION BOUNDARY: every earlier thread is CLOSED, answered or not. Do NOT revisit, ' +
         'reference, or re-ask ANY previous question — a human interviewer lets an unresolved ' +
-        'thread go when the section changes. Your ONLY job this turn is the transition above.'
+        'thread go when the section changes. Beyond the single acknowledgment beat (handoff only), ' +
+        'your job this turn is the transition above.'
       : '',
     "Produce only the interviewer's next utterance.",
   ]

@@ -338,23 +338,34 @@ test('multi-turn voice interview: spoken oral turns drive STT → voice_turn_tel
   await room.waitForCoding(60_000);
   expect(await room.isCoding(), 'should reach coding phase after oral turns').toBeTruthy();
 
+  // The blocking stage modal now HOLDS the spoken problem intro until acknowledged
+  // (dual-attention fix) — acknowledge it first, like a real candidate, so the ask_code
+  // TTS plays and the mic re-arms.
+  await room.acknowledgeStageModalIfOpen();
+
   const title = await room.problemTitle();
   console.log(`[voice-mimic] coding problem: "${title}"`);
   expect(title.length, 'problem title must be non-empty').toBeGreaterThan(0);
 
-  // ── 8. Coding phase: voice probe (optional) ────────────────────────────────────
-  // The server may send a voice probe during coding (expects:'voice'). If "Listening" re-appears
-  // within 10 s of entering coding, answer with the approach clip (turn-05).
-  // This is best-effort: if the WS has closed the voice channel for coding (expects:'code'),
-  // "Listening" won't reappear and we skip silently.
-  if (CLIPS.length >= 5) {
-    const codingVoiceProbe = await waitForListening(page, 10_000);
-    if (codingVoiceProbe) {
-      console.log('[voice-mimic] coding voice probe: playing approach clip');
-      await speakAndWaitCommit(page, CLIPS[4], { transcriptTimeout: 45_000 });
-      await room.waitForSettled(30_000);
-    }
-  }
+  // ── 8. Coding phase: the approach question is answered BY VOICE ────────────────
+  // Regression for interview e3c07b8f (2026-08-09): the room went permanently deaf the
+  // moment the coding intro finished (stopMic on expects!=='voice'), so no spoken word
+  // in the entire coding phase ever committed. With the always-listening fix the mic
+  // must be live here: "Listening" must reappear after the intro TTS and a spoken
+  // answer must commit. HARD assertions — this failing again means the deafness is back.
+  const codingListening = await waitForListening(page, 45_000);
+  expect(
+    codingListening,
+    'mic must be live in the coding phase (deafness regression, e3c07b8f)'
+  ).toBeTruthy();
+  const approachCommitted = await speakAndWaitCommit(page, CLIPS[4], {
+    transcriptTimeout: 60_000,
+  });
+  expect(
+    approachCommitted,
+    'a spoken answer during coding must produce a transcript commit (deafness regression)'
+  ).toBeTruthy();
+  await room.waitForSettled(30_000);
 
   // ── 9. Code + run (typed — reuses the mimic's proven driver) ──────────────────
   await room.typeCode(GENERIC_ATTEMPT);
@@ -378,10 +389,30 @@ test('multi-turn voice interview: spoken oral turns drive STT → voice_turn_tel
   const counterQ = await room.lastAiText();
   console.log(`[voice-mimic] submit counter-question: "${counterQ.slice(0, 100)}"`);
   expect(counterQ.length, 'SUBMIT must fire a counter-question').toBeGreaterThan(0);
-  await room.answer(
-    'I counted tokens from stdin as a first pass; with more time I would group anagrams by their ' +
-      'sorted character key in a hash map to make it correct for the actual problem.'
-  );
+
+  // Regression for e3c07b8f: the candidate answered the mandatory counter-question ALOUD
+  // and nothing committed (47s dead air → typed "hey can you hear me?"). The spoken CQ
+  // answer must now commit. HARD assertion. Falls back to a typed reply afterwards only
+  // if the FSM still wants one (keeps the flow moving either way).
+  const cqListening = await waitForListening(page, 45_000);
+  expect(
+    cqListening,
+    'mic must be listening after the counter-question (deafness regression, e3c07b8f)'
+  ).toBeTruthy();
+  const cqCommitted = await speakAndWaitCommit(page, CLIPS[3], { transcriptTimeout: 60_000 });
+  expect(
+    cqCommitted,
+    'the spoken counter-question answer must commit (deafness regression, e3c07b8f)'
+  ).toBeTruthy();
+  await room.waitForSettled(60_000);
+  // If the spoken reply did not advance past the problem (coding_ack path), advance with a
+  // typed answer as before.
+  if ((await room.phase()) === 'coding' && !(await room.isDone())) {
+    await room.answer(
+      'I counted tokens from stdin as a first pass; with more time I would group anagrams by ' +
+        'their sorted character key in a hash map to make it correct for the actual problem.'
+    );
+  }
 
   // Forward-only through any remaining coding problems.
   for (let p = 0; p < 4 && !(await room.isDone()); p++) {

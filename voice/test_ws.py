@@ -113,7 +113,9 @@ def _deps(client: httpx.AsyncClient, build):
 
 
 def _make_build(*, fire_after: int, transcript: str, results, captured: dict):
-    def build(interview_id: str, token: str, language: str, sink: WsTtsSink) -> VoiceSession:
+    def build(
+        interview_id: str, token: str, language: str, phase: str, sink: WsTtsSink
+    ) -> VoiceSession:
         ep = FakeEndpointer(fire_after=fire_after)
         captured["ep"] = ep
         return VoiceSession(
@@ -124,6 +126,7 @@ def _make_build(*, fire_after: int, transcript: str, results, captured: dict):
             brain=FakeBrain(results=results),
             sink=sink,
             language=language,
+            phase=phase,
         )
 
     return build
@@ -222,7 +225,9 @@ async def test_handshake_bad_token_rejected() -> None:
     assert ws.closed_code == CLOSE_UNAUTHORIZED
 
 
-def _unused_build(interview_id: str, token: str, language: str, sink: WsTtsSink) -> VoiceSession:
+def _unused_build(
+    interview_id: str, token: str, language: str, phase: str, sink: WsTtsSink
+) -> VoiceSession:
     raise AssertionError("build_session must not be called on a rejected handshake")
 
 
@@ -280,3 +285,58 @@ async def test_bad_frame_length_closes_connection() -> None:
     ws = FakeWS([_hello(), {"type": "websocket.receive", "bytes": b"\x00" * 1000}])
     await WsConnection(ws, "iv1", _deps(_state_client(), build)).run()
     assert ws.closed_code == CLOSE_BAD_PROTOCOL
+
+
+# ─────────────── mic_off advisory + greeting_done pass-through (2026-08-09) ───────────────
+
+
+async def test_mic_off_advisory_does_not_affect_pipeline() -> None:
+    """mic_off is advisory — the reader ignores it and the pipeline completes a full turn."""
+    captured: dict = {}
+    build = _make_build(
+        fire_after=5,
+        transcript="still listening",
+        results=[AnswerResult(Utterance("good", "voice"), "oral", {})],
+        captured=captured,
+    )
+    ws = FakeWS(
+        [
+            _hello(),
+            # Advisory mic_off before the audio frames — must not disrupt the pipeline.
+            {"type": "websocket.receive", "text": json.dumps({"type": "mic_off"})},
+            *([_frame()] * 5),
+        ],
+        auto_ack=True,
+    )
+    await WsConnection(ws, "iv1", _deps(_state_client(), build)).run()
+    # A turn_ready was emitted — mic_off did not kill the pipeline.
+    assert any(m["type"] == "turn_ready" for m in ws.sent)
+    # No {closing} with reason='mic_off' — the message is purely advisory.
+    assert not any(
+        m.get("type") == "closing" and m.get("reason") == "mic_off" for m in ws.sent
+    )
+
+
+async def test_greeting_done_forwarded_to_session() -> None:
+    """A {type:'greeting_done'} control message must call session.greeting_done().
+
+    This is verified indirectly: the message is received without error and the pipeline
+    continues to complete a normal turn (i.e. greeting_done() caused no state corruption).
+    """
+    captured: dict = {}
+    build = _make_build(
+        fire_after=5,
+        transcript="heard it",
+        results=[AnswerResult(Utterance("great", "voice"), "oral", {})],
+        captured=captured,
+    )
+    ws = FakeWS(
+        [
+            _hello(),
+            {"type": "websocket.receive", "text": json.dumps({"type": "greeting_done"})},
+            *([_frame()] * 5),
+        ],
+        auto_ack=True,
+    )
+    await WsConnection(ws, "iv1", _deps(_state_client(), build)).run()
+    assert any(m["type"] == "turn_ready" for m in ws.sent)

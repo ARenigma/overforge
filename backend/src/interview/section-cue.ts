@@ -49,8 +49,9 @@ export function sectionRetryNote(kind: SectionEffectKind): string {
       return (
         'YOUR PREVIOUS DRAFT FAILED: it continued an earlier discussion instead of announcing ' +
         'the section change. Every earlier thread is CLOSED — do not revisit, reference, or ' +
-        're-ask ANY previous question. Say ONLY that the walkthrough is done and the coding ' +
-        'round starts now, in one short warm line.'
+        're-ask ANY previous question. Give one half-sentence warm acknowledgment of their final ' +
+        'answer, then say the walkthrough is done and the coding round starts now. ' +
+        'Two short sentences maximum.'
       );
     case 'ask_code':
       return (

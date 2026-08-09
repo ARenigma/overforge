@@ -195,25 +195,29 @@ export class DeterministicOracle implements Oracle {
         };
       case 'handoff':
         if (e.pivot) {
-          // D5: name the transition even on pivot.
+          // D5: name the transition even on pivot (dodge → no ack owed).
           return { text: "No problem — that's the walkthrough done. Now let's get into the coding round.", expects: 'text' };
         }
         // D5: spoken section label for the oral→coding boundary.
-        return { text: "That's the walkthrough done — now the coding round.", expects: 'text' };
+        // Choreography A3: warm acknowledgment beat BEFORE the boundary line.
+        return { text: "Got it — thanks for walking me through that. That's the walkthrough done — now the coding round.", expects: 'text' };
       case 'ask_code':
         return {
           // The full problem is shown on the candidate's screen (problem panel); the interviewer
           // gives a brief spoken intro, never reads the whole statement aloud.
+          // expects:'voice' — the ask_code turn invites the candidate to SPEAK their approach
+          // before typing. expects:'code' would kill the mic; see voice-deafness fix.
           text:
             e.index === 0
               ? "Let's move into the coding part. Your first problem is on the screen now — take a minute to read it, then walk me through your approach before you start coding."
               : "Here's your next problem, up on the screen. Have a read and tell me how you'd approach it.",
-          expects: 'code',
+          expects: 'voice',
         };
       case 'ask_followup':
+        // expects:'voice' — follow-up questions demand spoken answers.
         return {
           text: `Follow-up ${e.depth}: why this approach over the alternatives?`,
-          expects: 'code',
+          expects: 'voice',
         };
       case 'coding_ack':
         // D2: brief non-advancing acknowledgment — keeps the floor with the candidate without
@@ -248,17 +252,19 @@ export class DeterministicOracle implements Oracle {
 
   async generateIntervention(req: InterventionRequest): Promise<Utterance> {
     // Idle check-in (Path B): word by stuck-mode, and stay content-free (nothing failed).
+    // expects:'voice' — invites the candidate to speak their thinking.
     if (req.kind === 'nudge' && req.idleMode) {
       const idle =
         req.idleMode === 'blank'
           ? "No rush at all — want to talk me through how you're thinking about this, or try a small example by hand?"
           : "Take your time — want to walk me through what you've got so far on a small input?";
-      return { text: idle, expects: 'code' };
+      return { text: idle, expects: 'voice' };
     }
     // B5: the mandatory counter-question must stay CODE-ANCHORED even without the LLM (429/timeout),
     // else it degrades to a generic "explain your approach" that an overlay tool can answer.
+    // expects:'voice' — the counter-question demands a spoken answer.
     if (req.mandatory) {
-      return { text: codeAnchoredProbe(req.code), expects: 'code' };
+      return { text: codeAnchoredProbe(req.code), expects: 'voice' };
     }
     const canned: Record<InterventionKind, string> = {
       counter_question: 'Before we move on — what makes you confident that approach is correct?',
@@ -270,7 +276,9 @@ export class DeterministicOracle implements Oracle {
       encourage:
         "<soft>Nice — that's passing now.</soft> [pause] Walk me through what you changed to fix it.",
     };
-    return { text: canned[req.kind], expects: 'code' };
+    // All interventions invite a spoken response — expects:'voice' keeps the mic alive.
+    // Only coding_ack (handled by generateUtterance) should use expects:'code'.
+    return { text: canned[req.kind], expects: 'voice' };
   }
 
   async classifyAndAnswer(req: ClarifyRequest): Promise<ClarifyResult> {
@@ -284,12 +292,13 @@ export class DeterministicOracle implements Oracle {
         t
       );
     if (!isQuestion) return { intent: 'answer' };
-    const expects = req.ctx.phase === 'coding' ? 'code' : 'voice';
+    // expects:'voice' — clarifying replies invite the candidate to SPEAK their answer/assumption.
+    // In voice mode, expects:'code' would kill the mic; see voice-deafness fix.
     return {
       intent: 'question',
       reply: {
         text: "Go with a reasonable assumption and state it out loud — I'm more interested in your reasoning than in one exact reading of the prompt.",
-        expects,
+        expects: 'voice',
       },
     };
   }

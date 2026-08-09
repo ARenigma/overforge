@@ -221,3 +221,105 @@ describe('PENALIZABLE_KINDS — coding_ack is advisory (D2)', () => {
     expect(prompt).not.toContain('ASSISTANCE GIVEN');
   });
 });
+
+// ─────────────────────── Regression: interview e3c07b8f (2026-08-09) ───────────────────────
+// The real prod interview that motivated the grounding rework. The scorecard asserted
+// "0/8 hidden tests passed" while runs 5-6 passed 8/8, branded the capture-failure "No."
+// opener "unprofessional", and judged the candidate's typed "hey can you hear me?" (sent
+// during total voice deafness) as disengagement. This fixture reproduces that exact input
+// shape; the assertions below are the contract that scoring can never do that again.
+describe('regression e3c07b8f: grounded facts + system-failure fairness', () => {
+  const { computeCodeFacts, deriveSystemFlags, factCheckScorecard } =
+    jest.requireActual<typeof import('./scorer')>('./scorer');
+
+  const SLUGS = ['best-time-stock', 'group-anagrams-count'];
+
+  /** The six real runs: all visibly "Runtime Error" (stdin-less exec), runs 1-4 fail-fast
+   *  0/8 incomplete, runs 5-6 pass 8/8 — the candidate had SOLVED it. */
+  const RUNS = [
+    ...Array.from({ length: 4 }, () => ({
+      language: 'python',
+      status: 'Runtime Error',
+      stderr: 'EOFError: EOF when reading a line',
+      codeIndex: 0,
+      testResults: { passed: 0, total: 8, incomplete: true },
+    })),
+    ...Array.from({ length: 2 }, () => ({
+      language: 'python',
+      status: 'Runtime Error',
+      stderr: 'EOFError: EOF when reading a line',
+      codeIndex: 0,
+      testResults: { passed: 8, total: 8 },
+    })),
+  ];
+
+  const TRANSCRIPT = [
+    { role: 'interviewer' as const, text: "Hey — I'm Finn, thanks for making the time. So — what's the most technically interesting thing you've worked on recently?" },
+    { role: 'candidate' as const, text: 'No.' }, // 15s of speech committed as one word
+    { role: 'interviewer' as const, text: 'Hmm, looks like we missed the walkthrough. Could you tell me about a recent project?' },
+    { role: 'candidate' as const, text: 'I built an agent infrastructure where a fleet of agents were deployed through a Hermes architecture.' },
+    {
+      role: 'interviewer' as const,
+      text: 'Your use of min_price starts with prices—if the input list were empty, what would happen when that line runs?',
+      assist: { kind: 'counter_question' as const, strength: 1, mandatory: true },
+    },
+    { role: 'candidate' as const, text: 'hey can you hear me?' },
+    { role: 'interviewer' as const, text: 'Yes, I can hear you loud and clear.' },
+  ];
+
+  test('computeCodeFacts: problem 1 is SOLVED 8/8 despite six visible Runtime Errors; problem 2 untouched', () => {
+    const facts = computeCodeFacts(RUNS, SLUGS);
+    expect(facts[0]).toEqual({ slug: 'best-time-stock', runs: 6, best: { passed: 8, total: 8 }, solved: true });
+    expect(facts[1]).toEqual({ slug: 'group-anagrams-count', runs: 0, best: null, solved: false });
+  });
+
+  test('deriveSystemFlags: the "No." opener, the connectivity check, and the unheard counter-question are all flagged', () => {
+    const flags = deriveSystemFlags(TRANSCRIPT);
+    const kinds = flags.map((f) => `${f.kind}@${f.turnIndex}`);
+    expect(kinds).toContain('capture_failure@1'); // "No." — 15s of speech, one word committed
+    expect(kinds).toContain('connectivity_check@5'); // "hey can you hear me?"
+    expect(kinds).toContain('undelivered_question@4'); // the mandatory CQ the candidate never heard a response path for
+  });
+
+  test('buildScoringPrompt: FACTS block carries the authoritative 8/8, and the flagged turns are excluded from judgment', () => {
+    const prompt = buildScoringPrompt({
+      transcript: TRANSCRIPT,
+      codeRuns: RUNS,
+      problemSlugs: SLUGS,
+    });
+    expect(prompt).toContain('FACTS');
+    expect(prompt).toMatch(/8\/8|passed 8 of 8|8 of 8/);
+    expect(prompt).toContain('SYSTEM-FAILURE');
+    expect(prompt).toContain('hey can you hear me?');
+    // The contradictory bare status list must not be presented as the grade.
+    expect(prompt).not.toMatch(/^- python: Runtime Error \[hidden tests: 0\/8\]/m);
+  });
+
+  test('factCheckScorecard: the real hallucinated scorecard is caught; a truthful one passes', () => {
+    const facts = computeCodeFacts(RUNS, SLUGS);
+    const flags = deriveSystemFlags(TRANSCRIPT);
+    const hallucinated = {
+      overall: 1 as const,
+      summary: 'Failed to deliver a working solution: 0/8 hidden tests passed across runs.',
+      dimensions: [
+        { name: 'problem_solving', score: 2, notes: '0/8 hidden tests passed due to typos.' },
+        { name: 'communication', score: 1, notes: "Opened with a flat 'No.' — unprofessional and disengaged. Asked 'hey can you hear me?' instead of answering." },
+      ],
+      recommendation: 'no_hire' as const,
+      scoringFailed: false,
+    };
+    const violations = factCheckScorecard(hallucinated, facts, flags);
+    expect(violations.length).toBeGreaterThan(0);
+
+    const truthful = {
+      overall: 3 as const,
+      summary: 'Solved the first problem (8/8 hidden tests) after early syntax struggles; second problem not attempted.',
+      dimensions: [
+        { name: 'problem_solving', score: 3, notes: 'Best run passed 8/8 hidden tests on the first problem.' },
+      ],
+      recommendation: 'lean_hire' as const,
+      scoringFailed: false,
+    };
+    expect(factCheckScorecard(truthful, facts, flags)).toEqual([]);
+  });
+});

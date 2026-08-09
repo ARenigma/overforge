@@ -291,12 +291,40 @@ export async function updateLastRunIntervention(
   if (readErr || !data) throw new Error(`updateLastRunIntervention read: ${readErr?.message}`);
   const runs = ((data as { code_runs?: unknown[] }).code_runs ?? []) as RunResult[];
   if (runs.length === 0) return;
-  const patched = [...runs.slice(0, -1), { ...runs[runs.length - 1], intervention }];
+  // Clear interventionPending so subsequent nudge checks are not blocked by a stale true.
+  const patched = [
+    ...runs.slice(0, -1),
+    { ...runs[runs.length - 1], intervention, interventionPending: false },
+  ];
   const { error: writeErr } = await db
     .from('interviews')
     .update({ code_runs: patched as unknown as Record<string, unknown>[] })
     .eq('id', id);
   if (writeErr) throw new Error(`updateLastRunIntervention write: ${writeErr.message}`);
+}
+
+/** Clear the interventionPending flag on the last code run when the outcome is 'none' (no
+ *  intervention warranted). Without this, the flag stays true and blocks every subsequent
+ *  nudge check — the candidate can never receive a second intervention after the first run
+ *  that produced no action. */
+export async function clearLastRunInterventionPending(id: string): Promise<void> {
+  const db = createServiceClient();
+  const { data, error: readErr } = await db
+    .from('interviews')
+    .select('code_runs')
+    .eq('id', id)
+    .single();
+  if (readErr || !data) throw new Error(`clearLastRunInterventionPending read: ${readErr?.message}`);
+  const runs = ((data as { code_runs?: unknown[] }).code_runs ?? []) as RunResult[];
+  if (runs.length === 0) return;
+  const last = runs[runs.length - 1];
+  if (!last.interventionPending) return; // already clear — skip the write
+  const patched = [...runs.slice(0, -1), { ...last, interventionPending: false }];
+  const { error: writeErr } = await db
+    .from('interviews')
+    .update({ code_runs: patched as unknown as Record<string, unknown>[] })
+    .eq('id', id);
+  if (writeErr) throw new Error(`clearLastRunInterventionPending write: ${writeErr.message}`);
 }
 
 /** Atomically claim an invited interview for begin (single-flight CAS). Sets status to

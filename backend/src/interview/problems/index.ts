@@ -5,7 +5,7 @@
 //
 // NOTE: bank.json is copied into dist by the build script (tsc does not emit .json); see package.json.
 
-import { CodingProblem } from '../types';
+import { CodingProblem, CodingProblemTest } from '../types';
 import bankData from './bank.json';
 
 export const CODING_PROBLEMS: CodingProblem[] = bankData as unknown as CodingProblem[];
@@ -48,6 +48,16 @@ export interface PublicProblem {
   statement: string;
   examples: CodingProblem['examples'];
   constraints: string;
+}
+
+/**
+ * Return the candidate-visible sample tests for a problem. Uses the explicit `sampleTests` override
+ * when present; otherwise derives them from the statement examples (which are already shown to the
+ * candidate, so they are safe). This is the SINGLE source of truth for the visible RUN's inputs.
+ */
+export function sampleTestsOf(p: CodingProblem): CodingProblemTest[] {
+  if (p.sampleTests && p.sampleTests.length > 0) return p.sampleTests;
+  return p.examples.map((e) => ({ input: e.input, expected: e.output }));
 }
 
 /** Strip a problem down to what the candidate may see (no hidden tests, no reference solution). */

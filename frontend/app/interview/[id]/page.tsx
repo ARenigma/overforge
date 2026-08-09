@@ -259,7 +259,7 @@ async function playPcmStream(opts: {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Stage = 'loading_token' | 'consent' | 'interview' | 'done' | 'error';
+type Stage = 'loading_token' | 'consent' | 'interview' | 'done' | 'finishing' | 'error';
 
 /** Sub-state within the consent stage: tracks camera permission flow. */
 type ConsentCameraState = 'idle' | 'requesting' | 'denied';
@@ -473,6 +473,8 @@ export default function InterviewPage() {
   const [wrapUpModalOpen, setWrapUpModalOpen] = useState(false);
   // Escalation note shown inside the coding modal after 30 s unacknowledged.
   const [codingEscalationNote, setCodingEscalationNote] = useState<string | undefined>(undefined);
+  // Set when /finish failed both retry attempts — shown as a note on the done screen.
+  const [finishFailed, setFinishFailed] = useState(false);
   // Per-problem transition banner (non-modal, polite live region).
   const [problemBannerText, setProblemBannerText] = useState<string | undefined>(undefined);
   // Voice (P1): the interviewer speaks its turns (always audible — the candidate can't mute it).
@@ -515,6 +517,14 @@ export default function InterviewPage() {
   // Timestamp (ms) until which mic frames stay gated AFTER interviewer audio ends — lets the
   // speaker/room tail clear so the mic doesn't capture the reverb as a phantom turn (self-echo).
   const micCooldownUntilRef = useRef(0);
+  // True while a REST-path (non-voice-WS) utterance is playing — gates mic forwarding so
+  // speaker-echo from REST-served audio can't be committed as a candidate turn. WS-driven turns
+  // keep frames flowing for server barge-in; REST-driven ones have no server-side SPEAKING-state
+  // protection, so frames are gated client-side for the duration + tail cooldown.
+  const restSpeakGateRef = useRef(false);
+  // State mirror of restSpeakGateRef — drives the pill ("Speaking" vs "Listening") without
+  // reading a stale ref in JSX.
+  const [restSpeakActive, setRestSpeakActive] = useState(false);
   // The requestId of the turn we are currently playing/acking.
   const pendingVoiceRequestRef = useRef<string | null>(null);
   // Whether the voice WS should be connected (set false on fatal / voice toggle).
@@ -538,6 +548,13 @@ export default function InterviewPage() {
   // (survives reloads within the same browser tab session).
   const codingModalShownRef = useRef(false);
   const wrapUpModalShownRef = useRef(false);
+  // Live ref mirrors of the open states — readable in async callbacks (speak, handleVoiceTurnReady)
+  // without stale-closure risk. Set eagerly in ack handlers; also synced via useEffect.
+  const codingModalOpenRef = useRef(false);
+  const wrapUpModalOpenRef = useRef(false);
+  // Utterance held while a stage modal blocks the screen — released when the modal is acked.
+  // text is optional: typed-path callers don't pass text (speak() re-fetches from server).
+  const heldUtteranceRef = useRef<{ source: 'turn' | 'run'; text?: string } | null>(null);
   // Coding modal escalation timer refs (30 s → note; 90 s → telemetry, see effect comment).
   const escalation30Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
   const escalation90Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -584,6 +601,10 @@ export default function InterviewPage() {
   useEffect(() => {
     chatCollapsedRef.current = chatCollapsed;
   }, [chatCollapsed]);
+  // Fallback sync for codingModalOpenRef/wrapUpModalOpenRef — the ack handlers set these
+  // eagerly (before the state flush), so the ref is always current in async speak paths.
+  useEffect(() => { codingModalOpenRef.current = codingModalOpen; }, [codingModalOpen]);
+  useEffect(() => { wrapUpModalOpenRef.current = wrapUpModalOpen; }, [wrapUpModalOpen]);
 
   // ── Proctor hook ──────────────────────────────────────────────────────────────
   // Camera proctoring: face detection runs entirely in-browser via a Web Worker.
@@ -621,7 +642,7 @@ export default function InterviewPage() {
       // the short post-TTS echo tail has cleared (micCooldownUntilRef). The server-side VAD
       // protects the first ~300ms of each utterance and requires 10 consecutive voiced frames
       // above a 0.025 RMS threshold — well above AEC residual — before cutting.
-      if (!micForwardingRef.current || Date.now() < micCooldownUntilRef.current) return;
+      if (!micForwardingRef.current || restSpeakGateRef.current || Date.now() < micCooldownUntilRef.current) return;
       sendFrameRef.current?.(buf);
     }, []),
   });
@@ -633,7 +654,12 @@ export default function InterviewPage() {
 
   // speak() is defined below but the socket cue handlers need it — use a ref.
   const speakRef = useRef<
-    | ((source: 'turn' | 'run', tokenOverride?: string, textOverride?: string) => Promise<void>)
+    | ((
+        source: 'turn' | 'run',
+        tokenOverride?: string,
+        textOverride?: string,
+        opts?: { viaVoiceWs?: boolean }
+      ) => Promise<void>)
     | null
   >(null);
   const activeTokenRef = useRef<string | null>(null);
@@ -822,19 +848,76 @@ export default function InterviewPage() {
       escalation90Ref.current = null;
     }
     setCodingEscalationNote(undefined);
+    // Clear ref eagerly — before releasing the held utterance — so speakOrHold's next
+    // call (if any) sees the modal as closed and doesn't re-hold it.
+    codingModalOpenRef.current = false;
     setCodingModalOpen(false);
+    // Release any utterance that was held while the modal blocked the screen.
+    const held = heldUtteranceRef.current;
+    heldUtteranceRef.current = null;
+    if (held) void speakRef.current?.(held.source, undefined, held.text);
     requestAnimationFrame(() => transcriptLogRef.current?.focus());
   }, []);
 
   const handleWrapUpModalAck = useCallback(() => {
+    wrapUpModalOpenRef.current = false;
     setWrapUpModalOpen(false);
+    const held = heldUtteranceRef.current;
+    heldUtteranceRef.current = null;
+    if (held) void speakRef.current?.(held.source, undefined, held.text);
     requestAnimationFrame(() => transcriptLogRef.current?.focus());
   }, []);
 
+  // Route an utterance through the active stage-modal gate. If a coding or wrap-up modal is
+  // currently blocking the screen, hold the utterance and return immediately — the modal's ack
+  // handler releases it. The voice-WS path's {spoken} ack then fires right away (not held), so
+  // the server's 30 s ack window is never hostage to the candidate's modal dismiss gesture.
+  //
+  // opts.viaVoiceWs: true marks a WS-driven turn (barge-in eligible; REST gate cleared).
+  // opts.incomingPhase: the FSM phase from the incoming cue. The state-effect that opens the
+  //   coding/wrapup modal fires ONE render-tick after setPhase(), so the open refs are stale when
+  //   doSpeak() calls us (still false even though a modal is about to appear). Checking the
+  //   incoming phase + sessionStorage catches that race: if the coding/wrapup modal WILL open this
+  //   cycle, hold the utterance now rather than racing to play audio behind the blocking dialog.
+  const speakOrHold = useCallback(
+    (
+      source: 'turn' | 'run',
+      text?: string,
+      opts?: { viaVoiceWs?: boolean; incomingPhase?: string }
+    ): Promise<void> => {
+      // Already-open check (steady-state: typed-path answers, re-entries).
+      const alreadyBlocked = codingModalOpenRef.current || wrapUpModalOpenRef.current;
+      // About-to-open check (race: voice-WS turn arrives at the same time as the coding handoff).
+      // The sessionStorage key is set inside the modal effect — if it is absent AND the incoming
+      // cue IS the phase flip, the modal WILL open this render cycle.
+      const codingAboutToOpen =
+        opts?.incomingPhase === 'coding' &&
+        !codingModalShownRef.current &&
+        typeof sessionStorage !== 'undefined' &&
+        !sessionStorage.getItem(`of_stage_coding_${id}`);
+      const wrapUpAboutToOpen =
+        opts?.incomingPhase === 'wrap_up' &&
+        !wrapUpModalShownRef.current &&
+        typeof sessionStorage !== 'undefined' &&
+        !sessionStorage.getItem(`of_stage_wrapup_${id}`);
+      if (alreadyBlocked || codingAboutToOpen || wrapUpAboutToOpen) {
+        heldUtteranceRef.current = { source, text };
+        return Promise.resolve();
+      }
+      return (
+        speakRef.current?.(source, undefined, text, { viaVoiceWs: opts?.viaVoiceWs }) ??
+        Promise.resolve()
+      );
+    },
+    [id]
+  );
+
   const handleVoiceReady = useCallback((cue: ServerReady) => {
     lastExpectsRef.current = cue.expects;
-    // Arm mic forwarding if the server expects voice immediately.
-    if (cue.expects === 'voice') setMicForwarding(true);
+    // Arm mic unconditionally — the mic lives from consent to terminal regardless of expects.
+    // (expects is a UI affordance hint only; coding/text phases still need spoken answers.)
+    // This also fixes resume/reload mid-coding: ready arrives with expects='code' and must arm.
+    setMicForwarding(true);
   }, []);
 
   const handleVoiceThinking = useCallback(() => {
@@ -890,7 +973,14 @@ export default function InterviewPage() {
           // Voice the EXACT utterance from this cue (not a server re-fetch). The idle probe's text
           // lives only in the voice service and is never persisted, so re-deriving it server-side
           // replayed the last real turn; passing the cue text makes audio always match what's shown.
-          await speakRef.current?.('turn', undefined, cue.utterance.text);
+          // speakOrHold: holds this utterance if the coding/wrap-up modal is blocking (or is
+          // about to open — the phase/sessionStorage check catches the one-render-tick race).
+          // The {spoken} ack fires in the finally regardless, so the server's 30 s window is
+          // never hostage to the candidate's modal acknowledge gesture.
+          await speakOrHold('turn', cue.utterance.text, {
+            viaVoiceWs: true,
+            incomingPhase: cue.phase,
+          });
         } catch (err) {
           // speak() now always resolves (it has its own playback timeout), but guard anyway so the
           // finally — which re-arms the mic — can NEVER be skipped by an unexpected throw.
@@ -904,19 +994,21 @@ export default function InterviewPage() {
             cue.requestId,
             firstAt != null && firstAt >= t0 ? Math.round(firstAt - t0) : null
           );
-          // Re-arm mic if next phase is still voice.
-          if (cue.utterance.expects === 'voice' && !cue.isTerminal) {
-            setMicForwarding(true);
-          } else if (cue.utterance.expects !== 'voice') {
-            // Coding/text phase — disarm mic and notify server.
+          if (cue.isTerminal) {
+            // Interview over — the ONLY legitimate mic teardown. Disarm and notify server.
+            setMicForwarding(false);
             stopMic();
             sendMicOffRef.current?.();
+          } else {
+            // Finn is ALWAYS listening after a turn: re-arm regardless of expects.
+            // expects is a UI affordance hint; coding-phase answers are spoken too.
+            setMicForwarding(true);
           }
         }
       };
       void doSpeak();
     },
-    [stopMic]
+    [stopMic, speakOrHold]
   );
 
   const handleVoiceFatal = useCallback(() => {
@@ -938,6 +1030,9 @@ export default function InterviewPage() {
     stopTtsStreamRef.current = null;
     // Clear TTS-active flag (speak()'s finally won't clear it because seq !== current).
     voiceSpeakingRef.current = false;
+    // Clear REST gate (defense-in-depth: barge-in supersedes any REST playback in flight).
+    restSpeakGateRef.current = false;
+    setRestSpeakActive(false);
     // Remove post-TTS echo cooldown so mic captures the candidate's next word immediately.
     micCooldownUntilRef.current = 0;
     // Ensure mic forwarding stays armed (it should already be true, but guard explicitly).
@@ -1272,17 +1367,26 @@ export default function InterviewPage() {
   async function handleEndInterview() {
     if (!activeToken || concludeCalledRef.current) return;
     concludeCalledRef.current = true;
-    setStage('done');
-    try {
-      await finishInterview(
-        id,
-        activeToken,
-        codeRef.current.trim() ? codeRef.current : undefined,
-        codeRef.current.trim() ? langRef.current : undefined
-      );
-    } catch {
-      // Idempotent server-side — ignore.
+    // Show a brief transitional state so the exit doesn't feel like an abrupt cut.
+    setStage('finishing');
+    const finalCode = codeRef.current.trim() ? codeRef.current : undefined;
+    const finalLang = codeRef.current.trim() ? langRef.current : undefined;
+    let succeeded = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await finishInterview(id, activeToken, finalCode, finalLang);
+        succeeded = true;
+        break;
+      } catch {
+        // retry on first failure; fall through after second
+      }
     }
+    if (!succeeded) {
+      // Both attempts failed — surface it on the done screen so the candidate isn't left
+      // wondering. The interview IS over from their perspective; don't re-open the room.
+      setFinishFailed(true);
+    }
+    setStage('done');
   }
 
   async function handleSendAnswer() {
@@ -1326,7 +1430,7 @@ export default function InterviewPage() {
           ...(res.assist ? { assist: res.assist.kind } : {}),
         },
       ]);
-      void speak('turn'); // speak the interviewer's reply (P1)
+      void speakOrHold('turn', undefined, { incomingPhase: res.phase }); // held if a stage modal is open or about to open
       if (res.phase === 'done') {
         setStage('done');
       }
@@ -1390,7 +1494,7 @@ export default function InterviewPage() {
           ...(res.assist ? { assist: res.assist.kind } : {}),
         },
       ]);
-      void speak('turn');
+      void speakOrHold('turn', undefined, { incomingPhase: res.phase }); // held if a stage modal is open
       if (res.phase === 'done') setStage('done');
     } catch (err: unknown) {
       // Roll back the optimistic submit bubble; surface the reason (incl. the B2 "not enough time —
@@ -1431,10 +1535,23 @@ export default function InterviewPage() {
   // override is needed right after begin() (the state token hasn't flushed yet). source='run'
   // voices a run-triggered hint (which lives on the code run, not the transcript).
   const speak = useCallback(
-    async (source: 'turn' | 'run', tokenOverride?: string, textOverride?: string) => {
+    async (
+      source: 'turn' | 'run',
+      tokenOverride?: string,
+      textOverride?: string,
+      opts?: { viaVoiceWs?: boolean }
+    ) => {
       const tok = tokenOverride ?? activeToken;
       if (!tok) return;
       const seq = ++speakSeqRef.current; // a newer turn supersedes this playback
+      // REST-TTS half-duplex gate: REST-path utterances (greeting, run probes/hints, counter-
+      // question replies) play while the VoiceSession is server-side LISTENING — with an always-
+      // live mic, self-echo could be committed as a candidate turn. Gate frames client-side for the
+      // full playback window. viaVoiceWs=true turns are WS-driven (barge-in protected server-side)
+      // and must NOT set the gate — the NEWEST speak always owns the gate flag so a WS turn that
+      // supersedes a REST one clears it immediately.
+      restSpeakGateRef.current = opts?.viaVoiceWs !== true;
+      if (opts?.viaVoiceWs !== true) setRestSpeakActive(true);
       firstAudioAtRef.current = null; // fresh utterance — a stale stamp must never be attributed
       audioRef.current?.pause();
       // Cancel any in-flight STREAMED playback from a previous turn (aborts its fetch + stops its
@@ -1545,6 +1662,9 @@ export default function InterviewPage() {
         if (seq === speakSeqRef.current) {
           voiceSpeakingRef.current = false;
           micCooldownUntilRef.current = Date.now() + SPEAK_TAIL_COOLDOWN_MS;
+          // Clear the REST-TTS gate so mic frames resume after the tail cooldown.
+          restSpeakGateRef.current = false;
+          setRestSpeakActive(false);
         }
       }
     },
@@ -1945,9 +2065,17 @@ export default function InterviewPage() {
   }
 
   // STAGE 2 — Interview (split-pane) + Done state
-  const isDone = stage === 'done' || phase === 'done';
+  const isDone = stage === 'done' || stage === 'finishing' || phase === 'done';
   const phaseIdx = Math.max(0, PHASE_ORDER.indexOf(phase));
   const progressPct = (phaseIdx / (PHASE_ORDER.length - 1)) * 100;
+
+  // Voice pill state — computed here so JSX stays simple (no IIFE / block-in-expression needed).
+  // micLive: hardware is granted AND the forwarding flag is set — never lies about the mic.
+  // voicePillListening: frames are actually flowing to the server right now.
+  // voicePillSpeaking: REST-path TTS is playing (frames client-gated); distinct from "Listening".
+  const micLive = voiceMode && micForwarding && micState === "granted";
+  const voicePillListening = micLive && !restSpeakActive;
+  const voicePillSpeaking = restSpeakActive;
 
   return (
     <div
@@ -2006,8 +2134,8 @@ export default function InterviewPage() {
               {!!VOICE_WS_URL && (
                 <DeviceIndicator
                   icon={Mic}
-                  on={voiceMode && micState === 'granted'}
-                  live={micForwarding}
+                  on={voiceMode && micState === "granted"}
+                  live={micLive}
                   title="Microphone on — your spoken answers are transcribed"
                 />
               )}
@@ -2084,7 +2212,7 @@ export default function InterviewPage() {
       <StageModal
         open={codingModalOpen}
         title="Time to write some code."
-        body="The walkthrough's done. Your editor is ready below — RUN to test your solution, SUBMIT when you're happy with it."
+        body="The walkthrough's done. Your editor is ready below — RUN to test your solution, SUBMIT when you're happy with it. The clock keeps running — take a breath, then dive in."
         buttonLabel="Start coding"
         onAcknowledge={handleCodingModalAck}
         escalationNote={codingEscalationNote}
@@ -2107,23 +2235,44 @@ export default function InterviewPage() {
       </div>
 
       {isDone ? (
-        // Done state — full-width thank-you
+        // Done / finishing state — full-width card
         <div className="flex-1 flex items-center justify-center px-4">
-          <div
-            data-testid="interview-done"
-            data-concluded-by-time={concludedByTime ? 'true' : 'false'}
-            className="w-full max-w-md bg-card border border-success/40 rounded-xl p-8 text-center space-y-4"
-          >
-            <CheckCircle className="w-10 h-10 text-success mx-auto" />
-            <h2 className="text-base font-medium text-foreground">
-              {concludedByTime ? 'Time’s up — interview concluded' : 'Interview complete'}
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              {concludedByTime
-                ? 'The interview reached its time limit. Your responses so far have been submitted and will be reviewed shortly.'
-                : 'Thank you for completing this interview. Your responses have been submitted and will be reviewed shortly.'}
-            </p>
-          </div>
+          {stage === "finishing" ? (
+            // Transitional "wrapping up" state — shown while /finish request is in-flight.
+            // Prevents the abrupt cut from the live room to the done card.
+            <div
+              data-testid="interview-finishing"
+              className="w-full max-w-md bg-card border border-border rounded-xl p-8 text-center space-y-4"
+            >
+              <Loader2 className="w-10 h-10 text-muted-foreground mx-auto animate-spin" />
+              <h2 className="text-base font-medium text-foreground">Wrapping up your interview…</h2>
+              <p className="text-sm text-muted-foreground">
+                Submitting your responses — this only takes a moment.
+              </p>
+            </div>
+          ) : (
+            <div
+              data-testid="interview-done"
+              data-concluded-by-time={concludedByTime ? "true" : "false"}
+              className="w-full max-w-md bg-card border border-success/40 rounded-xl p-8 text-center space-y-4"
+            >
+              <CheckCircle className="w-10 h-10 text-success mx-auto" />
+              <h2 className="text-base font-medium text-foreground">
+                {concludedByTime ? "Time’s up — interview concluded" : "Interview complete"}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {concludedByTime
+                  ? "The interview reached its time limit. Your responses so far have been submitted and will be reviewed shortly."
+                  : "Thank you for completing this interview. Your responses have been submitted and will be reviewed shortly."}
+              </p>
+              {finishFailed && (
+                <p className="text-xs text-destructive border border-destructive/30 rounded-md px-3 py-2">
+                  We had trouble confirming your submission — your responses were captured and
+                  will be reviewed. If you have concerns, contact your recruiter.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       ) : (
         // Split-pane interview layout — editor + output | AI chat
@@ -2462,22 +2611,22 @@ export default function InterviewPage() {
                 </span>
                 <span className="text-xs font-semibold text-foreground">Interviewer</span>
 
-                {/* Voice status pill — only visible when voice mode is active */}
+                {/* Voice status pill — only visible when voice mode is active.
+                    voicePillListening: frames are actually flowing (micLive + no REST gate).
+                    voicePillSpeaking: REST-path TTS is playing, frames are client-gated.
+                    Never shows "Listening" when the mic hardware is gone or REST gate is active. */}
                 {voiceMode && (
                   <span
+                    data-testid="voice-pill"
                     className={[
-                      'flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-mono font-medium',
-                      micForwarding
-                        ? 'bg-primary/15 text-primary border border-primary/30'
-                        : voiceSpeakingRef.current
-                          ? 'bg-muted text-muted-foreground border border-border'
-                          : socketStatus === 'connecting'
-                            ? 'bg-muted text-muted-foreground border border-border'
-                            : 'bg-muted text-muted-foreground border border-border',
-                    ].join(' ')}
+                      "flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-mono font-medium",
+                      voicePillListening
+                        ? "bg-primary/15 text-primary border border-primary/30"
+                        : "bg-muted text-muted-foreground border border-border",
+                    ].join(" ")}
                     aria-live="polite"
                   >
-                    {micForwarding ? (
+                    {voicePillListening ? (
                       <>
                         <span className="relative flex h-1.5 w-1.5">
                           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
@@ -2485,15 +2634,17 @@ export default function InterviewPage() {
                         </span>
                         Listening
                       </>
-                    ) : socketStatus === 'connecting' ? (
+                    ) : socketStatus === "connecting" ? (
                       <>
                         <Loader2 className="h-2.5 w-2.5 animate-spin" />
                         Connecting
                       </>
-                    ) : socketStatus === 'failed' ? (
-                      'Voice off'
+                    ) : socketStatus === "failed" || (!micLive && !voicePillSpeaking) ? (
+                      "Voice off"
+                    ) : voicePillSpeaking ? (
+                      "Speaking"
                     ) : (
-                      'Speaking'
+                      "Voice off"
                     )}
                   </span>
                 )}

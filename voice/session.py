@@ -71,6 +71,15 @@ _IDLE_PROBE_LINES = (
 )
 _MAX_TURN_FRAMES = int(_MAX_TURN_S * _SR / _VAD_FRAME)
 
+# FSM phases where the idle watchdog must NOT arm. Coding-phase idle interventions are owned
+# by the backend engagement engine (Path B/C via the /nudge route). The voice service speaking
+# "shall I rephrase the question?" during coding is phase-blind and unintelligible.
+_WATCHDOG_SUPPRESSED_PHASES: frozenset[str] = frozenset({"coding"})
+
+# Fallback: if no {type:'greeting_done'} WS message arrives within this window after the
+# streamer starts, arm the initial idle watchdog anyway (handles old clients / lost messages).
+_GREETING_FALLBACK_S = 45.0
+
 # Streaming STT (Phase 2b, flag-gated via STT_STREAMING=1): during LISTENING, transcribe a completed
 # speech segment in the BACKGROUND when trailing silence reaches a phrase-pause AND enough new audio
 # has accumulated, so the EOT finalize transcribes only the short tail (near-instant) instead of the
@@ -247,6 +256,7 @@ class VoiceSession:
         telemetry: TelemetrySink | None = None,
         streamer: SttStreamerLike | None = None,
         shadow: ShadowSttLike | None = None,
+        phase: str = "greeting",
     ) -> None:
         self._interview_id = interview_id
         self._token = session_token
@@ -304,6 +314,16 @@ class VoiceSession:
         self._shadow = shadow
         self._shadow_started = False
         self._shadow_close_task: asyncio.Task[None] | None = None
+        # FSM phase tracking for idle-watchdog phase awareness. Updated after each brain result
+        # so the watchdog can be suppressed while the candidate is coding (phase-blind "rephrase?"
+        # probes from the voice service make no sense in coding; the backend owns that path via
+        # the /nudge engagement engine). Initialized from the ready phase forwarded by ws_connection.
+        self._phase: str = phase
+        # Greeting-done guard: the initial idle watchdog must not fire while the greeting TTS is
+        # still playing. The browser sends {type:'greeting_done'} when speak() resolves (calling
+        # greeting_done()); until then (or until the 45 s fallback) the first window is held back.
+        self._greeting_done: bool = False
+        self._greeting_fallback_task: asyncio.Task[None] | None = None
         # Barge-in detection (BARGE_IN_ENABLED). _frame_q is set by pump() so the watcher can
         # read mic frames from the same queue as the pipeline, without extra plumbing. It is None
         # on the local whisper path until the first pump() call, which is fine — barge-in is only
@@ -578,11 +598,73 @@ class VoiceSession:
             logger.exception("Streaming STT failed to start — using the local whisper path.")
             self._fallback_to_local()
             return
-        # Streamer started successfully — arm the idle watchdog for the initial listening window.
-        # (_recover arms it for all subsequent windows; this covers the very first turn which
-        # never goes through _recover before the first frame arrives.)
-        if self._stream_mode() and self._idle_watchdog_task is None:
-            self._streamer.speech_activity.clear()
+        # Streamer started successfully.  DON'T arm the initial idle watchdog yet: the greeting
+        # TTS is likely still playing (the browser plays it asynchronously after /begin returns).
+        # Wait for {type:'greeting_done'} from the browser (which calls greeting_done()) to arm
+        # the watchdog for the first listening window.  A 45 s fallback arms it anyway for old
+        # clients or lost messages — see _arm_greeting_fallback.
+        if self._stream_mode():
+            self._streamer.speech_activity.clear()  # type: ignore[union-attr]
+            self._arm_greeting_fallback()
+
+    def _arm_greeting_fallback(self) -> None:
+        """Schedule a one-shot fallback that arms the initial idle watchdog after 45 s.
+
+        Called once after the streamer starts for the first listening window. If
+        ``greeting_done()`` fires first (browser confirmed greeting TTS finished) this task is
+        cancelled. If it never fires (old client / lost WS message) the fallback arms the
+        watchdog so the idle-probe path never stays permanently dark on the first turn.
+        Idempotent: a second call is a no-op.
+        """
+        if self._greeting_fallback_task is not None:
+            return
+
+        async def _fallback() -> None:
+            try:
+                await asyncio.sleep(_GREETING_FALLBACK_S)
+            except asyncio.CancelledError:
+                return
+            if self._greeting_done:
+                return  # greeting_done() already handled the arm
+            logger.info(
+                "voice.greeting_fallback rid=%s — no greeting_done in %.0fs; arming watchdog.",
+                self._request_id,
+                _GREETING_FALLBACK_S,
+            )
+            self._greeting_done = True
+            if (
+                self._stream_mode()
+                and self._state is _State.LISTENING
+                and self._idle_watchdog_task is None
+                and self._phase not in _WATCHDOG_SUPPRESSED_PHASES
+            ):
+                self._streamer.speech_activity.clear()  # type: ignore[union-attr]
+                self._start_idle_watchdog()
+
+        task = asyncio.create_task(_fallback(), name=f"greeting-fallback-{self._request_id}")
+        self._greeting_fallback_task = task
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
+    def greeting_done(self) -> None:
+        """Signal that the greeting TTS has finished playing (browser sent ``{type:'greeting_done'}``).
+
+        Arms the idle watchdog for the first listening window. The 45 s fallback
+        (``_arm_greeting_fallback``) is cancelled if it hasn't fired yet. Idempotent.
+        """
+        if self._greeting_done:
+            return
+        self._greeting_done = True
+        task = self._greeting_fallback_task
+        if task is not None and not task.done():
+            task.cancel()
+        if (
+            self._stream_mode()
+            and self._state is _State.LISTENING
+            and self._idle_watchdog_task is None
+            and self._phase not in _WATCHDOG_SUPPRESSED_PHASES
+        ):
+            self._streamer.speech_activity.clear()  # type: ignore[union-attr]
             self._start_idle_watchdog()
 
     def _ensure_shadow_started(self) -> None:
@@ -819,6 +901,7 @@ class VoiceSession:
         except TerminalError as err:
             # 409 / 403: interview over (or token dead). Voice the conclusion; no reset.
             oracle_ms = (time.perf_counter() - t_stt) * 1000.0
+            self._phase = "done"  # session closing; watchdog already cancelled on TERMINAL
             self._state = _State.TERMINAL
             turn = TurnResult(
                 utterance=Utterance(
@@ -838,6 +921,9 @@ class VoiceSession:
             )
             return turn
         oracle_ms = (time.perf_counter() - t_stt) * 1000.0
+        # Track the post-answer FSM phase so the idle watchdog can be phase-aware on the next
+        # listening window (e.g. suppress probes once the brain transitions into 'coding').
+        self._phase = result.phase
 
         is_terminal = result.phase in _TERMINAL_PHASES
         turn = TurnResult(
@@ -1193,12 +1279,16 @@ class VoiceSession:
             self._request_id = _new_request_id()
         self._endpointer.reset()
         self._state = _State.LISTENING
-        # Idle probe: start a fresh 10 s watchdog for this listening window (assemblyai only).
-        # Reset the once-per-turn guard and clear any leftover speech signal from the prior turn
-        # so the new window starts clean.
+        # Idle probe: start a fresh watchdog for this listening window (assemblyai only, and only
+        # when the FSM is NOT in a coding phase — coding-phase idle interventions are owned by the
+        # backend engagement engine via /nudge; a voice-service "shall I rephrase?" in coding is
+        # phase-blind and confusing to the candidate).
+        # NOTE: the greeting-done guard is NOT re-checked here — subsequent windows are always
+        # post-playback (speak() resolves on the {spoken} ack before arm_next_turn() runs, so
+        # the greeting is guaranteed to have finished long before _recover is called again).
         self._probe_fired = False
         self._cancel_idle_watchdog()
-        if self._stream_mode():
+        if self._stream_mode() and self._phase not in _WATCHDOG_SUPPRESSED_PHASES:
             self._streamer.speech_activity.clear()  # type: ignore[union-attr]
             self._start_idle_watchdog()
 
@@ -1226,26 +1316,48 @@ class VoiceSession:
                 return
             except TimeoutError:
                 pass
-            # 10 s elapsed with no speech signal.  Only probe if we are still in the same
-            # listening window (turn_gen unchanged), still LISTENING, and haven't fired yet.
-            if self._turn_gen != gen or self._state is not _State.LISTENING or self._probe_fired:
+            # 10 s elapsed with no speech signal.  Multi-condition guard (all must hold):
+            # same listening window, still LISTENING, not already fired, greeting finished
+            # (belt-and-braces: the initial window must never probe while greeting plays),
+            # FSM not in a suppressed phase, and a final speech_activity re-check in case the
+            # event was set between the wait_for timeout and this point.
+            if (
+                self._turn_gen != gen
+                or self._state is not _State.LISTENING
+                or self._probe_fired
+                or not self._greeting_done
+                or self._phase in _WATCHDOG_SUPPRESSED_PHASES
+                or streamer.speech_activity.is_set()  # D2: last-moment re-check
+            ):
                 return
             self._probe_fired = True
-            line = _IDLE_PROBE_LINES[self._probe_index % len(_IDLE_PROBE_LINES)]
+            probe_idx = self._probe_index
+            line = _IDLE_PROBE_LINES[probe_idx % len(_IDLE_PROBE_LINES)]
             self._probe_index += 1
+            # D2: give the probe its own request_id so a late {spoken} ack for the probe
+            # cannot prematurely resolve the NEXT real turn's speak() wait in the sink.
+            probe_rid = f"{self._request_id}:probe{probe_idx}"
             probe_turn = TurnResult(
                 utterance=Utterance(text=line, expects="voice"),
                 phase="idle_probe",
                 transcript="",
-                request_id=self._request_id,
+                request_id=probe_rid,
                 is_terminal=False,
             )
             logger.info(
-                "voice.idle_probe rid=%s — no speech in %.0fs, probing once.",
+                "voice.idle_probe rid=%s probe_rid=%s — no speech in %.0fs, probing once.",
                 self._request_id,
+                probe_rid,
                 _IDLE_PROBE_S,
             )
             await self._safe_speak(probe_turn)
+            # D3: Persist the probe fire via telemetry so it's traceable in the DB.
+            # Voice INFO logs don't reach docker logs (known) — the DB row is the only
+            # reliable audit trail for probe fires and mic-absorption analysis.
+            self._log_turn(
+                probe_rid, "idle_probe", 0.0, 0.0, None, None, "idle_probe",
+                transcript=line, empty=True,
+            )
 
         task = asyncio.create_task(_watchdog(), name=f"idle-probe-{self._request_id}")
         self._idle_watchdog_task = task

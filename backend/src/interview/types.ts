@@ -174,6 +174,30 @@ export interface CodingProblem {
   hiddenTests: CodingProblemTest[];
   /** A correct python3 reference (stdin→stdout) used ONLY for offline test verification. Server-side. */
   referencePython: string;
+  /** Explicit override for the candidate-visible sample tests used in the visible RUN. When absent,
+   *  `sampleTestsOf(p)` falls back to `examples.map(e => ({input: e.input, expected: e.output}))`.
+   *  Only needed when a problem's displayed example is illustrative rather than machine-runnable. */
+  sampleTests?: CodingProblemTest[];
+}
+
+/** Candidate-VISIBLE sample-test outcome (statement examples). Never secret — inputs/expected are
+ *  already on the candidate's screen. Rendered by the run card; also read by intervention wording
+ *  and scorer so every consumer speaks the same truth the candidate sees. */
+export interface SampleResults {
+  passed: number;
+  total: number;
+  /** True if execution short-circuited (crash/timeout) before all samples ran. */
+  incomplete?: boolean;
+  cases: Array<{
+    index: number;      // examples[] index — the room labels it "Example {index+1}"
+    input: string;
+    expected: string;
+    stdout: string;
+    stderr: string;
+    status: string;     // kernel status for this case ('Accepted' | 'Runtime Error' | ...)
+    passed: boolean;    // status==='Accepted' && stdout.trim()===expected.trim()
+    timeMs: number | null;
+  }>;
 }
 
 /** Per-run hidden-test outcome. Persisted on the run + fed to the scorer; NEVER returned to the
