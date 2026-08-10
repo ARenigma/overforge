@@ -18,7 +18,7 @@ import {
   INTEGRITY_SIGNAL_KINDS,
   updateInterview,
 } from '../db/interviews';
-import { validateSpeakText } from './speak-validation';
+import { validateSpeakText, GOODBYE_LINE } from './speak-validation';
 import { captureException } from '../observability/sentry';
 import { recordTtsCost } from '../cost/ledger';
 import {
@@ -802,9 +802,7 @@ router.post('/:id/finish', async (req: Request, res: Response): Promise<void> =>
       ...(validatedLanguage !== undefined ? { finalLanguage: validatedLanguage } : {}),
       endReason: 'candidate_ended',
     });
-    const goodbye =
-      "Thanks for completing the interview — we'll review your session and be in touch. Best of luck!";
-    res.json({ ok: true, goodbye });
+    res.json({ ok: true, goodbye: GOODBYE_LINE });
   } catch (err) {
     sendError(res, err);
   }

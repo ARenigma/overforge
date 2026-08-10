@@ -98,6 +98,12 @@ const AEC_WARMUP_MS = 3000;
 // continues. The existing trailing flush (on pause / visibility-change / pagehide) is preserved.
 const SNAPSHOT_THROTTLE_MS = 3_000;
 
+// Finn's parting line on candidate-initiated End. Spoken via /speak-stream BEFORE /finish
+// (afterwards the interview is scored and synthesis is gated off), then shown on the done card.
+// SYNC: backend/src/http/speak-validation.ts GOODBYE_LINE — keep both in lockstep.
+const GOODBYE_LINE =
+  "Thanks for completing the interview — we'll review your session and be in touch. Best of luck!";
+
 // ── §6.7 Deterministic PRNG helpers (no Math.random for ambient cue schedule) ───────────────
 /** Unsigned 32-bit hash of a string — used to seed the per-interview PRNG. */
 function hashSeed(s: string): number {
@@ -475,6 +481,9 @@ export default function InterviewPage() {
   const [codingEscalationNote, setCodingEscalationNote] = useState<string | undefined>(undefined);
   // Set when /finish failed both retry attempts — shown as a note on the done screen.
   const [finishFailed, setFinishFailed] = useState(false);
+  // Finn's parting line on candidate-initiated End — spoken during 'finishing', shown on the
+  // done card so the exit has closure even with sound off.
+  const [goodbyeText, setGoodbyeText] = useState<string | null>(null);
   // Per-problem transition banner (non-modal, polite live region).
   const [problemBannerText, setProblemBannerText] = useState<string | undefined>(undefined);
   // Voice (P1): the interviewer speaks its turns (always audible — the candidate can't mute it).
@@ -1369,6 +1378,17 @@ export default function InterviewPage() {
     concludeCalledRef.current = true;
     // Show a brief transitional state so the exit doesn't feel like an abrupt cut.
     setStage('finishing');
+    // Finn says goodbye BEFORE /finish — after it the interview is scored and the speak
+    // routes' terminal-status gate forbids synthesis. Best-effort with a hard cap so a TTS
+    // hiccup can never hold the candidate hostage on the way out. The line is server-
+    // authoritative (SYNC: backend/src/http/speak-validation.ts GOODBYE_LINE).
+    setGoodbyeText(GOODBYE_LINE);
+    if (voiceMode) {
+      await Promise.race([
+        speakRef.current?.('turn', activeToken, GOODBYE_LINE) ?? Promise.resolve(),
+        new Promise((r) => setTimeout(r, 8_000)),
+      ]).catch(() => undefined);
+    }
     const finalCode = codeRef.current.trim() ? codeRef.current : undefined;
     const finalLang = codeRef.current.trim() ? langRef.current : undefined;
     let succeeded = false;
@@ -2265,6 +2285,11 @@ export default function InterviewPage() {
                   ? "The interview reached its time limit. Your responses so far have been submitted and will be reviewed shortly."
                   : "Thank you for completing this interview. Your responses have been submitted and will be reviewed shortly."}
               </p>
+              {goodbyeText && (
+                <p className="text-sm text-foreground italic" data-testid="goodbye-line">
+                  “{goodbyeText}”
+                </p>
+              )}
               {finishFailed && (
                 <p className="text-xs text-destructive border border-destructive/30 rounded-md px-3 py-2">
                   We had trouble confirming your submission — your responses were captured and

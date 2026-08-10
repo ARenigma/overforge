@@ -384,8 +384,8 @@ export async function finishInterview(
   token: string,
   finalCode?: string,
   finalLanguage?: string
-): Promise<{ ok: boolean }> {
-  return apiFetch<{ ok: boolean }>(`/api/interviews/${id}/finish`, {
+): Promise<{ ok: boolean; goodbye?: string }> {
+  return apiFetch<{ ok: boolean; goodbye?: string }>(`/api/interviews/${id}/finish`, {
     body: {
       token,
       ...(finalCode !== undefined ? { finalCode } : {}),

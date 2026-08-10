@@ -21,6 +21,16 @@ export const IDLE_PROBE_LINES: readonly string[] = [
 const IDLE_PROBE_SET = new Set<string>(IDLE_PROBE_LINES);
 
 /**
+ * The spoken goodbye for a candidate-initiated End. The room speaks it BEFORE calling /finish
+ * (after /finish the interview is scored and the terminal-status gate below forbids synthesis),
+ * and /finish returns the same string for display on the done card.
+ *
+ * SYNC: mirrored in frontend/app/interview/[id]/page.tsx GOODBYE_LINE — keep both in lockstep.
+ */
+export const GOODBYE_LINE =
+  "Thanks for completing the interview — we'll review your session and be in touch. Best of luck!";
+
+/**
  * Pure validation: confirm that a client-supplied TTS text matches a server-authoritative
  * utterance before synthesising it. Throws a structured error on rejection.
  *
@@ -62,6 +72,9 @@ export function validateSpeakText(
 
   // (c) Voice idle-probe lines (never persisted; only the voice service produces them).
   if (IDLE_PROBE_SET.has(trimmedText)) return;
+
+  // (d) The candidate-initiated-End goodbye (spoken by the room just before /finish).
+  if (trimmedText === GOODBYE_LINE) return;
 
   // Mismatch. Log the length only — never the actual text, which could be candidate-influenced
   // and therefore must not appear in server logs (content policy + privacy).

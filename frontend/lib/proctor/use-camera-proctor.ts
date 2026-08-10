@@ -84,7 +84,13 @@ export function useCameraProctor({
   // `samples > 0 && token` guard never fires a POST (the bug that produced zero signals).
   const tokenRef = useRef<string | null>(token);
   useEffect(() => {
+    const hadToken = tokenRef.current != null && tokenRef.current !== '';
     tokenRef.current = token;
+    // Consent boundary: the token exists only after T&C acceptance (begin), but sampling starts
+    // at camera-grant on the consent screen. Discard anything accumulated pre-token so the first
+    // PERSISTED window never claims coverage from before recorded consent — the stored record is
+    // what a DPO reads (the 2026-08-09 session's first window predated tnc_accepted_at by ~8s).
+    if (!hadToken && token) accumRef.current = newWindow();
   }, [token]);
 
   // Consecutive empty-window counter, for a one-shot "no frames" diagnostic.
