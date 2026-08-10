@@ -73,6 +73,23 @@ export interface RunResult {
   exitCode: number | null;
   timeMs: number | null;
   memoryKb: number | null;
+  /** Public sample-test outcomes for this run (the problem statement's own examples — never
+   *  hidden tests). Present when the assigned problem ships sample tests; the room renders
+   *  per-case pass/fail so RUN status can never read as success while the samples fail. */
+  sampleResults?: {
+    passed: number;
+    total: number;
+    cases: {
+      index: number;
+      input: string;
+      expected: string;
+      stdout: string;
+      passed: boolean;
+      status: string;
+      stderr?: string;
+      timeMs?: number | null;
+    }[];
+  };
   /** An autonomous interviewer hint triggered by this run (USP) — shown immediately in the chat;
    *  also persisted to the transcript, so it survives a reload. */
   intervention?: { text: string; kind: string };

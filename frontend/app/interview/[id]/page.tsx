@@ -2486,12 +2486,33 @@ export default function InterviewPage() {
                       </div>
 
                       {/* No auto-advance on all-tests-pass (research: every platform requires an
-                          explicit submit). A clean sample run nudges toward SUBMIT without moving on. */}
-                      {phase === 'coding' && runResult && runResult.exitCode === 0 && !running && (
-                        <p className="mb-2 font-mono text-[10px] text-success">
-                          Sample run passed — press SUBMIT when you're ready to move on.
-                        </p>
-                      )}
+                          explicit submit). The nudge keys on the SAMPLE outcomes, never on a clean
+                          exit — a wrong solution that executes cleanly must not read as success
+                          (the 2026-08-09 session showed 6 false "Runtime Error"s for a passing one;
+                          the inverse lie is just as corrosive). */}
+                      {phase === 'coding' &&
+                        runResult &&
+                        !running &&
+                        (runResult.sampleResults ? (
+                          runResult.sampleResults.passed === runResult.sampleResults.total &&
+                          runResult.sampleResults.total > 0 ? (
+                            <p className="mb-2 font-mono text-[10px] text-success">
+                              All {runResult.sampleResults.total} sample tests passed — press SUBMIT
+                              when you're ready to move on.
+                            </p>
+                          ) : (
+                            <p className="mb-2 font-mono text-[10px] text-warning">
+                              {runResult.sampleResults.passed}/{runResult.sampleResults.total} sample
+                              tests passed — check the cases below.
+                            </p>
+                          )
+                        ) : (
+                          runResult.exitCode === 0 && (
+                            <p className="mb-2 font-mono text-[10px] text-success">
+                              Run finished cleanly — press SUBMIT when you're ready to move on.
+                            </p>
+                          )
+                        ))}
 
                       {runError && (
                         <Alert className="mb-2 border-destructive/40 bg-destructive/10 py-2 px-3">
@@ -2522,6 +2543,27 @@ export default function InterviewPage() {
                               <span>{Math.round(runResult.memoryKb / 1024)}KB</span>
                             ) : null}
                           </div>
+                          {runResult.sampleResults && runResult.sampleResults.cases.length > 0 && (
+                            <div className="space-y-1" data-testid="sample-results">
+                              {runResult.sampleResults.cases.map((c) => (
+                                <div key={c.index} className="font-mono text-[10px]">
+                                  <span className={c.passed ? 'text-success' : 'text-destructive'}>
+                                    {c.passed ? '✓' : '✗'} Sample {c.index + 1}
+                                  </span>
+                                  {!c.passed && (
+                                    <span className="text-muted-foreground">
+                                      {' '}
+                                      — expected <span className="text-foreground">{c.expected}</span>
+                                      , got{' '}
+                                      <span className="text-foreground">
+                                        {(c.stdout || '').trim() || '(no output)'}
+                                      </span>
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                           {runResult.compileOutput && (
                             <pre className="text-destructive whitespace-pre-wrap break-all">
                               {runResult.compileOutput}
