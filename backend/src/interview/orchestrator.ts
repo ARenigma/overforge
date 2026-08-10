@@ -1164,7 +1164,7 @@ export async function submitAnswer(
       // than showing the answer as if it counted. The room normally concludes itself at 0:00; this
       // is the server-side backstop.
       if (durationExceeded(interview)) {
-        void finishAndScore(interviewId).catch((err: unknown) => {
+        void finishAndScore(interviewId, { endReason: 'time_cap' }).catch((err: unknown) => {
           console.error(`[orchestrator] time-limit scoring failed for ${interviewId}:`, err);
         });
         throw Object.assign(
@@ -1295,7 +1295,7 @@ export async function submitAnswer(
         );
         // Score in the background so the candidate's final response returns immediately. The
         // explicit /finish path also calls finishAndScore; the single-flight claim makes it safe.
-        void finishAndScore(interviewId).catch((err: unknown) => {
+        void finishAndScore(interviewId, { endReason: 'completed' }).catch((err: unknown) => {
           console.error(`[orchestrator] background scoring failed for ${interviewId}:`, err);
         });
         // Return an empty utterance — the UI should show a "scoring complete" state.
@@ -1709,7 +1709,7 @@ async function _recordRunInner(interviewId: string, req: RunRequest): Promise<Ru
 
   // Hard time limit: don't execute a run past the cap — conclude + score instead.
   if (durationExceeded(interview)) {
-    void finishAndScore(interviewId).catch((err: unknown) => {
+    void finishAndScore(interviewId, { endReason: 'time_cap' }).catch((err: unknown) => {
       console.error(`[orchestrator] time-limit scoring failed for ${interviewId}:`, err);
     });
     throw Object.assign(new Error('Your interview has concluded — the time limit was reached.'), {
@@ -2317,7 +2317,7 @@ export async function finishAndScore(
     rescore?: boolean;
     finalCode?: string;
     finalLanguage?: string;
-    endReason?: 'candidate_ended' | 'time_cap';
+    endReason?: 'candidate_ended' | 'time_cap' | 'completed';
   } = {}
 ): Promise<boolean> {
   // ── Phase 1: claim + capture snapshot (under lock) ──────────────────────────────────────────
