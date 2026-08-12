@@ -1835,3 +1835,258 @@ async def test_probe_telemetry_logged(monkeypatch) -> None:
     pump_task.cancel()
     await asyncio.gather(pump_task, return_exceptions=True)
     await session.aclose()
+
+
+# ─────────────────────────── multi-shadow (A/B/C) ───────────────────────────
+
+from contracts import ShadowSnapshot  # noqa: E402
+
+
+class _FakeShadow:
+    """Minimal ShadowSttLike double for multi-shadow tests."""
+
+    def __init__(self, engine: str, transcript: str = "shadow text") -> None:
+        self.engine = engine
+        self._transcript = transcript
+        self.fed: list[np.ndarray] = []
+        self.flush_calls = 0
+        self.reset_calls = 0
+        self.started = False
+        self.closed = False
+
+    async def start(self) -> None:
+        self.started = True
+
+    async def feed(self, pcm_f32: np.ndarray) -> None:
+        self.fed.append(np.asarray(pcm_f32))
+
+    async def flush_turn(self) -> None:
+        self.flush_calls += 1
+
+    def reset(self) -> None:
+        self.reset_calls += 1
+
+    def take_snapshot(self) -> ShadowSnapshot:
+        return ShadowSnapshot(
+            transcript=self._transcript,
+            stt_ms=50.0,
+            endpoint_ms=40.0,
+            endpoint_count=1,
+            finalize_lag_ms=None,
+        )
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _multi_shadow_session(
+    shadows: list[_FakeShadow],
+    *,
+    fire_after: int = 3,
+    transcript: str = "primary",
+) -> tuple[VoiceSession, FakeTelemetrySink]:
+    ep = FakeEndpointer(fire_after=fire_after)
+    stt = FakeSTT(transcript)
+    brain = FakeBrain([AnswerResult(utterance=Utterance("reply", "voice"), phase="oral", state={})])
+    tel = FakeTelemetrySink()
+    session = VoiceSession(
+        interview_id="iv-multi",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        telemetry=tel,
+        shadows=shadows,  # type: ignore[arg-type]
+    )
+    return session, tel
+
+
+async def test_multi_shadow_both_receive_all_listening_frames() -> None:
+    """Every LISTENING frame is tee'd to ALL configured shadow engines."""
+    sh_a = _FakeShadow("soniox", "soniox said")
+    sh_b = _FakeShadow("deepgram", "deepgram said")
+    session, tel = _multi_shadow_session([sh_a, sh_b], fire_after=4)
+
+    for _ in range(4):
+        await session.feed_frame(_frame())
+    await asyncio.sleep(0)
+
+    # All 4 frames tee'd: shadow tee runs before the state transition to PROCESSING on frame 4.
+    assert len(sh_a.fed) == 4
+    assert len(sh_b.fed) == 4
+    assert sh_a.flush_calls >= 1
+    assert sh_b.flush_calls >= 1
+    await session.aclose()
+
+
+async def test_multi_shadow_both_snapshots_in_telemetry() -> None:
+    """Both shadow engines appear in TurnTelemetry.shadow_snapshots."""
+    sh_a = _FakeShadow("soniox", "soniox text")
+    sh_b = _FakeShadow("deepgram", "deepgram text")
+    session, tel = _multi_shadow_session([sh_a, sh_b], fire_after=3)
+
+    for _ in range(3):
+        await session.feed_frame(_frame())
+    await asyncio.sleep(0)
+
+    assert len(tel.records) == 1
+    rec = tel.records[0]
+    assert len(rec.shadow_snapshots) == 2
+
+    engines = {s.engine for s in rec.shadow_snapshots}
+    assert engines == {"soniox", "deepgram"}
+
+    transcripts = {s.transcript for s in rec.shadow_snapshots}
+    assert "soniox text" in transcripts
+    assert "deepgram text" in transcripts
+    await session.aclose()
+
+
+async def test_multi_shadow_first_shadow_populates_legacy_fields() -> None:
+    """First configured shadow's data backfills legacy shadow_engine/shadow_transcript cols."""
+    sh_a = _FakeShadow("soniox", "first shadow")
+    sh_b = _FakeShadow("deepgram", "second shadow")
+    session, tel = _multi_shadow_session([sh_a, sh_b], fire_after=3)
+
+    for _ in range(3):
+        await session.feed_frame(_frame())
+    await asyncio.sleep(0)
+
+    rec = tel.records[0]
+    assert rec.shadow_engine == "soniox"
+    assert rec.shadow_transcript == "first shadow"
+    assert rec.shadow_stt_ms == 50.0
+    await session.aclose()
+
+
+async def test_multi_shadow_crash_in_one_does_not_affect_other_or_turn() -> None:
+    """A snapshot() crash in shadow A must not prevent shadow B's data or break the turn."""
+
+    class _CrashShadow(_FakeShadow):
+        def take_snapshot(self) -> ShadowSnapshot:
+            raise RuntimeError("shadow A exploded")
+
+    sh_a = _CrashShadow("soniox")
+    sh_b = _FakeShadow("deepgram", "deepgram ok")
+    session, tel = _multi_shadow_session([sh_a, sh_b], fire_after=3)
+
+    turn = None
+    for _ in range(3):
+        turn = await session.feed_frame(_frame())
+    await asyncio.sleep(0)
+
+    assert turn is not None
+    assert len(tel.records) == 1
+    rec = tel.records[0]
+
+    # Only shadow B's snapshot survives (shadow A crashed).
+    assert len(rec.shadow_snapshots) == 1
+    assert rec.shadow_snapshots[0].engine == "deepgram"
+    assert rec.shadow_snapshots[0].transcript == "deepgram ok"
+
+    # Legacy fields fall through to first surviving shadow.
+    assert rec.shadow_engine == "deepgram"
+    await session.aclose()
+
+
+async def test_single_shadow_kwarg_backward_compat() -> None:
+    """The legacy ``shadow=`` singular kwarg still works (wraps in list internally)."""
+    sh = _FakeShadow("soniox", "legacy shadow")
+    ep = FakeEndpointer(fire_after=3)
+    stt = FakeSTT("primary")
+    brain = FakeBrain([AnswerResult(utterance=Utterance("reply", "voice"), phase="oral", state={})])
+    tel = FakeTelemetrySink()
+    session = VoiceSession(
+        interview_id="iv-compat",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        telemetry=tel,
+        shadow=sh,
+    )
+
+    for _ in range(3):
+        await session.feed_frame(_frame())
+    await asyncio.sleep(0)
+
+    assert sh.started
+    rec = tel.records[0]
+    assert rec.shadow_engine == "soniox"
+    assert rec.shadow_transcript == "legacy shadow"
+    assert len(rec.shadow_snapshots) == 1
+    assert rec.shadow_snapshots[0].engine == "soniox"
+    await session.aclose()
+
+
+async def test_shadows_kwarg_takes_precedence_over_shadow_kwarg() -> None:
+    """When both ``shadows=`` and ``shadow=`` are supplied, ``shadows=`` wins."""
+    sh_singular = _FakeShadow("soniox", "singular")
+    sh_list = _FakeShadow("deepgram", "list shadow")
+    ep = FakeEndpointer(fire_after=3)
+    stt = FakeSTT("primary")
+    brain = FakeBrain([AnswerResult(utterance=Utterance("reply", "voice"), phase="oral", state={})])
+    tel = FakeTelemetrySink()
+    session = VoiceSession(
+        interview_id="iv-prec",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        telemetry=tel,
+        shadow=sh_singular,
+        shadows=[sh_list],  # type: ignore[arg-type]
+    )
+
+    for _ in range(3):
+        await session.feed_frame(_frame())
+    await asyncio.sleep(0)
+
+    rec = tel.records[0]
+    assert len(rec.shadow_snapshots) == 1
+    assert rec.shadow_snapshots[0].engine == "deepgram"
+    assert sh_singular.started is False
+    await session.aclose()
+
+
+async def test_multi_shadow_reset_called_on_all_shadows_on_rearm() -> None:
+    """After a committed turn, arm_next_turn() calls reset() on every shadow."""
+    sh_a = _FakeShadow("soniox")
+    sh_b = _FakeShadow("deepgram")
+    session, _ = _multi_shadow_session([sh_a, sh_b], fire_after=3)
+
+    for _ in range(3):
+        await session.feed_frame(_frame())
+    await asyncio.sleep(0)
+
+    session.arm_next_turn()
+
+    assert sh_a.reset_calls == 1
+    assert sh_b.reset_calls == 1
+    await session.aclose()
+
+
+async def test_no_shadows_yields_empty_shadow_snapshots() -> None:
+    """A session with no shadows has shadow_snapshots=() and no legacy shadow fields."""
+    ep = FakeEndpointer(fire_after=3)
+    stt = FakeSTT("answer")
+    brain = FakeBrain([AnswerResult(utterance=Utterance("q", "voice"), phase="oral", state={})])
+    tel = FakeTelemetrySink()
+    session = VoiceSession(
+        interview_id="iv-none",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        telemetry=tel,
+    )
+
+    for _ in range(3):
+        await session.feed_frame(_frame())
+    await asyncio.sleep(0)
+
+    rec = tel.records[0]
+    assert rec.shadow_snapshots == ()
+    assert rec.shadow_engine is None
+    assert rec.shadow_transcript is None
+    await session.aclose()

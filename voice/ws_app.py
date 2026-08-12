@@ -16,10 +16,12 @@ stt_assemblyai.AssemblyAIConfig.from_env). Unset/`whisper` keeps the local Siler
 whisper path byte-for-byte unchanged; the local models stay warm either way — they are the
 in-session fallback when the remote stream permanently fails.
 
-Shadow STT (A/B): STT_SHADOW=soniox + SONIOX_API_KEY runs a Soniox stt-rt-v5 observer that
-transcribes the SAME audio in parallel with whatever the primary is. It is log-only (per-turn
-transcript captured into voice_turn_telemetry.shadow_*) and never drives turns, so it is safe
-alongside any primary. Unset = no shadow.
+Shadow STT (A/B/C): STT_SHADOW is a comma-separated list of engine names, e.g.
+``STT_SHADOW=soniox,deepgram``. Each named engine runs an observer that transcribes the SAME
+audio in parallel with the primary. All observers are log-only (per-turn snapshots written to
+``voice_turn_telemetry.shadow_*`` and ``voice_turn_shadows``); none drive turns; all are safe
+alongside any primary. Supported names: ``soniox`` (requires SONIOX_API_KEY), ``deepgram``
+(requires DEEPGRAM_API_KEY). Unset or empty = no shadows.
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ from contracts import AudioArray, ShadowSttLike, SttStreamerLike  # noqa: E402
 from endpointing import SilenceGatedEndpointer  # noqa: E402
 from session import VoiceSession  # noqa: E402
 from stt_assemblyai import AssemblyAIConfig, AssemblyAIStreamer  # noqa: E402
+from stt_deepgram import DeepgramConfig, DeepgramShadow  # noqa: E402
 from stt_soniox import SonioxConfig, SonioxShadow  # noqa: E402
 from telemetry import RestTelemetrySink  # noqa: E402
 from ws_connection import ConnectionDeps, WsConnection  # noqa: E402
@@ -57,10 +60,13 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 MAX_CONNECTIONS = int(os.environ.get("MAX_CONNECTIONS", "4"))
 STT_CONCURRENCY = int(os.environ.get("STT_CONCURRENCY", "2"))
 STT_PROVIDER = os.environ.get("STT_PROVIDER", "whisper").strip().lower()
-# Shadow STT (A/B): a second engine transcribes the SAME audio in parallel, log-only. It never
-# drives turns, so it's safe to run alongside any primary. STT_SHADOW=soniox enables it.
+# Shadow STT (A/B/C): comma-separated engine names. Each named engine transcribes the SAME
+# audio in parallel with the primary (log-only, never drives turns).
+# e.g. STT_SHADOW=soniox,deepgram
 STT_SHADOW = os.environ.get("STT_SHADOW", "").strip().lower()
 _REQUEST_TIMEOUT_S = 30.0
+
+_KNOWN_SHADOW_ENGINES = frozenset({"soniox", "deepgram"})
 
 
 def _use_assemblyai() -> bool:
@@ -75,16 +81,29 @@ def _use_assemblyai() -> bool:
     return True
 
 
-def _use_soniox_shadow() -> bool:
-    """True when the Soniox shadow is selected AND usable (key present). Log-only observer."""
-    if STT_SHADOW != "soniox":
-        if STT_SHADOW not in ("", "none"):
-            logger.error("Unknown STT_SHADOW=%r — no shadow STT.", STT_SHADOW)
-        return False
-    if not os.environ.get("SONIOX_API_KEY"):
-        logger.error("STT_SHADOW=soniox but SONIOX_API_KEY is unset — no shadow STT.")
-        return False
-    return True
+def _parse_shadow_engines() -> list[str]:
+    """Return the list of enabled shadow engine names from STT_SHADOW (comma-list).
+
+    Skips unknown names with an error log; skips engines whose required API key is absent.
+    Returns an empty list when STT_SHADOW is unset or all entries are invalid.
+    """
+    raw = STT_SHADOW.strip()
+    if not raw or raw in ("none", "0", "false"):
+        return []
+    requested = [e.strip() for e in raw.split(",") if e.strip()]
+    enabled: list[str] = []
+    for engine in requested:
+        if engine not in _KNOWN_SHADOW_ENGINES:
+            logger.error("Unknown STT_SHADOW engine %r — skipping.", engine)
+            continue
+        if engine == "soniox" and not os.environ.get("SONIOX_API_KEY"):
+            logger.error("STT_SHADOW includes soniox but SONIOX_API_KEY is unset — skipping.")
+            continue
+        if engine == "deepgram" and not os.environ.get("DEEPGRAM_API_KEY"):
+            logger.error("STT_SHADOW includes deepgram but DEEPGRAM_API_KEY is unset — skipping.")
+            continue
+        enabled.append(engine)
+    return enabled
 
 
 class SemaphoreStt:
@@ -125,9 +144,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     use_assemblyai = _use_assemblyai()
     if use_assemblyai:
         logger.info("STT provider: assemblyai (v3 streaming; local whisper kept as fallback).")
-    use_soniox_shadow = _use_soniox_shadow()
-    if use_soniox_shadow:
-        logger.info("STT shadow: soniox (A/B observer; log-only, never drives turns).")
+    shadow_engines = _parse_shadow_engines()
+    if shadow_engines:
+        logger.info(
+            "STT shadows: %s (A/B/C observers; log-only, never drive turns).",
+            ", ".join(shadow_engines),
+        )
 
     def build_session(
         interview_id: str, token: str, language: str, phase: str, sink: WsTtsSink
@@ -136,8 +158,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # read-mostly warm models; one shared SemaphoreStt; a brain and telemetry sink both
         # using the shared HTTP client (no second connection opened). On the assemblyai path
         # each connection also gets its OWN streamer (one AAI WS per session lifetime); the
-        # endpointer + whisper stay wired in as the in-session fallback. With the shadow enabled
-        # each connection also gets its OWN Soniox observer (one shadow WS per session lifetime).
+        # endpointer + whisper stay wired in as the in-session fallback. Each enabled shadow
+        # gets its OWN observer WS per session lifetime.
         endpointer = SilenceGatedEndpointer(
             vad_model=vad_model, smart_turn_session=smart_turn_session
         )
@@ -145,9 +167,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         streamer: SttStreamerLike | None = None
         if use_assemblyai:
             streamer = AssemblyAIStreamer(AssemblyAIConfig.from_env(language=language))
-        shadow: ShadowSttLike | None = None
-        if use_soniox_shadow:
-            shadow = SonioxShadow(SonioxConfig.from_env(language=language))
+        # Build the list of shadow observers for this session (one per enabled engine).
+        shadows: list[ShadowSttLike] = []
+        for engine_name in shadow_engines:
+            if engine_name == "soniox":
+                shadows.append(SonioxShadow(SonioxConfig.from_env(language=language)))
+            elif engine_name == "deepgram":
+                shadows.append(DeepgramShadow(DeepgramConfig.from_env()))
         return VoiceSession(
             interview_id=interview_id,
             session_token=token,
@@ -158,7 +184,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             language=language,
             telemetry=telemetry_sink,
             streamer=streamer,
-            shadow=shadow,
+            shadows=shadows if shadows else None,
             phase=phase,
         )
 

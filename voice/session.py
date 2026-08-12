@@ -47,7 +47,7 @@ from contracts import (
     TurnResult,
     Utterance,
 )
-from telemetry import NoopTelemetrySink, TelemetrySink, TurnTelemetry
+from telemetry import NoopTelemetrySink, ShadowTelemetryItem, TelemetrySink, TurnTelemetry
 
 logger = logging.getLogger(__name__)
 
@@ -239,11 +239,16 @@ class VoiceSession:
                         on permanent streamer failure the session falls back to the injected
                         ``endpointer``/``stt``. ``None`` (default) = the local whisper path,
                         byte-for-byte unchanged.
-        shadow:         Optional :class:`ShadowSttLike` (Soniox, ``STT_SHADOW=soniox``). A pure
-                        OBSERVER: it transcribes the SAME LISTENING audio in parallel for A/B
-                        comparison, snapshotting its per-turn transcript into telemetry. It
-                        never drives turns and never affects the live interview — all its calls
-                        are best-effort. ``None`` (default) = no shadow.
+        shadow:         Optional :class:`ShadowSttLike` (single engine, backward-compat).
+                        When supplied without ``shadows``, it is wrapped in a one-element list
+                        and treated identically to ``shadows=[shadow]``.
+        shadows:        Optional list of :class:`ShadowSttLike` observers (A/B/C comparison).
+                        All observers receive the SAME LISTENING frames concurrently; all are
+                        flushed together at end-of-turn; all appear in telemetry (one
+                        ``ShadowTelemetryItem`` per engine). None of them drive turns or affect
+                        the live interview — all calls are best-effort. ``None`` (default) = no
+                        shadows. When both ``shadow`` and ``shadows`` are provided, ``shadows``
+                        takes precedence.
     """
 
     def __init__(
@@ -259,6 +264,7 @@ class VoiceSession:
         telemetry: TelemetrySink | None = None,
         streamer: SttStreamerLike | None = None,
         shadow: ShadowSttLike | None = None,
+        shadows: list[ShadowSttLike] | None = None,
         phase: str = "greeting",
     ) -> None:
         self._interview_id = interview_id
@@ -310,12 +316,18 @@ class VoiceSession:
         self._idle_watchdog_task: asyncio.Task[None] | None = None
         self._probe_fired = False
         self._probe_index = 0
-        # Shadow STT (A/B, STT_SHADOW=soniox). A pure observer: the same LISTENING frames are
-        # tee'd to it, its per-turn transcript is snapshotted into telemetry at commit, and it
-        # is reset on each re-arm. Started lazily on the first frame; closed at teardown. All
-        # calls are best-effort (the shadow swallows its own errors) so it can never break a turn.
-        self._shadow = shadow
-        self._shadow_started = False
+        # Shadow STT (A/B/C observers). All observers receive the SAME LISTENING frames
+        # concurrently; each is flushed at end-of-turn; each is snapshotted for telemetry.
+        # ``shadows=`` (list) takes precedence; ``shadow=`` (single, backward-compat) is
+        # wrapped in a list when ``shadows`` is not provided. All calls are best-effort so no
+        # shadow can ever block or break a turn. Started lazily on the first frame.
+        if shadows is not None:
+            self._shadows: list[ShadowSttLike] = list(shadows)
+        elif shadow is not None:
+            self._shadows = [shadow]
+        else:
+            self._shadows = []
+        self._shadow_started = False  # True once _ensure_shadows_started has been scheduled
         self._shadow_close_task: asyncio.Task[None] | None = None
         # FSM phase tracking for idle-watchdog phase awareness. Updated after each brain result
         # so the watchdog can be suppressed while the candidate is coding (phase-blind "rephrase?"
@@ -364,12 +376,17 @@ class VoiceSession:
         if self._state is not _State.LISTENING:
             return None  # ignore frames while processing / speaking / done
 
-        # Shadow STT (A/B observer): tee every LISTENING frame to the shadow engine so it
-        # transcribes the SAME audio as the primary. Started lazily; best-effort (the shadow
-        # swallows its own errors and never back-pressures this hot path) — never affects the turn.
-        if self._shadow is not None:
-            self._ensure_shadow_started()  # schedules start() off the hot path — never blocks
-            await self._shadow.feed(np.asarray(frame, dtype=np.float32))
+        # Shadow STT (A/B/C observers): tee every LISTENING frame to ALL shadow engines so each
+        # transcribes the SAME audio as the primary. Started lazily; best-effort per engine so
+        # a crash in one shadow never back-pressures this hot path or affects the turn.
+        if self._shadows:
+            self._ensure_shadows_started()  # schedules start() for each shadow, off the hot path
+            pcm_f32 = np.asarray(frame, dtype=np.float32)
+            for _sh in self._shadows:
+                try:
+                    await _sh.feed(pcm_f32)
+                except Exception:
+                    logger.debug("Shadow %s feed failed — skipping this frame.", _sh.engine)
 
         streamer = self._streamer
         if streamer is not None and self._stream_mode():
@@ -670,57 +687,73 @@ class VoiceSession:
             self._streamer.speech_activity.clear()  # type: ignore[union-attr]
             self._start_idle_watchdog()
 
-    def _ensure_shadow_started(self) -> None:
-        """Schedule the shadow's start ONCE as a background task — NEVER block the hot frame path
-        on the shadow's network connect. A slow/unreachable Soniox must not delay the primary's
-        audio intake, so start() is fire-and-forget: frames fed before the socket is up are simply
-        dropped by the shadow (it no-ops until connected), trimming only the first turn's shadow
-        transcript slightly. A failed start disables the shadow silently (it's just an observer)."""
-        if self._shadow is None or self._shadow_started:
+    def _ensure_shadows_started(self) -> None:
+        """Schedule each shadow's start ONCE as a background task.
+
+        Never blocks the hot frame path on a shadow's network connect — each start() is
+        fire-and-forget. Frames fed before a socket is up are dropped by that shadow (it
+        no-ops until connected), trimming only the first turn's shadow transcript slightly.
+        A failed start is logged and silently ignored (the shadow is a pure observer).
+        """
+        if not self._shadows or self._shadow_started:
             return
         self._shadow_started = True
-        shadow = self._shadow
+        for _sh in list(self._shadows):
+            shadow = _sh  # capture for closure
 
-        async def _run() -> None:
-            try:
-                await shadow.start()
-            except Exception:
-                logger.exception("Shadow STT failed to start — continuing without a shadow.")
+            async def _run(s: ShadowSttLike = shadow) -> None:
+                try:
+                    await s.start()
+                except Exception:
+                    logger.exception(
+                        "Shadow STT %s failed to start — continuing without it.", s.engine
+                    )
 
-        task = asyncio.create_task(_run(), name="shadow-start")
-        self._bg_tasks.add(task)
-        task.add_done_callback(self._bg_tasks.discard)
+            task = asyncio.create_task(_run(), name=f"shadow-start-{shadow.engine}")
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._bg_tasks.discard)
 
-    def _flush_shadow(self) -> None:
-        """Fire the shadow's mid-stream finalize (fire-and-forget) at end-of-turn so its tail tokens
-        become final before we snapshot (~brain+speak later). Best-effort; never blocks the turn."""
-        if self._shadow is None:
-            return
-        shadow = self._shadow
+    def _flush_shadows(self) -> None:
+        """Fire flush_turn() on every shadow (fire-and-forget, one task per engine).
 
-        async def _run() -> None:
-            try:
-                await shadow.flush_turn()
-            except Exception:
-                logger.exception("Shadow flush failed — snapshot may miss this turn's tail.")
-
-        task = asyncio.create_task(_run(), name="shadow-flush")
-        self._bg_tasks.add(task)
-        task.add_done_callback(self._bg_tasks.discard)
-
-    def _snapshot_shadow(self) -> tuple[str | None, ShadowSnapshot | None]:
-        """Consume the shadow's current-window ``(engine, ShadowSnapshot)`` for telemetry.
-
-        Best-effort: any shadow error yields ``(None, None)`` so a shadow fault can never break a
-        turn. Called once per committed turn from :meth:`_log_turn`.
+        Each flush is independent: a crash in one shadow does not affect the others or the
+        turn. The flushes execute concurrently so brain+TTS time allows all shadows to
+        receive and process their finalize responses before take_snapshot() is called.
         """
-        if self._shadow is None:
-            return None, None
-        try:
-            return self._shadow.engine, self._shadow.take_snapshot()
-        except Exception:
-            logger.exception("Shadow STT snapshot failed — omitting shadow fields this turn.")
-            return None, None
+        for _sh in self._shadows:
+            shadow = _sh  # capture for closure
+
+            async def _run(s: ShadowSttLike = shadow) -> None:
+                try:
+                    await s.flush_turn()
+                except Exception:
+                    logger.exception(
+                        "Shadow %s flush failed — snapshot may miss tail tokens.", s.engine
+                    )
+
+            task = asyncio.create_task(_run(), name=f"shadow-flush-{shadow.engine}")
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._bg_tasks.discard)
+
+    def _collect_shadow_snapshots(self) -> list[tuple[str, ShadowSnapshot]]:
+        """Collect per-turn snapshots from every shadow engine.
+
+        Returns a list of ``(engine, ShadowSnapshot)`` pairs — one per configured shadow.
+        Empty when no shadows are running. A crash in one shadow yields no entry for it but
+        never disrupts the others or the turn (best-effort per engine).
+
+        Called once per committed turn from :meth:`_log_turn`; synchronous (take_snapshot()
+        reads Python variables set by background asyncio tasks — no I/O).
+        """
+        results: list[tuple[str, ShadowSnapshot]] = []
+        for _sh in self._shadows:
+            try:
+                results.append((_sh.engine, _sh.take_snapshot()))
+            except Exception:
+                logger.exception(
+                    "Shadow STT %s snapshot failed — omitting this engine's fields.", _sh.engine
+                )
+        return results
 
     def _fallback_to_local(self) -> None:
         """Flip (once) to the local endpointer + whisper path after a fatal streamer failure.
@@ -855,9 +888,9 @@ class VoiceSession:
         """
         rid = self._request_id
 
-        # Ask the shadow (if any) to finalize its tail NOW so the per-turn snapshot taken in
-        # _log_turn (after brain + speak) captures this turn's full transcript, not a lagged one.
-        self._flush_shadow()
+        # Ask all shadows to finalize their tails NOW so per-turn snapshots taken in
+        # _log_turn (after brain + speak) capture full transcripts, not lagged ones.
+        self._flush_shadows()
 
         if not transcript:
             # False fire (cough / clipped silence): never submit an empty answer; re-arm + listen.
@@ -1004,8 +1037,25 @@ class VoiceSession:
             " terminal=1" if terminal else "",
             " barge_in=1" if barge_in else "",
         )
-        # Consume the shadow's per-turn observation (A/B). Once per turn, aligned to this commit.
-        shadow_engine, snap = self._snapshot_shadow()
+        # Collect per-turn observations from every shadow (A/B/C). Each is a (engine, snap) pair.
+        # The FIRST shadow populates the legacy single-shadow columns (backward-compat for old
+        # queries); all shadows appear in shadow_snapshots for the new voice_turn_shadows table.
+        raw_snaps = self._collect_shadow_snapshots()
+        shadow_items = tuple(
+            ShadowTelemetryItem(
+                engine=eng,
+                transcript=sn.transcript,
+                stt_ms=sn.stt_ms,
+                endpoint_ms=sn.endpoint_ms,
+                endpoint_count=sn.endpoint_count,
+                finalize_lag_ms=sn.finalize_lag_ms,
+                second_voice_ms=sn.non_primary_speaker_ms,
+                speaker_count=sn.speaker_count,
+            )
+            for eng, sn in raw_snaps
+        )
+        # Legacy single-shadow fields from the first configured shadow (None when no shadows).
+        first_eng, first_snap = raw_snaps[0] if raw_snaps else (None, None)
         t = TurnTelemetry(
             request_id=rid,
             commit=commit,
@@ -1018,15 +1068,16 @@ class VoiceSession:
             empty=empty,
             terminal=terminal,
             primary_transcript=transcript,
-            shadow_engine=shadow_engine,
-            shadow_transcript=snap.transcript if snap else None,
-            shadow_stt_ms=snap.stt_ms if snap else None,
-            shadow_endpoint_ms=snap.endpoint_ms if snap else None,
-            shadow_endpoint_count=snap.endpoint_count if snap else None,
+            shadow_engine=first_eng,
+            shadow_transcript=first_snap.transcript if first_snap else None,
+            shadow_stt_ms=first_snap.stt_ms if first_snap else None,
+            shadow_endpoint_ms=first_snap.endpoint_ms if first_snap else None,
+            shadow_endpoint_count=first_snap.endpoint_count if first_snap else None,
             first_audio_ms=first_audio_ms,
             barge_in=barge_in,
-            speaker_count=snap.speaker_count if snap else None,
-            non_primary_speaker_ms=snap.non_primary_speaker_ms if snap else None,
+            speaker_count=first_snap.speaker_count if first_snap else None,
+            non_primary_speaker_ms=first_snap.non_primary_speaker_ms if first_snap else None,
+            shadow_snapshots=shadow_items,
         )
         self._safe_telemetry(t)
 
@@ -1231,16 +1282,26 @@ class VoiceSession:
                 self._streamer_close_task = loop.create_task(
                     self._streamer.close(), name="session-streamer-close"
                 )
-        if self._shadow is not None and self._shadow_close_task is None:
-            # Best-effort shadow teardown (flush + EOS + close). aclose() awaits it; a bare
-            # close() outside a running loop just skips it (the shadow is disposable).
+        if self._shadows and self._shadow_close_task is None:
+            # Best-effort shadow teardown (flush + EOS + close) for all engines concurrently.
+            # aclose() awaits the gathered task; a bare close() outside a running loop skips it.
+            shadows_snapshot = list(self._shadows)
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 pass
             else:
+                async def _close_all_shadows(engines: list[ShadowSttLike]) -> None:
+                    for _sh in engines:
+                        try:
+                            await _sh.close()
+                        except Exception:
+                            logger.exception(
+                                "Shadow %s close failed during teardown — continuing.", _sh.engine
+                            )
+
                 self._shadow_close_task = loop.create_task(
-                    self._shadow.close(), name="session-shadow-close"
+                    _close_all_shadows(shadows_snapshot), name="session-shadows-close"
                 )
 
     async def aclose(self) -> None:
@@ -1276,8 +1337,11 @@ class VoiceSession:
         self._stream_frames = 0
         self._barge_in_occurred = False  # clear for the next speaking window
         self._drain_stream_events()  # streamed events from the prior listening window are stale
-        if self._shadow is not None:
-            self._shadow.reset()  # align the shadow's window to this fresh listening window
+        for _sh in self._shadows:
+            try:
+                _sh.reset()  # align each shadow's window to this fresh listening window
+            except Exception:
+                logger.exception("Shadow %s reset failed — continuing.", _sh.engine)
         if new_request_id:
             self._request_id = _new_request_id()
         self._endpointer.reset()

@@ -531,6 +531,54 @@ export async function recordVoiceTurn(interviewId: string, t: VoiceTurnRecord): 
   if (error) throw new Error(`recordVoiceTurn: ${error.message}`);
 }
 
+// ─────────────────────── Voice turn shadow rows ───────────────────────
+
+/** One shadow engine's per-turn observation; maps 1:1 to voice_turn_shadows columns. */
+export interface VoiceTurnShadowRecord {
+  engine: string;
+  transcript?: string | null;
+  sttMs?: number | null;
+  endpointMs?: number | null;
+  endpointCount?: number | null;
+  finalizeLagMs?: number | null;
+  secondVoiceMs?: number | null;
+  speakerCount?: number | null;
+}
+
+/**
+ * Bulk-insert shadow observations for one turn into voice_turn_shadows.
+ * No-ops when the shadows array is empty. Throws on DB error (route swallows).
+ */
+export async function recordVoiceTurnShadows(
+  interviewId: string,
+  requestId: string,
+  shadows: VoiceTurnShadowRecord[]
+): Promise<void> {
+  if (shadows.length === 0) return;
+  const db = createServiceClient();
+
+  const safeNum = (v: number | null | undefined): number | null => {
+    if (v == null || !isFinite(v)) return null;
+    return Math.max(0, v);
+  };
+
+  const rows = shadows.map((s) => ({
+    interview_id: interviewId,
+    request_id: requestId,
+    engine: s.engine,
+    transcript: s.transcript ?? null,
+    stt_ms: safeNum(s.sttMs),
+    endpoint_ms: safeNum(s.endpointMs),
+    endpoint_count: s.endpointCount == null ? null : Math.round(s.endpointCount),
+    finalize_lag_ms: safeNum(s.finalizeLagMs),
+    second_voice_ms: safeNum(s.secondVoiceMs),
+    speaker_count: s.speakerCount == null ? null : Math.round(s.speakerCount),
+  }));
+
+  const { error } = await db.from('voice_turn_shadows').insert(rows);
+  if (error) throw new Error(`recordVoiceTurnShadows: ${error.message}`);
+}
+
 // ─────────────────────── Proctor signals ───────────────────────
 
 export interface ProctorSignalRecord {

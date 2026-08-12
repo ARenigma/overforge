@@ -137,12 +137,19 @@ class ShadowSnapshot:
     """One shadow engine's per-turn observation, consumed at the primary's end-of-turn.
 
     - ``transcript``            the shadow's text for this turn window (for cross-engine WER).
-    - ``stt_ms``                window-start → last final token (rough finalization latency).
+    - ``stt_ms``                window-start → last final token.  For Soniox this is ~utterance
+                                duration (the full window), not a pure latency number — use
+                                ``finalize_lag_ms`` for Soniox's finalization response time.
     - ``endpoint_ms``           window-start → the shadow's FIRST semantic endpoint decision
                                 (its own EOT), or None if it never fired one. Compare against when
                                 the PRIMARY actually cut the turn to A/B turn-detection.
     - ``endpoint_count``        how many endpoints the shadow fired in the window (0 = never ended;
                                 >=2 = it would have SPLIT the primary's single turn).
+    - ``finalize_lag_ms``       time from when the mid-stream finalize message was physically SENT
+                                to the provider to when the last ``is_final`` token arrived back
+                                (ms). Measures the provider's round-trip response to the flush
+                                command.  None when the provider has no mid-stream finalize (e.g.
+                                Deepgram), or when no flush was issued this window.
     - ``speaker_count``         distinct speaker labels observed in this turn's window (advisory
                                 diarization only — NEVER a biometric voiceprint). None when the
                                 provider returned no speaker labels (diarization off or labels absent).
@@ -156,6 +163,7 @@ class ShadowSnapshot:
     stt_ms: float | None
     endpoint_ms: float | None
     endpoint_count: int
+    finalize_lag_ms: float | None = None
     speaker_count: int | None = None
     non_primary_speaker_ms: float | None = None
 

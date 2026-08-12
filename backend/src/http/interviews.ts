@@ -13,10 +13,12 @@ import * as orchestrator from '../interview/orchestrator';
 import {
   getById,
   recordVoiceTurn,
+  recordVoiceTurnShadows,
   recordProctorSignal,
   recordIntegritySignal,
   INTEGRITY_SIGNAL_KINDS,
   updateInterview,
+  type VoiceTurnShadowRecord,
 } from '../db/interviews';
 import { validateSpeakText, GOODBYE_LINE } from './speak-validation';
 import { captureException } from '../observability/sentry';
@@ -855,6 +857,7 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       firstAudioMs,
       speakerCount,
       nonPrimarySpeakerMs,
+      shadows,
     } = req.body as {
       token?: string;
       requestId?: string;
@@ -876,6 +879,8 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       firstAudioMs?: unknown;
       speakerCount?: unknown;
       nonPrimarySpeakerMs?: unknown;
+      /** Multi-shadow A/B/C observations — one entry per configured engine. */
+      shadows?: unknown;
     };
 
     await validateCandidate(id, token ?? '');
@@ -929,6 +934,30 @@ router.post('/:id/voice-turn', async (req: Request, res: Response): Promise<void
       })(),
       firstAudioMs: toFirstAudioMs(firstAudioMs),
     });
+
+    // Multi-shadow rows (voice_turn_shadows): one row per configured engine. Best-effort —
+    // a failure here must never break the turn (voice service fires-and-forgets the POST).
+    if (Array.isArray(shadows) && shadows.length > 0 && typeof requestId === 'string') {
+      try {
+        const shadowRows: VoiceTurnShadowRecord[] = shadows
+          .filter((s): s is Record<string, unknown> => s != null && typeof s === 'object' && !Array.isArray(s))
+          .map((s) => ({
+            engine: typeof s['engine'] === 'string' ? s['engine'].slice(0, 32) : 'unknown',
+            transcript: typeof s['transcript'] === 'string' ? s['transcript'].slice(0, MAX_TRANSCRIPT_CHARS) : null,
+            sttMs: toNum(s['sttMs']),
+            endpointMs: toNum(s['endpointMs']),
+            endpointCount: (() => { const n = toNum(s['endpointCount']); return n == null ? null : Math.round(n); })(),
+            finalizeLagMs: toNum(s['finalizeLagMs']),
+            secondVoiceMs: toNum(s['secondVoiceMs']),
+            speakerCount: (() => { const n = toNum(s['speakerCount']); return n == null ? null : Math.round(n); })(),
+          }));
+        if (shadowRows.length > 0) {
+          await recordVoiceTurnShadows(id, requestId, shadowRows);
+        }
+      } catch (shadowErr) {
+        console.error('[voice-turn] shadow rows insert failed (non-fatal):', shadowErr);
+      }
+    }
 
     // Second-voice integrity signal: when shadow diarization detected >1 speaker in this turn,
     // write an advisory integrity_signals row. Best-effort — a write failure must never break

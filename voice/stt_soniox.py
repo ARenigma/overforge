@@ -199,6 +199,12 @@ class SonioxShadow:
         self._finals: list[str] = []
         self._window_start: float | None = None
         self._last_final_t: float | None = None
+        # perf_counter timestamp when the _FINALIZE sentinel was physically SENT to the Soniox
+        # socket (set in the sender loop, not at enqueue time). Used to compute finalize_lag_ms =
+        # (last_final_t - _flush_sent_t), which measures Soniox's round-trip response time to the
+        # mid-stream finalize message. Distinct from stt_ms (window_start → last_final_t), which
+        # measures the total window duration and is always ~utterance_duration.
+        self._flush_sent_t: float | None = None
         # perf_counter timestamps of Soniox's own semantic endpoints (<end>) in this window.
         self._endpoints: list[float] = []
         # Speaker diarization — advisory only, never biometric identity.
@@ -279,6 +285,7 @@ class SonioxShadow:
         self._finals.clear()
         self._window_start = None
         self._last_final_t = None
+        self._flush_sent_t = None
         self._endpoints.clear()
         self._turn_speaker_ms.clear()
 
@@ -302,8 +309,18 @@ class SonioxShadow:
         if self._window_start is not None and self._endpoints:
             endpoint_ms = max(0.0, (self._endpoints[0] - self._window_start) * 1000.0)
         endpoint_count = len(self._endpoints)
+        # finalize_lag_ms = time from when {"type":"finalize"} was physically SENT to Soniox
+        # to when the last is_final token arrived back. This is Soniox's response latency to the
+        # mid-stream flush command — a small number (~50–300 ms). Distinct from stt_ms, which
+        # measures window_start → last_final_t and is always approximately equal to the utterance
+        # duration (not a useful latency metric). Both are recorded: stt_ms for total-window
+        # analysis; finalize_lag_ms for provider round-trip comparison.
+        finalize_lag_ms: float | None = None
+        if self._flush_sent_t is not None and self._last_final_t is not None:
+            finalize_lag_ms = max(0.0, (self._last_final_t - self._flush_sent_t) * 1000.0)
         self._finals.clear()
         self._last_final_t = None
+        self._flush_sent_t = None
         self._endpoints.clear()
 
         # Diarization: derive speaker_count + non-primary ms from this turn's window.
@@ -324,6 +341,7 @@ class SonioxShadow:
             stt_ms=latency_ms,
             endpoint_ms=endpoint_ms,
             endpoint_count=endpoint_count,
+            finalize_lag_ms=finalize_lag_ms,
             speaker_count=speaker_count,
             non_primary_speaker_ms=non_primary_speaker_ms,
         )
@@ -376,6 +394,9 @@ class SonioxShadow:
                         await self._ws.send(bytes(buf))
                         buf.clear()
                     if self._ws is not None:
+                        # Timestamp the SEND (not the enqueue) so finalize_lag_ms measures
+                        # the true round-trip: socket send → is_final tokens arrive.
+                        self._flush_sent_t = time.perf_counter()
                         await self._ws.send('{"type": "finalize"}')  # flush → is_final; stays open
                     continue
                 buf.extend(item)  # type: ignore[arg-type]

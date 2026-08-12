@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 import httpx
@@ -20,6 +20,39 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "http://localhost:5001"
 _DEFAULT_TIMEOUT_S = 5.0
+
+
+@dataclass(frozen=True)
+class ShadowTelemetryItem:
+    """Per-engine per-turn shadow observation posted to ``voice_turn_shadows``.
+
+    One row per configured shadow per turn.  Fields mirror the ``voice_turn_shadows``
+    DB columns (snake_case here, camelCase in the JSON body).
+
+    - ``engine``            engine label (``"soniox"``, ``"deepgram"``).
+    - ``transcript``        shadow transcript for this window (for WER comparison).
+    - ``stt_ms``            window-start → last final token (ms).  For Soniox this is
+                            ~utterance_duration; use ``finalize_lag_ms`` for the actual
+                            finalization response latency.
+    - ``endpoint_ms``       window-start → shadow's first own EOT decision (ms); None
+                            if it never fired (candidate spoke without pausing).
+    - ``endpoint_count``    shadow EOT decisions in the window (0=never; >=2=would split).
+    - ``finalize_lag_ms``   time from mid-stream finalize SENT to last is_final token (ms).
+                            Measures the provider's round-trip response latency.  None for
+                            Deepgram (no mid-stream finalize on v1).
+    - ``second_voice_ms``   ms attributed to non-primary speakers in this turn (positional
+                            label, not identity/voiceprint).  None when no diarization data.
+    - ``speaker_count``     distinct speaker labels in the window; None when unavailable.
+    """
+
+    engine: str
+    transcript: str | None
+    stt_ms: float | None
+    endpoint_ms: float | None
+    endpoint_count: int
+    finalize_lag_ms: float | None
+    second_voice_ms: float | None
+    speaker_count: int | None
 
 
 @dataclass(frozen=True)
@@ -39,6 +72,7 @@ class TurnTelemetry:
     #: Primary-engine transcript for this turn — the pairwise reference for A/B disagreement.
     primary_transcript: str = ""
     #: Shadow STT engine run in parallel on the same audio ("soniox"); None when no shadow ran.
+    #: Backward-compat: populated from the FIRST configured shadow for old queries.
     shadow_engine: str | None = None
     #: Shadow transcript for the SAME audio window as ``primary_transcript`` (log-only).
     shadow_transcript: str | None = None
@@ -57,10 +91,15 @@ class TurnTelemetry:
     #: Distinct speaker labels detected in this turn's shadow-diarization window. None when the
     #: shadow provider returned no speaker labels (diarization off, provider omitted labels, or no
     #: shadow running). Advisory only — NEVER a biometric voiceprint; label identity not stored.
+    #: Backward-compat: populated from the FIRST configured shadow.
     speaker_count: int | None = None
     #: Total ms in this turn attributed to non-primary speakers (positional label, not identity).
     #: 0.0 when only the primary speaker was heard; None when no speaker labels were returned.
+    #: Backward-compat: populated from the FIRST configured shadow.
     non_primary_speaker_ms: float | None = None
+    #: All configured shadows' per-turn observations (one item per engine). Empty tuple when no
+    #: shadows ran. Each item is inserted into ``voice_turn_shadows`` for three-way comparison.
+    shadow_snapshots: tuple[ShadowTelemetryItem, ...] = field(default_factory=tuple)
 
 
 class TelemetrySink(Protocol):
@@ -132,6 +171,7 @@ class RestTelemetrySink:
                 "empty": t.empty,
                 "terminal": t.terminal,
                 "primaryTranscript": t.primary_transcript,
+                # Backward-compat single-shadow fields (first shadow; None when no shadows).
                 "shadowEngine": t.shadow_engine,
                 "shadowTranscript": t.shadow_transcript,
                 "shadowSttMs": t.shadow_stt_ms,
@@ -141,6 +181,20 @@ class RestTelemetrySink:
                 "bargeIn": t.barge_in,
                 "speakerCount": t.speaker_count,
                 "nonPrimarySpeakerMs": t.non_primary_speaker_ms,
+                # Multi-shadow array (one entry per engine; empty list when no shadows).
+                "shadows": [
+                    {
+                        "engine": s.engine,
+                        "transcript": s.transcript,
+                        "sttMs": s.stt_ms,
+                        "endpointMs": s.endpoint_ms,
+                        "endpointCount": s.endpoint_count,
+                        "finalizeLagMs": s.finalize_lag_ms,
+                        "secondVoiceMs": s.second_voice_ms,
+                        "speakerCount": s.speaker_count,
+                    }
+                    for s in t.shadow_snapshots
+                ],
             }
             resp = await self._client.post(path, json=body)
             if resp.status_code not in (200, 204):

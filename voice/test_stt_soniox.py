@@ -490,3 +490,129 @@ async def test_session_shadow_snapshot_failure_never_breaks_turn() -> None:
     assert rec.shadow_engine is None  # snapshot failure → shadow fields omitted
     assert rec.shadow_transcript is None
     await session.aclose()
+
+
+# ─────────────────────────── finalize_lag_ms ───────────────────────────
+
+
+async def test_finalize_lag_none_when_no_flush_called() -> None:
+    """Without flush_turn(), _flush_sent_t stays None → finalize_lag_ms is None."""
+    ws = FakeWs([_tokens_msg((" answer", True), finished=True)])
+    shadow = _shadow(ws)
+    await shadow.start()
+    await shadow.feed(_frame())
+    assert shadow._recv_task is not None
+    await asyncio.wait_for(shadow._recv_task, timeout=1)
+
+    snap = shadow.take_snapshot()
+    # No flush_turn() was called → _flush_sent_t never set → finalize_lag_ms must be None.
+    assert snap.finalize_lag_ms is None
+    assert snap.stt_ms is not None  # stt_ms is independent — still measured from window_start
+    await shadow.close()
+
+
+async def test_flush_turn_sets_flush_sent_t_in_sender_loop() -> None:
+    """After flush_turn() + one event-loop yield, _flush_sent_t is set (sender ran)."""
+    ws = FakeWs()  # no incoming msgs — recv blocks; that's fine, we just test the sender
+    shadow = _shadow(ws)
+    await shadow.start()
+    await shadow.feed(_frame())  # sets _window_start + enqueues PCM
+
+    assert shadow._flush_sent_t is None  # not yet
+    await shadow.flush_turn()
+    # Give the event loop one turn so the sender task can dequeue _FINALIZE and set the timestamp.
+    await asyncio.sleep(0)
+
+    assert shadow._flush_sent_t is not None  # sender ran and stamped the send time
+    # The FakeWs.sent list should contain the finalize control frame.
+    json_sends = [s for s in ws.sent if isinstance(s, str) and "finalize" in s]
+    assert len(json_sends) >= 1
+    await shadow.close()
+
+
+async def test_finalize_lag_ms_computed_correctly_from_timestamps() -> None:
+    """finalize_lag_ms = (last_final_t − flush_sent_t) × 1000, clamped ≥ 0."""
+    ws = FakeWs([_tokens_msg((" hello", True), finished=True)])
+    shadow = _shadow(ws)
+    await shadow.start()
+    await shadow.feed(_frame())
+
+    # Drive the recv loop so _last_final_t is set from the queued tokens.
+    assert shadow._recv_task is not None
+    await asyncio.wait_for(shadow._recv_task, timeout=1)
+
+    # Manually set _flush_sent_t to a time BEFORE _last_final_t so finalize_lag_ms > 0.
+    assert shadow._last_final_t is not None
+    shadow._flush_sent_t = shadow._last_final_t - 0.120  # simulate 120 ms round-trip
+
+    snap = shadow.take_snapshot()
+    assert snap.finalize_lag_ms is not None
+    # Should be ~120 ms (± small float error)
+    assert 100.0 <= snap.finalize_lag_ms <= 200.0
+    await shadow.close()
+
+
+async def test_finalize_lag_clamped_to_zero_when_ordering_inverted() -> None:
+    """If flush_sent_t > last_final_t (unlikely clock skew), finalize_lag_ms is clamped to 0."""
+    ws = FakeWs([_tokens_msg((" hi", True), finished=True)])
+    shadow = _shadow(ws)
+    await shadow.start()
+    assert shadow._recv_task is not None
+    await asyncio.wait_for(shadow._recv_task, timeout=1)
+
+    assert shadow._last_final_t is not None
+    # Simulate inverted clock: flush was "sent" AFTER the final token arrived.
+    shadow._flush_sent_t = shadow._last_final_t + 0.5
+
+    snap = shadow.take_snapshot()
+    assert snap.finalize_lag_ms == 0.0
+    await shadow.close()
+
+
+async def test_stt_ms_and_finalize_lag_ms_are_distinct_metrics() -> None:
+    """stt_ms (window_start→last_final_t) is always ≥ finalize_lag_ms (flush_sent_t→last_final_t)."""
+    ws = FakeWs([_tokens_msg((" word", True), finished=True)])
+    shadow = _shadow(ws)
+    await shadow.start()
+    await shadow.feed(_frame())  # sets _window_start early
+    assert shadow._recv_task is not None
+    await asyncio.wait_for(shadow._recv_task, timeout=1)
+
+    assert shadow._window_start is not None
+    assert shadow._last_final_t is not None
+    # Flush was sent 50 ms after window_start — simulates a real interview where candidate
+    # speaks for a while before end-of-turn triggers flush.
+    shadow._flush_sent_t = shadow._window_start + 0.050
+
+    snap = shadow.take_snapshot()
+    # stt_ms covers the WHOLE window; finalize_lag covers only the flush round-trip.
+    assert snap.stt_ms is not None
+    assert snap.finalize_lag_ms is not None
+    assert snap.stt_ms >= snap.finalize_lag_ms  # window_start is always earlier than flush_sent_t
+    await shadow.close()
+
+
+async def test_flush_sent_t_cleared_by_take_snapshot() -> None:
+    """take_snapshot() clears _flush_sent_t so a second call yields finalize_lag_ms=None."""
+    ws = FakeWs([_tokens_msg((" a", True), finished=True)])
+    shadow = _shadow(ws)
+    await shadow.start()
+    await shadow.feed(_frame())
+    assert shadow._recv_task is not None
+    await asyncio.wait_for(shadow._recv_task, timeout=1)
+
+    shadow._flush_sent_t = shadow._last_final_t  # any non-None value
+    snap1 = shadow.take_snapshot()
+    assert snap1.finalize_lag_ms is not None
+
+    snap2 = shadow.take_snapshot()
+    assert snap2.finalize_lag_ms is None  # _flush_sent_t was cleared by the first call
+    await shadow.close()
+
+
+def test_flush_sent_t_cleared_by_reset() -> None:
+    """reset() clears _flush_sent_t so a window started after reset has no stale flush timestamp."""
+    shadow = _shadow()
+    shadow._flush_sent_t = 12345.678  # inject directly to simulate a previous flush
+    shadow.reset()
+    assert shadow._flush_sent_t is None
