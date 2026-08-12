@@ -83,6 +83,13 @@ export interface ServerBargeIn {
   type: 'barge_in';
 }
 
+export interface ServerIntegrity {
+  /** The voice service detected a potential integrity event during the session. */
+  type: 'integrity';
+  /** 'second_voice' = VAD/diarization detected a speaker who is not the candidate. */
+  kind: string;
+}
+
 /** Discriminated union of all server→client JSON cues. */
 export type VoiceCue =
   | ServerReady
@@ -90,7 +97,8 @@ export type VoiceCue =
   | ServerTurnReady
   | ServerError
   | ServerClosing
-  | ServerBargeIn;
+  | ServerBargeIn
+  | ServerIntegrity;
 
 // ── Protocol constants (consumers hardcode these values — kept here for reference only) ──
 // WebSocket close codes (4xxx = application-defined, mirrors ws_protocol.py):

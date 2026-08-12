@@ -55,6 +55,10 @@ export interface ScoringInput {
   problemSlugs?: string[];
   /** Total interview duration in seconds from T&C acceptance to finish. */
   durationSeconds?: number | null;
+  /** Additional system-derived flags computed by the orchestrator (e.g. second_voice_turn) that
+   *  cannot be derived from the transcript alone. Merged with deriveSystemFlags output before
+   *  the LLM prompt is assembled. */
+  additionalSystemFlags?: SystemFlag[];
 }
 
 /** Intervention kinds that count against the candidate (assistance that reveals approach/answer).
@@ -108,10 +112,12 @@ export function computeCodeFacts(runs: CodeRunSummary[], problemSlugs: string[])
 /** Word count ≤ this threshold on the FIRST candidate turn → suspected capture failure. */
 export const CAPTURE_FAILURE_MAX_WORDS = 3;
 
-/** A turn that reflects a platform failure — must NOT be judged against the candidate. */
+/** A turn that reflects a platform failure OR overheard third-party audio — must NOT be judged
+ *  against the candidate. `second_voice_turn` identifies a candidate turn where diarization
+ *  detected a non-primary speaker (overheard third-party speech, not the candidate's own voice). */
 export interface SystemFlag {
   turnIndex: number;
-  kind: 'capture_failure' | 'connectivity_check' | 'undelivered_question' | 'abandoned_mandatory_cq';
+  kind: 'capture_failure' | 'connectivity_check' | 'undelivered_question' | 'abandoned_mandatory_cq' | 'second_voice_turn';
   excerpt: string;
 }
 
@@ -214,7 +220,8 @@ export function factCheckScorecard(card: Scorecard, facts: ProblemFact[], flags:
       if (
         flag.kind === 'capture_failure' ||
         flag.kind === 'connectivity_check' ||
-        flag.kind === 'abandoned_mandatory_cq'
+        flag.kind === 'abandoned_mandatory_cq' ||
+        flag.kind === 'second_voice_turn'
       ) {
         // Whole-word match only: a short excerpt like "No." must not fire on any text that
         // merely CONTAINS the substring ("NOt attempted") — that would force a regenerate on
@@ -257,7 +264,8 @@ export function overwriteFactViolations(card: Scorecard, facts: ProblemFact[], f
         if (
           flag.kind === 'capture_failure' ||
           flag.kind === 'connectivity_check' ||
-          flag.kind === 'abandoned_mandatory_cq'
+          flag.kind === 'abandoned_mandatory_cq' ||
+          flag.kind === 'second_voice_turn'
         ) {
           if (sn.includes(normalizeText(flag.excerpt))) return false;
         }
@@ -344,7 +352,11 @@ const SCORING_RETRY_DELAYS_MS = process.env.NODE_ENV === 'test' ? [0, 0, 0] : [0
 
 export async function scoreInterview(input: ScoringInput, client: MinimaxClient): Promise<Scorecard> {
   const facts = computeCodeFacts(input.codeRuns, input.problemSlugs ?? []);
-  const flags = deriveSystemFlags(input.transcript);
+  // Merge transcript-derived flags with orchestrator-computed flags (e.g. second_voice_turn).
+  const flags = [
+    ...deriveSystemFlags(input.transcript),
+    ...(input.additionalSystemFlags ?? []),
+  ];
 
   const messages: ChatMessage[] = [
     { role: 'system', content: RUBRIC_SYSTEM },
@@ -400,7 +412,10 @@ export function buildScoringPrompt(
   flagsArg?: SystemFlag[]
 ): string {
   const facts = factsArg ?? computeCodeFacts(input.codeRuns, input.problemSlugs ?? []);
-  const flags = flagsArg ?? deriveSystemFlags(input.transcript);
+  const flags = flagsArg ?? [
+    ...deriveSystemFlags(input.transcript),
+    ...(input.additionalSystemFlags ?? []),
+  ];
 
   const transcript = input.transcript
     .map((t) => `${t.role}: ${fenceCandidate(t.text, 2000)}`)
@@ -471,6 +486,8 @@ export function buildScoringPrompt(
           return `- turn ${flag.turnIndex} (interviewer): this question was likely never heard by the candidate — do NOT count it as unanswered, dodged, or ignored.`;
         case 'abandoned_mandatory_cq':
           return `- turn ${flag.turnIndex} (interviewer): "${flag.excerpt}" — the candidate ended the interview before answering this mandatory follow-up; do NOT count it as an unanswered probe.`;
+        case 'second_voice_turn':
+          return `- turn ${flag.turnIndex} (candidate): "${flag.excerpt}" — audio contains overheard third-party speech (another person in the room), NOT the candidate speaking; do NOT attribute this content to the candidate's ability, communication, or integrity.`;
       }
     });
     systemFailureLine =

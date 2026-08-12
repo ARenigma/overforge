@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ServerBargeIn,
+  ServerIntegrity,
   ServerReady,
   ServerThinking,
   ServerTurnReady,
@@ -29,6 +30,9 @@ interface UseVoiceSocketOptions {
   onBargeIn: (cue: ServerBargeIn) => void;
   /** Called when all retry attempts are exhausted — caller reverts to typed mode. */
   onFatal: () => void;
+  /** Called when the server pushes an integrity event (e.g. second_voice detected by VAD).
+   *  Optional — unknown integrity kinds must be tolerated gracefully. */
+  onIntegrity?: (cue: ServerIntegrity) => void;
 }
 
 export type SocketStatus = 'disconnected' | 'connecting' | 'ready' | 'failed';
@@ -57,6 +61,7 @@ export function useVoiceSocket({
   onClosing,
   onBargeIn,
   onFatal,
+  onIntegrity,
 }: UseVoiceSocketOptions): UseVoiceSocketResult {
   const [socketStatus, setSocketStatus] = useState<SocketStatus>('disconnected');
 
@@ -73,6 +78,7 @@ export function useVoiceSocket({
   const onClosingRef = useRef(onClosing);
   const onBargeInRef = useRef(onBargeIn);
   const onFatalRef = useRef(onFatal);
+  const onIntegrityRef = useRef(onIntegrity);
   const tokenRef = useRef(token);
 
   useEffect(() => {
@@ -96,6 +102,9 @@ export function useVoiceSocket({
   useEffect(() => {
     onFatalRef.current = onFatal;
   }, [onFatal]);
+  useEffect(() => {
+    onIntegrityRef.current = onIntegrity;
+  }, [onIntegrity]);
   useEffect(() => {
     tokenRef.current = token;
   }, [token]);
@@ -171,6 +180,10 @@ export function useVoiceSocket({
         case 'barge_in':
           onBargeInRef.current(cue);
           break;
+        case 'integrity':
+          onIntegrityRef.current?.(cue);
+          break;
+        // Unknown types are silently ignored — the socket must never break on forward-compat cues.
       }
     };
 

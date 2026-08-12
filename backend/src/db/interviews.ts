@@ -746,6 +746,45 @@ export async function getSecondVoiceSignals(
   };
 }
 
+/** Fetch 'second_voice' integrity signals with their timestamps for second_voice_turn flag
+ *  derivation in finishAndScore. Each row includes the exact creation time so the orchestrator
+ *  can correlate signals with answer events by timestamp proximity (±20 s window). */
+export async function getSecondVoiceSignalsTimestamped(
+  interviewId: string
+): Promise<Array<{ at: Date; durationMs: number }>> {
+  const db = createServiceClient();
+  const { data, error } = await db
+    .from('integrity_signals')
+    .select('created_at, duration_ms')
+    .eq('interview_id', interviewId)
+    .eq('kind', 'second_voice')
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(`getSecondVoiceSignalsTimestamped: ${error.message}`);
+  return ((data ?? []) as Array<{ created_at: string; duration_ms: number | null }>).map((r) => ({
+    at: new Date(r.created_at),
+    durationMs: r.duration_ms ?? 0,
+  }));
+}
+
+/** Fetch the creation timestamps of all 'answer' events for this interview, ordered ascending.
+ *  The Nth row (0-based) corresponds to the Nth candidate turn in the transcript, allowing
+ *  second_voice signals to be mapped to specific transcript turn indices. */
+export async function getAnswerEventsTimestamped(
+  interviewId: string
+): Promise<Array<{ createdAt: Date }>> {
+  const db = createServiceClient();
+  const { data, error } = await db
+    .from('interview_events')
+    .select('created_at')
+    .eq('interview_id', interviewId)
+    .eq('kind', 'answer')
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(`getAnswerEventsTimestamped: ${error.message}`);
+  return ((data ?? []) as Array<{ created_at: string }>).map((r) => ({
+    createdAt: new Date(r.created_at),
+  }));
+}
+
 // ─────────────────────── Outbox store implementation ───────────────────────
 
 /** Insert a pending outbox row for the given interview. */

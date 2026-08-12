@@ -81,6 +81,8 @@ import {
   makeOutboxStore,
   getProctorSignalsForInterview,
   getSecondVoiceSignals,
+  getSecondVoiceSignalsTimestamped,
+  getAnswerEventsTimestamped,
   updateLastRunIntervention,
   clearLastRunInterventionPending,
   Interview,
@@ -91,7 +93,7 @@ import { RunRequest, RunResult } from '../execution/types';
 import { SampleResults } from './types';
 import { withCostContext } from '../cost/context';
 import { recordExecCost, rollupInterview } from '../cost/ledger';
-import { scoreInterview, CodeRunSummary } from '../scoring/scorer';
+import { scoreInterview, CodeRunSummary, SystemFlag } from '../scoring/scorer';
 import { Scorecard } from '../scoring/types';
 import { drainOutbox } from '../notify/outbox';
 import { createEmailSender } from '../notify/resend';
@@ -416,10 +418,15 @@ async function maybeAnswerClarification(
   }
   if (result.intent !== 'question' || !result.reply?.text) return null; // real answer → normal path
 
-  // D3: repeat guard — the clarify reply must not re-tread the interviewer's prior questions.
-  // The primary fix is CLARIFIER_SYSTEM (D6b): this is a structural backstop that falls back
-  // to the deterministic safe redirect when the LLM reply clusters with prior questions.
-  if (isSemanticRepeat(result.reply.text, priorAiQuestions(interview.transcript ?? []))) {
+  // D3 + Fix 6: repeat guard for clarify replies — check against ALL prior interviewer turns,
+  // not just those with '?'. Clarify replies are advice turns (no '?') so priorAiQuestions would
+  // miss them, allowing two consecutive clarify turns to echo the same canned advice.
+  // The DeterministicOracle.classifyAndAnswer fallback rotates by clarifyCount so the second
+  // call always returns a different text.
+  const allPriorInterviewer = (interview.transcript ?? [])
+    .filter((t) => t.role === 'interviewer')
+    .map((t) => t.text);
+  if (isSemanticRepeat(result.reply.text, allPriorInterviewer.length > 0 ? allPriorInterviewer : priorAiQuestions(interview.transcript ?? []))) {
     console.log(
       `[repeat-guard] fired interview=${interview.id} effect=clarify action=fallback`
     );
@@ -614,6 +621,27 @@ async function maybeHandleApproach(
     engagementEnabled: interventionsEnabled(),
   });
   if (!gateDecision.gate) return null;
+
+  // Substance guard (Fix 1): a genuine approach plan needs ≥8 words AND must arrive ≥5 s after
+  // ask_code was shown. A stale STT tail (e.g. "risks. So we had a full JSON schema for this.")
+  // arriving in <3 s cannot be a real plan — the candidate hasn't had time to read the problem.
+  // Non-qualifying answers get a brief coding_ack WITHOUT closing the gate.
+  const MIN_APPROACH_WORDS = 8;
+  const MIN_APPROACH_ELAPSED_MS = 5_000;
+  const wordCount = answer.trim().split(/\s+/).filter(Boolean).length;
+  const codeAskedAt = ctx.codeAskedAt ?? 0;
+  const elapsedSinceAsk = codeAskedAt > 0 ? Date.now() - codeAskedAt : Infinity;
+
+  if (wordCount < MIN_APPROACH_WORDS || elapsedSinceAsk < MIN_APPROACH_ELAPSED_MS) {
+    // Gate stays OPEN — do not set codeApproachDone. Return a brief non-question ack.
+    const ackText = 'Got it — take your time.';
+    await appendEvent(interview.id, 'utterance', { text: ackText, approach_rejected: true });
+    return {
+      utterance: { text: ackText, expects: 'code' as const },
+      phase: ctx.phase,
+      state: ctx, // gate NOT closed — codeApproachDone remains false
+    };
+  }
 
   // Evaluate the approach (does it warrant a counter-question?).
   let decision: import('./types').OracleDecision | undefined;
@@ -1275,6 +1303,13 @@ export async function submitAnswer(
         newCtx.clarifyCount = 0;
         newCtx.hintOffer = undefined;
       }
+      // When advancing to a new coding problem, reset per-problem ack rotation and approach state.
+      if (effect.kind === 'ask_code') {
+        newCtx.codingAckCount = 0;
+        newCtx.approachReminderFired = false;
+        // Stamp when ask_code was shown so the approach-gate substance guard can check elapsed time.
+        newCtx.codeAskedAt = Date.now();
+      }
 
       // Record the candidate's answer as an event.
       await appendEvent(interviewId, 'answer', {
@@ -1322,6 +1357,30 @@ export async function submitAnswer(
           phase: 'done',
           state: newCtx,
         };
+      }
+
+      // Fix 2: coding_ack is ALWAYS deterministic — the oracle must NEVER be called for it.
+      // Prod evidence (2026-08-12): LLM-worded acks re-asked the plan 4× while the candidate coded.
+      // Rotate through a small pool so consecutive acks differ; append a one-time approach reminder
+      // (at most once per problem, while the gate is still open) to keep the floor without nagging.
+      if (effect.kind === 'coding_ack') {
+        const CODING_ACK_POOL = [
+          "Got it — keep going; let me know when you want to run it.",
+          "Sure — take your time.",
+          "Okay, I'm here — run it whenever you're ready.",
+        ] as const;
+        const ackCount = ctx.codingAckCount ?? 0;
+        let ackText: string = CODING_ACK_POOL[ackCount % CODING_ACK_POOL.length];
+        // Spread to avoid mutating the ctx object returned by advance (which is the same ref).
+        const ackCtx: InterviewContext = { ...newCtx, codingAckCount: ackCount + 1 };
+        // One-time gentle reminder before the approach is done — fires at most once per problem.
+        if (!ctx.codeApproachDone && !ctx.approachReminderFired) {
+          ackText += " Whenever you're ready, I'd still love the one-line plan.";
+          ackCtx.approachReminderFired = true;
+        }
+        const ackUtterance: Utterance = { text: ackText, expects: 'code' };
+        await persistTransition(interview, ackCtx, effect, ackUtterance, answerText, requestId);
+        return { utterance: ackUtterance, phase: ackCtx.phase, state: ackCtx };
       }
 
       const transcriptWithAnswer: TranscriptTurn[] = [
@@ -1517,6 +1576,8 @@ export async function submitAnswer(
         }
         // The chained coding intro is the one cue the candidate must never miss (D1).
         askCodeUtterance = await ensureSectionCue(oracle, askCodeReq, askCodeUtterance, interviewId);
+        // Stamp ask_code timing so the approach-gate substance guard can check elapsed time.
+        codingCtx.codeAskedAt = Date.now();
         // Persist the chained ask_code transition (no candidate answer; no requestId so
         // idempotency is not double-applied on retry — the handoff persist already wrote it).
         await persistTransition(freshInterview, codingCtx, askCodeEffect, askCodeUtterance);
@@ -1990,6 +2051,18 @@ export async function nudgeInterview(
     };
     try {
       await appendCodeRunOnly(interviewId, idleRun);
+      // Fix 5b: persist the nudge as an interviewer transcript turn so it is auditable in the
+      // full conversation log. The idle-check-in was previously only stored in code_runs (as a
+      // synthetic Idle row) and an utterance event — both invisible to transcript readers.
+      const nudgeTranscript: TranscriptTurn[] = [
+        ...(fresh.transcript ?? []),
+        {
+          role: 'interviewer' as const,
+          text: safeText,
+          assist: { kind: decision.kind as import('./types').InterventionKind, strength: 0 },
+        },
+      ];
+      await updateInterview(interviewId, { transcript: nudgeTranscript });
       recordInterventionFired(interviewId);
       await appendEvent(interviewId, 'utterance', {
         text: safeText,
@@ -2311,6 +2384,51 @@ async function attachRunIntervention(
   }
 }
 
+/** Map second_voice integrity signals to specific candidate transcript turns (±20 s window).
+ *  The Nth answer event (sorted ascending by created_at) corresponds to the Nth candidate turn
+ *  in the transcript. Returns SystemFlags of kind 'second_voice_turn' so the scorer excludes
+ *  those turns from all judgments (overheard third-party audio, not the candidate's speech). */
+export function deriveSecondVoiceFlags(
+  signals: Array<{ at: Date; durationMs: number }>,
+  answerEvents: Array<{ createdAt: Date }>,
+  transcript: TranscriptTurn[]
+): SystemFlag[] {
+  const flags: SystemFlag[] = [];
+  const WINDOW_MS = 20_000;
+
+  for (const signal of signals) {
+    // Find the answer event whose timestamp is closest to the signal within ±20 s.
+    let bestIdx = -1;
+    let bestDiff = Infinity;
+    for (let i = 0; i < answerEvents.length; i++) {
+      const diff = Math.abs(answerEvents[i].createdAt.getTime() - signal.at.getTime());
+      if (diff <= WINDOW_MS && diff < bestDiff) {
+        bestDiff = diff;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx < 0) continue;
+
+    // Map the Nth answer event (0-based) to the Nth candidate turn in the full transcript.
+    let candidateCount = -1;
+    for (let i = 0; i < transcript.length; i++) {
+      if (transcript[i].role === 'candidate') {
+        candidateCount++;
+        if (candidateCount === bestIdx) {
+          flags.push({
+            turnIndex: i,
+            kind: 'second_voice_turn',
+            excerpt: transcript[i].text.slice(0, 120),
+          });
+          break;
+        }
+      }
+    }
+  }
+
+  return flags;
+}
+
 export async function finishAndScore(
   interviewId: string,
   opts: {
@@ -2423,6 +2541,22 @@ export async function finishAndScore(
     );
   }
 
+  // Fix 4: compute per-turn second_voice_turn SystemFlags — identifies the specific transcript
+  // turns containing overheard third-party audio so the scorer excludes them from all judgments.
+  let secondVoiceSystemFlags: SystemFlag[] = [];
+  try {
+    if (secondVoiceData && secondVoiceData.turnCount > 0) {
+      const svSignals = await getSecondVoiceSignalsTimestamped(interviewId);
+      const answerEvents = await getAnswerEventsTimestamped(interviewId);
+      secondVoiceSystemFlags = deriveSecondVoiceFlags(svSignals, answerEvents, interview.transcript ?? []);
+    }
+  } catch (err) {
+    console.error(
+      `[orchestrator] second-voice flag derivation failed for ${interviewId} (non-fatal):`,
+      err
+    );
+  }
+
   const durationSeconds = interview.tnc_accepted_at
     ? Math.round((Date.now() - new Date(interview.tnc_accepted_at).getTime()) / 1000)
     : undefined;
@@ -2439,6 +2573,7 @@ export async function finishAndScore(
         integritySignals: secondVoiceData,
         problemSlugs: interview.coding_problem_ids ?? [],
         durationSeconds,
+        additionalSystemFlags: secondVoiceSystemFlags.length > 0 ? secondVoiceSystemFlags : undefined,
       },
       minimaxClient
     )

@@ -89,6 +89,15 @@ class WsTtsSink:
         if event is not None:
             event.set()
 
+    async def integrity(self, kind: str) -> None:
+        """Send an integrity signal to the room (e.g. second-voice detected by shadow diarization).
+
+        Called fire-and-forget from ``VoiceSession._safe_integrity_signal``; a failure here is
+        already exception-isolated in the caller.  Delegates to ``_safe_send`` so a broken/closed
+        socket never propagates.
+        """
+        await self._safe_send({"type": "integrity", "kind": kind})
+
     async def _safe_send(self, payload: dict[str, object]) -> None:
         """Send a cue; a closed/broken socket is non-fatal (the turn loop must not crash on it)."""
         try:

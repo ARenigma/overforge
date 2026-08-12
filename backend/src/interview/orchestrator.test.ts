@@ -146,6 +146,15 @@ jest.mock('../db/interviews', () => {
       }
       return count;
     }),
+    // Fix 4: second-voice timestamp helpers — return empty arrays in the offline test environment
+    // (no integrity signals are recorded by the in-memory mock, so no flags are derived).
+    getSecondVoiceSignalsTimestamped: jest.fn(async (_id: string) => []),
+    getAnswerEventsTimestamped: jest.fn(async (_id: string) => []),
+    // Fix 4: aggregate second-voice summary (used by finishAndScore to decide if flagging is needed)
+    getSecondVoiceSignals: jest.fn(async (_id: string) => ({
+      turnCount: 0,
+      totalDurationMs: 0,
+    })),
   };
 });
 
@@ -857,5 +866,147 @@ describe('getSpectateView', () => {
     await orch.getSpectateView(id, 'owner-5');
     const rowAfter = JSON.stringify(await db.getById(id));
     expect(rowAfter).toBe(rowBefore);
+  });
+});
+
+// ─────────── Forensics-2026-08-12 Fix 1: approach-gate substance guard ───────────────────────
+// Root cause: a 10-word stale STT fragment arriving <3 s after ask_code closed the approach gate
+// before the candidate could read the problem. Fix: gate closes only when answer has ≥ 8 words
+// AND arrives ≥ 5 s after codeAskedAt.
+
+describe('Fix 1 — approach-gate substance guard', () => {
+  const OLD_EI = process.env.ENGAGEMENT_INTERVENTIONS;
+
+  beforeAll(() => {
+    // The approach gate is only active when ENGAGEMENT_INTERVENTIONS is on.
+    process.env.ENGAGEMENT_INTERVENTIONS = '1';
+  });
+
+  afterAll(() => {
+    if (OLD_EI === undefined) delete process.env.ENGAGEMENT_INTERVENTIONS;
+    else process.env.ENGAGEMENT_INTERVENTIONS = OLD_EI;
+  });
+
+  // 3 long answers reaches coding cleanly via D1 chain (greeting → oral0 → oral1 → handoff+ask_code).
+  // A 4th verbal answer with no intent would emit coding_ack and dirty the approach gate state.
+  async function toCodingFresh(): Promise<string> {
+    const { id } = await orch.createInterview({
+      interviewerId: 'u-fix1',
+      candidateEmail: 'fix1@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true });
+    // 3 answers: greeting→oral(0), oral(0)→oral(1), oral(1)→handoff+D1→coding
+    for (let i = 0; i < 3; i++) await orch.submitAnswer(id, longAnswer);
+    return id;
+  }
+
+  test('10-word answer submitted immediately after ask_code does NOT close the approach gate', async () => {
+    const id = await toCodingFresh();
+    // codeAskedAt was just stamped — elapsed ≈ 0 ms < 5 000 ms → timing guard fires
+    const tenWords = 'I will use a hash map for fast lookups here'; // 10 words
+    await orch.submitAnswer(id, tenWords, undefined, 'answer');
+    const row = await db.getById(id);
+    const ctx = (row as { fsm_state: { codeApproachDone?: boolean } }).fsm_state;
+    expect(ctx.codeApproachDone).toBeFalsy(); // gate must remain open
+  });
+
+  test('20-word plan submitted >5 s after ask_code closes the approach gate', async () => {
+    const id = await toCodingFresh();
+    // Backdate codeAskedAt so elapsed = 30 s — well above the 5 s threshold
+    const row = await db.getById(id);
+    (row as { fsm_state: { codeAskedAt: number } }).fsm_state.codeAskedAt = Date.now() - 30_000;
+    const plan =
+      'I plan to use a hash map to track character frequencies then iterate over the string to compare in O of n time with O of k space'; // 23 words
+    await orch.submitAnswer(id, plan, undefined, 'answer');
+    const updated = await db.getById(id);
+    const ctx = (updated as { fsm_state: { codeApproachDone?: boolean } }).fsm_state;
+    expect(ctx.codeApproachDone).toBe(true); // gate closed
+  });
+});
+
+// ─────────── Forensics-2026-08-12 Fix 2: deterministic coding_ack pool rotation ─────────────
+// Root cause: the LLM was generating coding_acks that re-asked the approach ("Okay — can you
+// give me your high-level plan?"). Fix: pool of 3 deterministic acks rotated by codingAckCount.
+
+describe('Fix 2 — coding_ack deterministic pool rotation', () => {
+  // 3 long answers → coding (D1 chain). codingAckCount=undefined(0), approachReminderFired=false.
+  // Then SUBMIT → mandatory CQ (followUps=1). Then 'short verbal' → followUps=2 (=cap).
+  // Any further verbal → coding_ack, starting at pool[0].
+  async function toCodingAtCapFresh(): Promise<string> {
+    const { id } = await orch.createInterview({
+      interviewerId: 'u-fix2',
+      candidateEmail: 'fix2@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true });
+    // 3 answers: greeting→oral(0)→oral(1)→handoff+D1→coding. No verbal in coding yet.
+    for (let i = 0; i < 3; i++) await orch.submitAnswer(id, longAnswer);
+    // mandatory CQ → followUps = 1; codingAckCount stays 0
+    await orch.submitAnswer(id, '', undefined, 'submit', 'def f(): pass');
+    // short verbal → followUp=true → followUps = 2 (= codeMaxFollowUps cap); codingAckCount stays 0
+    await orch.submitAnswer(id, 'short verbal', undefined, 'answer');
+    // further verbal answers now yield coding_ack starting at pool[0]
+    return id;
+  }
+
+  test('three consecutive verbal answers at budget cap produce three different ack texts', async () => {
+    const id = await toCodingAtCapFresh();
+    const r1 = await orch.submitAnswer(id, 'still working', undefined, 'answer');
+    const r2 = await orch.submitAnswer(id, 'almost there', undefined, 'answer');
+    const r3 = await orch.submitAnswer(id, 'one more sec', undefined, 'answer');
+    expect(r1.utterance.text).not.toBe(r2.utterance.text);
+    expect(r2.utterance.text).not.toBe(r3.utterance.text);
+    expect(r3.utterance.text).not.toBe(r1.utterance.text);
+  });
+
+  test('approach reminder appears only on the FIRST ack, never on subsequent ones', async () => {
+    const id = await toCodingAtCapFresh();
+    const reminderPhrase = "I'd still love the one-line plan";
+    // First coding_ack: gate still open (codeApproachDone=false), reminder not yet fired
+    const r1 = await orch.submitAnswer(id, 'thinking', undefined, 'answer');
+    // Second coding_ack: approachReminderFired=true — must NOT repeat
+    const r2 = await orch.submitAnswer(id, 'still thinking', undefined, 'answer');
+    expect(r1.utterance.text).toContain(reminderPhrase);
+    expect(r2.utterance.text).not.toContain(reminderPhrase);
+  });
+});
+
+// ─────────── Forensics-2026-08-12 Fix 5b: idle nudge persists a transcript turn ─────────────
+// Root cause: idle nudges were stored only in code_runs (as synthetic Idle rows) and an
+// utterance event — invisible to transcript readers. Fix: persist as interviewer transcript turn.
+
+describe('Fix 5b — idle nudge persists to transcript', () => {
+  const OLD_IDLE = process.env.IDLE_NUDGE_ENABLED;
+
+  beforeAll(() => {
+    process.env.IDLE_NUDGE_ENABLED = '1';
+  });
+
+  afterAll(() => {
+    if (OLD_IDLE === undefined) delete process.env.IDLE_NUDGE_ENABLED;
+    else process.env.IDLE_NUDGE_ENABLED = OLD_IDLE;
+  });
+
+  test('nudgeInterview appends an interviewer transcript turn with assist.strength === 0', async () => {
+    const { id } = await orch.createInterview({
+      interviewerId: 'u-fix5b',
+      candidateEmail: 'fix5b@example.com',
+    });
+    await orch.begin(id, { tncAccepted: true });
+    for (let i = 0; i < 4; i++) await orch.submitAnswer(id, longAnswer); // → coding
+
+    const transcriptBefore = ((await db.getById(id)) as { transcript: unknown[] }).transcript ?? [];
+    const result = await orch.nudgeInterview(id, 200); // codeLength=200 → 'partial' idle mode
+    if (result.intervention === null) {
+      // Nudge was gated off (e.g. pendingOffer, lastRunPassed) — skip assertion
+      return;
+    }
+    const transcriptAfter = ((await db.getById(id)) as {
+      transcript: Array<{ role: string; text: string; assist?: { strength: number } }>;
+    }).transcript ?? [];
+    expect(transcriptAfter.length).toBe(transcriptBefore.length + 1);
+    const lastTurn = transcriptAfter[transcriptAfter.length - 1];
+    expect(lastTurn.role).toBe('interviewer');
+    expect(lastTurn.text).toBeTruthy();
+    expect(lastTurn.assist?.strength).toBe(0);
   });
 });

@@ -75,8 +75,9 @@ import { ProblemDock } from '@/components/interview/problem-dock';
 import { StageModal } from '@/components/interview/stage-modal';
 import { useVoiceMic } from '@/lib/voice/use-voice-mic';
 import { useVoiceSocket } from '@/lib/voice/use-voice-socket';
-import type { ServerBargeIn, ServerReady, ServerTurnReady } from '@/lib/voice/types';
+import type { ServerBargeIn, ServerIntegrity, ServerReady, ServerTurnReady } from '@/lib/voice/types';
 import { useCameraProctor } from '@/lib/proctor/use-camera-proctor';
+import { useFocusSignals } from '@/lib/proctor/use-focus-signals';
 
 const VOICE_WS_URL = process.env.NEXT_PUBLIC_VOICE_WS_URL ?? '';
 
@@ -513,6 +514,26 @@ export default function InterviewPage() {
   const [pasteBlocked, setPasteBlocked] = useState(false);
   const pasteHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Integrity warning banner (fixes 2, 3, 4) ─────────────────────────────────
+  // Non-blocking amber banner surfaced for camera multi-face, second-voice, and
+  // tab-blur events. Auto-dismisses after 10 s. Shared across all three sources.
+  const [integrityBannerText, setIntegrityBannerText] = useState<string | null>(null);
+  const integrityDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Camera multi-face: shown at most 2 times per session.
+  const multiFaceWarnCountRef = useRef(0);
+
+  // Show the integrity warning banner (camera/voice/focus events). Replaces any currently
+  // visible banner and resets the 10 s auto-dismiss timer. Declared early so it is available
+  // to the useCameraProctor and useVoiceSocket call-site callbacks below.
+  const showIntegrityWarning = useCallback((text: string) => {
+    if (integrityDismissTimerRef.current) clearTimeout(integrityDismissTimerRef.current);
+    setIntegrityBannerText(text);
+    integrityDismissTimerRef.current = setTimeout(() => {
+      setIntegrityBannerText(null);
+      integrityDismissTimerRef.current = null;
+    }, 10_000);
+  }, []);
+
   // ── Voice (P2-B.4b) ──────────────────────────────────────────────────────────
   // voiceMode: true = browser is in spoken-interview mode (WS + mic active).
   // Automatically entered when NEXT_PUBLIC_VOICE_WS_URL is set and the mic is granted.
@@ -561,9 +582,14 @@ export default function InterviewPage() {
   // without stale-closure risk. Set eagerly in ack handlers; also synced via useEffect.
   const codingModalOpenRef = useRef(false);
   const wrapUpModalOpenRef = useRef(false);
-  // Utterance held while a stage modal blocks the screen — released when the modal is acked.
-  // text is optional: typed-path callers don't pass text (speak() re-fetches from server).
-  const heldUtteranceRef = useRef<{ source: 'turn' | 'run'; text?: string } | null>(null);
+  // FIFO queue of utterances held while a stage modal blocks the screen.
+  // Invariant: speakOrHold pushes to the tail while the modal is up; the modal ack handler drains
+  // from the head in order, awaiting each speak before starting the next. New arrivals during a
+  // drain are appended and consumed by the same running loop — never dropped, never clobbered.
+  // (Prior single-slot design lost the handoff-ack and problem-intro when they arrived <4 s apart.)
+  const heldUtterancesRef = useRef<{ source: 'turn' | 'run'; text?: string }[]>([]);
+  // Guard: at most one drain loop runs at a time — prevents interleaved concurrent plays.
+  const drainActiveRef = useRef(false);
   // Coding modal escalation timer refs (30 s → note; 90 s → telemetry, see effect comment).
   const escalation30Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
   const escalation90Ref = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -622,7 +648,17 @@ export default function InterviewPage() {
     cameraState,
     start: startCamera,
     stop: stopCamera,
-  } = useCameraProctor({ interviewId: id, token: activeToken });
+  } = useCameraProctor({
+    interviewId: id,
+    token: activeToken,
+    onMultiFace: useCallback(() => {
+      if (multiFaceWarnCountRef.current >= 2) return;
+      multiFaceWarnCountRef.current += 1;
+      showIntegrityWarning(
+        "Another person was detected on camera — this session is monitored. Please make sure you're alone."
+      );
+    }, [showIntegrityWarning]),
+  });
 
   // Stop proctoring when the interview ends.
   useEffect(() => {
@@ -846,6 +882,22 @@ export default function InterviewPage() {
     }, 8_000);
   }, [phase, codingMeta.index, codingMeta.total]);
 
+  // Drain the held-utterance FIFO queue: speak each item in order, awaiting completion
+  // before starting the next. New items pushed to the queue mid-drain (e.g. a stray
+  // follow-up arrives while the handoff ack is playing) are consumed by the same loop.
+  const drainHeldUtterances = useCallback(async () => {
+    if (drainActiveRef.current) return; // already draining — new items will be consumed
+    drainActiveRef.current = true;
+    try {
+      while (heldUtterancesRef.current.length > 0) {
+        const next = heldUtterancesRef.current.shift()!;
+        await speakRef.current?.(next.source, undefined, next.text);
+      }
+    } finally {
+      drainActiveRef.current = false;
+    }
+  }, []);
+
   // Acknowledge handlers — clear escalation timers and return focus to transcript log.
   const handleCodingModalAck = useCallback(() => {
     if (escalation30Ref.current) {
@@ -857,25 +909,21 @@ export default function InterviewPage() {
       escalation90Ref.current = null;
     }
     setCodingEscalationNote(undefined);
-    // Clear ref eagerly — before releasing the held utterance — so speakOrHold's next
-    // call (if any) sees the modal as closed and doesn't re-hold it.
+    // Clear ref eagerly — before draining the queue — so speakOrHold's next call (if any)
+    // sees the modal as closed and pushes directly to speak() rather than back into the queue.
     codingModalOpenRef.current = false;
     setCodingModalOpen(false);
-    // Release any utterance that was held while the modal blocked the screen.
-    const held = heldUtteranceRef.current;
-    heldUtteranceRef.current = null;
-    if (held) void speakRef.current?.(held.source, undefined, held.text);
+    // Drain all utterances that queued while the modal was blocking, in FIFO order.
+    void drainHeldUtterances();
     requestAnimationFrame(() => transcriptLogRef.current?.focus());
-  }, []);
+  }, [drainHeldUtterances]);
 
   const handleWrapUpModalAck = useCallback(() => {
     wrapUpModalOpenRef.current = false;
     setWrapUpModalOpen(false);
-    const held = heldUtteranceRef.current;
-    heldUtteranceRef.current = null;
-    if (held) void speakRef.current?.(held.source, undefined, held.text);
+    void drainHeldUtterances();
     requestAnimationFrame(() => transcriptLogRef.current?.focus());
-  }, []);
+  }, [drainHeldUtterances]);
 
   // Route an utterance through the active stage-modal gate. If a coding or wrap-up modal is
   // currently blocking the screen, hold the utterance and return immediately — the modal's ack
@@ -910,7 +958,9 @@ export default function InterviewPage() {
         typeof sessionStorage !== 'undefined' &&
         !sessionStorage.getItem(`of_stage_wrapup_${id}`);
       if (alreadyBlocked || codingAboutToOpen || wrapUpAboutToOpen) {
-        heldUtteranceRef.current = { source, text };
+        // Enqueue rather than overwrite — multiple utterances may arrive during the modal
+        // (handoff-ack, problem-intro, stray reply) and all must be played in order.
+        heldUtterancesRef.current.push({ source, text });
         return Promise.resolve();
       }
       return (
@@ -1070,6 +1120,13 @@ export default function InterviewPage() {
     }, [stopMic]),
     onBargeIn: handleVoiceBargeIn,
     onFatal: handleVoiceFatal,
+    onIntegrity: useCallback((cue: ServerIntegrity) => {
+      if (cue.kind === 'second_voice') {
+        showIntegrityWarning(
+          "A second voice was detected — please make sure you're alone; this is recorded."
+        );
+      }
+    }, [showIntegrityWarning]),
   });
 
   // Wire the ref so the mic onFrame callback can call sendFrame.
@@ -1090,6 +1147,18 @@ export default function InterviewPage() {
       setVoiceSocketEnabled(false);
     }
   }, [micState]);
+
+  // ── Fix 4: tab-switch / blur integrity signals ────────────────────────────────
+  // Listens to window blur/focus + visibilitychange. When the candidate is away ≥ 1500 ms,
+  // fires a fire-and-forget integrity POST and shows a deterrence banner (max 3 per session).
+  // Active only during stage=interview; phases greeting..wrap_up only (enforced inside hook).
+  useFocusSignals({
+    interviewId: id,
+    token: activeToken,
+    phase,
+    active: stage === 'interview',
+    onAway: showIntegrityWarning,
+  });
 
   // Scroll to bottom whenever messages change
   useEffect(() => {
@@ -1376,6 +1445,17 @@ export default function InterviewPage() {
   async function handleEndInterview() {
     if (!activeToken || concludeCalledRef.current) return;
     concludeCalledRef.current = true;
+
+    // ── Kill all capture immediately — the interview is over for the candidate. ──
+    // Order: mic state → mic hardware → server notify → socket → camera.
+    // The goodbye TTS runs via REST /speak-stream and does NOT depend on the voice socket.
+    setMicForwarding(false);
+    stopMic();
+    sendMicOffRef.current?.();
+    setVoiceMode(false);
+    setVoiceSocketEnabled(false);
+    stopCamera();
+
     // Show a brief transitional state so the exit doesn't feel like an abrupt cut.
     setStage('finishing');
     // Finn says goodbye BEFORE /finish — after it the interview is scored and the speak
@@ -2110,6 +2190,20 @@ export default function InterviewPage() {
           className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-foreground shadow-lg"
         >
           Pasting is disabled for this interview.
+        </div>
+      )}
+
+      {/* Integrity warning banner — camera multi-face, second-voice, and tab-blur events.
+          Non-blocking (role="status" aria-live polite); auto-dismisses after 10 s.
+          Shown max 2 times for camera events, max 3 for blur; second-voice is uncapped. */}
+      {integrityBannerText && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="integrity-warning"
+          className="fixed left-1/2 top-4 z-50 -translate-x-1/2 max-w-md w-[calc(100%-2rem)] rounded-md border border-warning/40 bg-warning/10 px-4 py-2.5 text-xs font-medium text-warning shadow-lg"
+        >
+          {integrityBannerText}
         </div>
       )}
 

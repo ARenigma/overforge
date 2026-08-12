@@ -1033,6 +1033,69 @@ router.post('/:id/proctor', async (req: Request, res: Response): Promise<void> =
   }
 });
 
+// ─────────────────────── POST /api/interviews/:id/integrity ───────────────────────
+// Candidate-originated discrete integrity signals (browser-side events). Accepts ONLY the three
+// client-safe kinds — 'second_voice' and other server-side kinds are rejected at this route.
+// Auth: validateCandidate (same as /proctor). Rate-limited generously (60/10min per token).
+
+/** Integrity signal kinds that the candidate browser is authorised to send. Server-side kinds
+ *  (e.g. 'second_voice', written by the voice pipeline) are never accepted from the client. */
+export const CANDIDATE_INTEGRITY_KINDS = new Set(['blur', 'hidden', 'fullscreen_exit'] as const);
+
+router.post('/:id/integrity', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { token, kind, durationMs, detail } = req.body as {
+      token?: string;
+      kind?: unknown;
+      durationMs?: unknown;
+      detail?: unknown;
+    };
+
+    await validateCandidate(id, token ?? '');
+    await enforceRateLimit(`candintegrity:${hashToken(token ?? '')}`, {
+      limit: 60,
+      windowMs: 600_000,
+    });
+
+    if (typeof kind !== 'string' || !CANDIDATE_INTEGRITY_KINDS.has(kind as never)) {
+      res.status(400).json({
+        error: `kind must be one of: ${[...CANDIDATE_INTEGRITY_KINDS].join(', ')}`,
+      });
+      return;
+    }
+
+    const toNum = (v: unknown): number | null => {
+      if (v == null) return null;
+      const n = Number(v);
+      return isFinite(n) ? Math.max(0, n) : null;
+    };
+
+    let safeDetail: Record<string, unknown> | undefined;
+    if (detail != null) {
+      if (typeof detail !== 'object' || Array.isArray(detail)) {
+        res.status(400).json({ error: 'detail must be a plain object' });
+        return;
+      }
+      if (JSON.stringify(detail).length > 2048) {
+        res.status(413).json({ error: 'detail is too large (max 2 KB)' });
+        return;
+      }
+      safeDetail = detail as Record<string, unknown>;
+    }
+
+    await recordIntegritySignal(id, {
+      kind,
+      durationMs: toNum(durationMs),
+      detail: safeDetail,
+    });
+
+    res.status(204).end();
+  } catch (err) {
+    sendError(res, err);
+  }
+});
+
 // ─────────────────────── POST /api/interviews/:id/integrity-signal ───────────────────────
 // Durable sink for discrete integrity signals emitted by the browser proctoring module.
 // The frontend has no Supabase credentials; it POSTs here and the backend writes the row.

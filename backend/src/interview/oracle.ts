@@ -49,8 +49,9 @@ export interface EvaluateRequest {
 /** Deterministic, CODE-ANCHORED counter-question for the mandatory-CQ fallback (B5). Extracts a
  *  salient construct from the submitted code and asks about it, so even with the LLM down the
  *  question cites something the candidate actually wrote — an overlay tool that only heard the
- *  problem statement cannot answer it. Wording is derived from the code (no RNG) for testability. */
-function codeAnchoredProbe(code?: string): string {
+ *  problem statement cannot answer it. `counter` (ctx.followUps) drives template rotation so the
+ *  same code state on consecutive follow-ups never returns the same text. */
+function codeAnchoredProbe(code?: string, counter?: number): string {
   const src = (code ?? '').trim();
   if (!src) {
     return 'Before we move on — walk me through your overall approach and its time complexity, step by step.';
@@ -71,8 +72,27 @@ function codeAnchoredProbe(code?: string): string {
     `Walk me through ${anchor}: what happens on an empty input, or the largest input the constraints allow?`,
     `About ${anchor} — why did you choose it over the alternatives, and what's the trade-off?`,
   ];
-  return templates[src.length % templates.length];
+  // Use the supplied counter (ctx.followUps) so the same code state on two consecutive follow-ups
+  // yields different templates. Fall back to src.length only when no counter is available.
+  return templates[(counter !== undefined ? counter : src.length) % templates.length];
 }
+
+/** Non-mandatory counter_question pool — rotated by ctx.followUps so verbatim repeats across
+ *  consecutive follow-ups are impossible. The deterministic fallback must never return the same
+ *  canned string twice in a row (root cause of the 2026-08-12 verbatim dupe). */
+const COUNTER_QUESTION_POOL = [
+  'Before we move on — what makes you confident that approach is correct?',
+  'Walk me through why this approach handles the edge cases — what input would break it?',
+  'Zoom out: what are the time and space trade-offs of what you have right now?',
+] as const;
+
+/** Safe rotating pool for the deterministic clarify fallback. Rotated by ctx.clarifyCount so two
+ *  consecutive clarify turns never echo the same advice back. */
+const CLARIFY_FALLBACK_POOL = [
+  "Go with a reasonable assumption and state it out loud — I'm more interested in your reasoning than in one exact reading of the prompt.",
+  "Pick the interpretation you feel is most natural and code for that — just mention your assumption briefly as you go.",
+  "Trust your reading of it and proceed — your thought process matters more than a single correct interpretation.",
+] as const;
 
 export interface InterventionRequest {
   kind: InterventionKind;
@@ -262,12 +282,18 @@ export class DeterministicOracle implements Oracle {
     }
     // B5: the mandatory counter-question must stay CODE-ANCHORED even without the LLM (429/timeout),
     // else it degrades to a generic "explain your approach" that an overlay tool can answer.
+    // Use ctx.followUps as the rotation counter so the same code on consecutive follow-ups yields
+    // a different template (fix for the 2026-08-12 verbatim-dupe root cause).
     // expects:'voice' — the counter-question demands a spoken answer.
     if (req.mandatory) {
-      return { text: codeAnchoredProbe(req.code), expects: 'voice' };
+      return { text: codeAnchoredProbe(req.code, req.ctx.followUps), expects: 'voice' };
     }
+    // Non-mandatory counter_question: rotate by ctx.followUps so two consecutive non-mandatory
+    // counter_questions CANNOT produce verbatim-identical text (root cause of the prod dupe).
+    const counterQuestion =
+      COUNTER_QUESTION_POOL[req.ctx.followUps % COUNTER_QUESTION_POOL.length];
     const canned: Record<InterventionKind, string> = {
-      counter_question: 'Before we move on — what makes you confident that approach is correct?',
+      counter_question: counterQuestion,
       probe: "Hmm, walk me through what you expected to happen versus what you're actually seeing.",
       hint: 'Take another look at your edge cases — what happens at the boundaries of your input?',
       nudge: "Talk me through where you're at — what are you trying right now?",
@@ -293,13 +319,11 @@ export class DeterministicOracle implements Oracle {
       );
     if (!isQuestion) return { intent: 'answer' };
     // expects:'voice' — clarifying replies invite the candidate to SPEAK their answer/assumption.
-    // In voice mode, expects:'code' would kill the mic; see voice-deafness fix.
+    // Rotate by clarifyCount so two consecutive clarify turns don't echo the same advice.
+    const clarifyText = CLARIFY_FALLBACK_POOL[(req.ctx.clarifyCount ?? 0) % CLARIFY_FALLBACK_POOL.length];
     return {
       intent: 'question',
-      reply: {
-        text: "Go with a reasonable assumption and state it out loud — I'm more interested in your reasoning than in one exact reading of the prompt.",
-        expects: 'voice',
-      },
+      reply: { text: clarifyText, expects: 'voice' },
     };
   }
 }

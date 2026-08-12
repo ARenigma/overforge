@@ -37,7 +37,10 @@ from session import (  # noqa: E402
     _BARGE_IN_MIN_VOICED_FRAMES,
     _BARGE_IN_PROTECTION_FRAMES,
     _MAX_TURN_FRAMES,
+    _STALE_TAIL_WINDOW_S,
     _looks_incomplete,
+    _prev_ended_mid_sentence,
+    _tail_reads_as_continuation,
     VoiceSession,
 )
 
@@ -2089,4 +2092,486 @@ async def test_no_shadows_yields_empty_shadow_snapshots() -> None:
     assert rec.shadow_snapshots == ()
     assert rec.shadow_engine is None
     assert rec.shadow_transcript is None
+    await session.aclose()
+
+
+# ─────────────────────────── Fix 1: stale-tail quarantine ────────────────────────────────────────
+#
+# Design: when a commit arrives within _STALE_TAIL_WINDOW_S of the last re-arm AND is short
+# (≤ _STALE_TAIL_MAX_WORDS words OR ≤ _STALE_TAIL_MAX_AUDIO_S) AND reads as a continuation of
+# the previous dispatched transcript (prev ended mid-sentence OR tail starts lowercase/connective),
+# it is quarantined: logged as commit='stale_tail' empty=True, then dropped with a re-arm.
+# A genuinely new short answer ("No.", "Yes, run it.") after a properly-terminated previous turn
+# satisfies neither continuation heuristic and is never quarantined.
+
+
+# ── module-level helper unit tests ──────────────────────────────────────────────────────────────
+
+def test_prev_ended_mid_sentence_detects_cut_transcripts() -> None:
+    """Transcripts ending without terminal punctuation look like they were split mid-sentence."""
+    # Cut mid-word (the exact prod case — last char is 'v')
+    assert _prev_ended_mid_sentence("the semantic extraction output forward was v") is True
+    # Ends with comma (common in a list cut mid-sentence)
+    assert _prev_ended_mid_sentence("concerns, next steps,") is True
+    # Ends with a plain word (no punctuation at all)
+    assert _prev_ended_mid_sentence("I used a hash map") is True
+    # Properly terminated — must return False
+    assert _prev_ended_mid_sentence("I used a hash map.") is False
+    assert _prev_ended_mid_sentence("Really?") is False
+    assert _prev_ended_mid_sentence("Go for it!") is False
+    # Empty / whitespace only
+    assert _prev_ended_mid_sentence("") is False
+    assert _prev_ended_mid_sentence("   ") is False
+
+
+def test_tail_reads_as_continuation_classifies_fragments() -> None:
+    """A fragment starting lowercase or with a connective reads as a continuation."""
+    # Prod exact fragment: starts with lowercase 'r' in "risks."
+    assert _tail_reads_as_continuation("risks. So we had a full JSON schema for this.") is True
+    # Starts with a connective word
+    assert _tail_reads_as_continuation("and then I processed it.") is True
+    assert _tail_reads_as_continuation("so that was the design.") is True
+    assert _tail_reads_as_continuation("because we needed fast lookups.") is True
+    # Uppercase opener that is NOT a connective → not a continuation
+    assert _tail_reads_as_continuation("No.") is False
+    assert _tail_reads_as_continuation("Yes, run it.") is False
+    assert _tail_reads_as_continuation("I used a hash map.") is False
+    # Empty
+    assert _tail_reads_as_continuation("") is False
+
+
+# ── VoiceSession stale-tail integration tests ────────────────────────────────────────────────────
+
+def _stale_tail_session(
+    first_transcript: str,
+    second_transcript: str,
+    *,
+    second_fire_after: int = 2,
+) -> tuple[VoiceSession, FakeTelemetrySink, FakeBrain]:
+    """Build a session with two successive commits; return the session, telemetry, and brain."""
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT(first_transcript)
+    brain = FakeBrain(
+        results=[
+            AnswerResult(Utterance("next question", "voice"), "oral", {}),
+            AnswerResult(Utterance("follow-up", "voice"), "oral", {}),
+        ]
+    )
+    tel = FakeTelemetrySink()
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        telemetry=tel,
+    )
+    return session, tel, brain
+
+
+async def test_stale_tail_prod_exact_fragment_quarantined() -> None:
+    """The exact forensics fragment from 2026-08-12 c189caeb must be quarantined.
+
+    Previous transcript: ends with 'v' (no terminal punct → mid-sentence).
+    Tail: "risks. So we had a full JSON schema for this." (starts lowercase, 10 words, 0.064s).
+    """
+    # Turn 1: dispatch a real answer whose transcript ends mid-word (no terminal punct).
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("the semantic extraction output forward was v")
+    brain = FakeBrain(results=[AnswerResult(Utterance("q2", "voice"), "oral", {})])
+    tel = FakeTelemetrySink()
+    session = VoiceSession(
+        interview_id="iv1", session_token="tok", endpointer=ep, stt=stt, brain=brain, telemetry=tel
+    )
+    await _drive(session, 5)
+    session.arm_next_turn()  # _recover() → _last_rearm_at set
+
+    # Turn 2: stale tail — 2 frames = 0.064 s audio, starts lowercase.
+    ep2 = FakeEndpointer(fire_after=2)
+    session._endpointer = ep2
+    stt.transcript = "risks. So we had a full JSON schema for this."
+    turn2 = await _drive(session, 2)
+
+    await asyncio.sleep(0)  # flush background tasks
+
+    assert turn2 is None, "stale tail must be quarantined (not returned as a turn)"
+    assert session.state == "listening", "session must stay LISTENING after quarantine"
+    assert len(brain.calls) == 1, "stale tail must NOT reach the brain"
+    assert session.take_rearm() is True, "browser must be told to re-arm after quarantine"
+
+    # Telemetry: the stale tail must be logged with commit='stale_tail' and empty=True.
+    # There are 2 telemetry records (one per commit including the real turn 1).
+    stale_records = [r for r in tel.records if r.commit == "stale_tail"]
+    assert len(stale_records) == 1
+    rec = stale_records[0]
+    assert rec.empty is True
+    assert rec.phase == "stale_tail"
+
+
+async def test_stale_tail_no_not_quarantined() -> None:
+    """'No.' arriving within the window after a PROPERLY-ENDED previous turn is not a stale tail."""
+    ep = FakeEndpointer(fire_after=5)
+    # Previous transcript ends with '.' → _prev_ended_mid_sentence = False.
+    stt = FakeSTT("I would use a hash map for O(1) lookup.")
+    brain = FakeBrain(results=[
+        AnswerResult(Utterance("q2", "voice"), "oral", {}),
+        AnswerResult(Utterance("q3", "voice"), "oral", {}),
+    ])
+    session = VoiceSession(
+        interview_id="iv1", session_token="tok", endpointer=ep, stt=stt, brain=brain
+    )
+    await _drive(session, 5)
+    session.arm_next_turn()
+
+    # "No." — uppercase 'N', not a connective → _tail_reads_as_continuation = False.
+    ep2 = FakeEndpointer(fire_after=2)
+    session._endpointer = ep2
+    stt.transcript = "No."
+    turn2 = await _drive(session, 2)
+
+    assert turn2 is not None, "'No.' must dispatch normally — NOT quarantined"
+    assert len(brain.calls) == 2
+
+
+async def test_stale_tail_yes_run_it_not_quarantined() -> None:
+    """'Yes, run it.' after a properly-ended turn must dispatch normally."""
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("The service queried in real time.")
+    brain = FakeBrain(results=[
+        AnswerResult(Utterance("q2", "voice"), "oral", {}),
+        AnswerResult(Utterance("q3", "voice"), "oral", {}),
+    ])
+    session = VoiceSession(
+        interview_id="iv1", session_token="tok", endpointer=ep, stt=stt, brain=brain
+    )
+    await _drive(session, 5)
+    session.arm_next_turn()
+
+    ep2 = FakeEndpointer(fire_after=2)
+    session._endpointer = ep2
+    stt.transcript = "Yes, run it."
+    turn2 = await _drive(session, 2)
+
+    assert turn2 is not None, "'Yes, run it.' must dispatch normally — NOT quarantined"
+    assert len(brain.calls) == 2
+
+
+async def test_stale_tail_outside_window_not_quarantined(monkeypatch) -> None:
+    """A stale-looking commit arriving AFTER _STALE_TAIL_WINDOW_S must dispatch normally."""
+    # Shrink window to 0 so even an immediate follow-up is outside it.
+    monkeypatch.setattr("session._STALE_TAIL_WINDOW_S", 0.0)
+
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("the semantic extraction output forward was v")
+    brain = FakeBrain(results=[
+        AnswerResult(Utterance("q2", "voice"), "oral", {}),
+        AnswerResult(Utterance("q3", "voice"), "oral", {}),
+    ])
+    session = VoiceSession(
+        interview_id="iv1", session_token="tok", endpointer=ep, stt=stt, brain=brain
+    )
+    await _drive(session, 5)
+    session.arm_next_turn()
+
+    ep2 = FakeEndpointer(fire_after=2)
+    session._endpointer = ep2
+    stt.transcript = "risks. So we had a full JSON schema for this."
+    turn2 = await _drive(session, 2)
+
+    assert turn2 is not None, "outside the window → dispatches normally"
+    assert len(brain.calls) == 2
+
+
+async def test_stale_tail_long_commit_not_quarantined() -> None:
+    """A commit exceeding BOTH word and audio thresholds is substantial — must dispatch normally."""
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("the semantic extraction output forward was v")
+    brain = FakeBrain(results=[
+        AnswerResult(Utterance("q2", "voice"), "oral", {}),
+        AnswerResult(Utterance("q3", "voice"), "oral", {}),
+    ])
+    session = VoiceSession(
+        interview_id="iv1", session_token="tok", endpointer=ep, stt=stt, brain=brain
+    )
+    await _drive(session, 5)
+    session.arm_next_turn()
+
+    # 200 frames = 200 * 512 / 16000 = 6.4 s > 2.5 s; transcript > 10 words → substantial.
+    ep2 = FakeEndpointer(fire_after=200)
+    session._endpointer = ep2
+    stt.transcript = (
+        "risks so we had a full JSON schema for this which improved consistency significantly"
+    )
+    turn2 = await _drive(session, 200)
+
+    assert turn2 is not None, "substantial commit (>words AND >audio) must dispatch normally"
+    assert len(brain.calls) == 2
+
+
+async def test_stale_tail_no_first_dispatch_cannot_be_stale() -> None:
+    """The very first commit can never be a stale tail (_last_rearm_at == 0)."""
+    ep = FakeEndpointer(fire_after=2)
+    # Short and starts lowercase — would be quarantined if there were a previous dispatch.
+    stt = FakeSTT("risks. So we had a full JSON schema for this.")
+    brain = FakeBrain(results=[AnswerResult(Utterance("q2", "voice"), "oral", {})])
+    session = VoiceSession(
+        interview_id="iv1", session_token="tok", endpointer=ep, stt=stt, brain=brain
+    )
+    turn = await _drive(session, 2)
+
+    assert turn is not None, "first-ever commit must never be quarantined"
+    assert len(brain.calls) == 1
+
+
+async def test_stale_tail_telemetry_commit_kind() -> None:
+    """Quarantined stale tail must be logged with commit='stale_tail' and empty=True."""
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("the semantic extraction output forward was v")
+    brain = FakeBrain(results=[AnswerResult(Utterance("q2", "voice"), "oral", {})])
+    tel = FakeTelemetrySink()
+    session = VoiceSession(
+        interview_id="iv1", session_token="tok", endpointer=ep, stt=stt, brain=brain, telemetry=tel
+    )
+    await _drive(session, 5)
+    session.arm_next_turn()
+
+    ep2 = FakeEndpointer(fire_after=2)
+    session._endpointer = ep2
+    stt.transcript = "risks. So we had a full JSON schema for this."
+    await _drive(session, 2)
+    await asyncio.sleep(0)  # flush fire-and-forget telemetry task
+
+    stale = [r for r in tel.records if r.commit == "stale_tail"]
+    assert len(stale) == 1
+    assert stale[0].empty is True
+    assert stale[0].oracle_ms is None
+    assert stale[0].tts_ms is None
+
+
+async def test_stale_tail_lowercase_continuation_without_prev_cut() -> None:
+    """A commit starting lowercase is quarantined even if the prev transcript ended properly.
+
+    _tail_reads_as_continuation is sufficient on its own — both heuristics are OR'd.
+    """
+    ep = FakeEndpointer(fire_after=5)
+    stt = FakeSTT("I used a hash map.")  # ends with '.' → _prev_ended_mid_sentence = False
+    brain = FakeBrain(results=[AnswerResult(Utterance("q2", "voice"), "oral", {})])
+    session = VoiceSession(
+        interview_id="iv1", session_token="tok", endpointer=ep, stt=stt, brain=brain
+    )
+    await _drive(session, 5)
+    session.arm_next_turn()
+
+    ep2 = FakeEndpointer(fire_after=2)
+    session._endpointer = ep2
+    # Starts with lowercase 'r' → reads as continuation even though prev ended properly.
+    stt.transcript = "retrieval augmented approach."
+    turn2 = await _drive(session, 2)
+
+    assert turn2 is None, "lowercase-start commit must be quarantined regardless of prev ending"
+    assert len(brain.calls) == 1
+
+
+# ─────────────────────────── Fix 2: second-voice live cue to the room ────────────────────────────
+#
+# Design: when _log_turn collects shadow snapshots and any snapshot has speaker_count >= 2,
+# fire _safe_integrity_signal("second_voice") — a fire-and-forget background task that calls
+# sink.integrity("second_voice") if the sink supports it (WsTtsSink does; NoopTtsSink does not).
+# At most ONE message per real (non-empty) turn; sink failure never affects the turn.
+
+
+class _IntegrityCaptureSink:
+    """TtsSink + integrity() that records every integrity call for assertions."""
+
+    def __init__(self, *, raises: bool = False) -> None:
+        self.spoken: list[TurnResult] = []
+        self.integrity_calls: list[str] = []
+        self._raises = raises
+
+    async def speak(self, turn: TurnResult) -> float | None:
+        self.spoken.append(turn)
+        return None
+
+    async def on_thinking(self) -> None:
+        pass
+
+    async def integrity(self, kind: str) -> None:
+        if self._raises:
+            raise RuntimeError("integrity sink exploded")
+        self.integrity_calls.append(kind)
+
+
+class _SpeakerCountShadow(_FakeShadow):
+    """_FakeShadow variant that returns a fixed speaker_count in its snapshot."""
+
+    def __init__(self, engine: str, *, speaker_count: int | None) -> None:
+        super().__init__(engine, "shadow text")
+        self._speaker_count = speaker_count
+
+    def take_snapshot(self) -> ShadowSnapshot:
+        return ShadowSnapshot(
+            transcript=self._transcript,
+            stt_ms=50.0,
+            endpoint_ms=None,
+            endpoint_count=0,
+            speaker_count=self._speaker_count,
+        )
+
+
+def _integrity_session(
+    shadow: _SpeakerCountShadow,
+    sink: _IntegrityCaptureSink,
+    *,
+    fire_after: int = 3,
+) -> VoiceSession:
+    ep = FakeEndpointer(fire_after=fire_after)
+    stt = FakeSTT("candidate answer")
+    brain = FakeBrain(results=[AnswerResult(Utterance("reply", "voice"), "oral", {})])
+    return VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        sink=sink,
+        shadows=[shadow],  # type: ignore[arg-type]
+    )
+
+
+async def test_second_voice_speaker_count_2_sends_integrity_message() -> None:
+    """A shadow snapshot with speaker_count=2 must emit one integrity/second_voice WS message."""
+    shadow = _SpeakerCountShadow("soniox", speaker_count=2)
+    sink = _IntegrityCaptureSink()
+    session = _integrity_session(shadow, sink)
+
+    await _drive(session, 3)
+    await asyncio.sleep(0)  # flush fire-and-forget tasks (integrity + telemetry)
+    await asyncio.sleep(0)
+
+    assert sink.integrity_calls == ["second_voice"], (
+        "exactly one 'second_voice' integrity message must be sent"
+    )
+    await session.aclose()
+
+
+async def test_second_voice_speaker_count_1_no_integrity_message() -> None:
+    """A shadow snapshot with speaker_count=1 (single speaker) must NOT send an integrity message."""
+    shadow = _SpeakerCountShadow("soniox", speaker_count=1)
+    sink = _IntegrityCaptureSink()
+    session = _integrity_session(shadow, sink)
+
+    await _drive(session, 3)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert sink.integrity_calls == [], "single speaker must not trigger an integrity message"
+    await session.aclose()
+
+
+async def test_second_voice_speaker_count_none_no_integrity_message() -> None:
+    """A snapshot with speaker_count=None (diarization unavailable) must not send a message."""
+    shadow = _SpeakerCountShadow("deepgram", speaker_count=None)
+    sink = _IntegrityCaptureSink()
+    session = _integrity_session(shadow, sink)
+
+    await _drive(session, 3)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert sink.integrity_calls == []
+    await session.aclose()
+
+
+async def test_second_voice_sink_raise_turn_unaffected() -> None:
+    """If sink.integrity() raises, the turn must still complete normally — fire-and-forget."""
+    shadow = _SpeakerCountShadow("soniox", speaker_count=2)
+    sink = _IntegrityCaptureSink(raises=True)
+    session = _integrity_session(shadow, sink)
+
+    turn = await _drive(session, 3)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert turn is not None, "turn must complete even when integrity() raises"
+    assert session.state == "speaking", "session must not be bricked by an integrity sink failure"
+    await session.aclose()
+
+
+async def test_second_voice_at_most_one_per_turn_two_shadows() -> None:
+    """When two shadows BOTH report speaker_count=2, only ONE integrity message must be sent."""
+    sh_a = _SpeakerCountShadow("soniox", speaker_count=2)
+    sh_b = _SpeakerCountShadow("deepgram", speaker_count=3)
+    sink = _IntegrityCaptureSink()
+    ep = FakeEndpointer(fire_after=3)
+    stt = FakeSTT("answer")
+    brain = FakeBrain(results=[AnswerResult(Utterance("reply", "voice"), "oral", {})])
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        sink=sink,
+        shadows=[sh_a, sh_b],  # type: ignore[arg-type]
+    )
+
+    await _drive(session, 3)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert sink.integrity_calls == ["second_voice"], (
+        "two shadows both reporting multiple speakers must still yield exactly ONE message"
+    )
+    await session.aclose()
+
+
+async def test_second_voice_no_message_on_empty_turn() -> None:
+    """An empty / false-fire commit (empty=True) must NOT trigger an integrity message."""
+    shadow = _SpeakerCountShadow("soniox", speaker_count=2)
+    sink = _IntegrityCaptureSink()
+    ep = FakeEndpointer(fire_after=3)
+    stt = FakeSTT("   ")  # whitespace → empty transcript → false-fire
+    brain = FakeBrain()
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        sink=sink,
+        shadows=[shadow],  # type: ignore[arg-type]
+    )
+
+    await _drive(session, 3)
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert sink.integrity_calls == [], (
+        "false-fire (empty=True) must not trigger a second-voice integrity message"
+    )
+    await session.aclose()
+
+
+async def test_second_voice_no_sink_integrity_method_is_silently_ignored() -> None:
+    """When the sink has no integrity() method (e.g. NoopTtsSink), the call is a no-op."""
+    shadow = _SpeakerCountShadow("soniox", speaker_count=2)
+    # NoopTtsSink has no integrity() method.
+    ep = FakeEndpointer(fire_after=3)
+    stt = FakeSTT("answer")
+    brain = FakeBrain(results=[AnswerResult(Utterance("reply", "voice"), "oral", {})])
+    session = VoiceSession(
+        interview_id="iv1",
+        session_token="tok",
+        endpointer=ep,
+        stt=stt,
+        brain=brain,
+        shadows=[shadow],  # type: ignore[arg-type]
+        # sink= omitted → NoopTtsSink, which has no integrity()
+    )
+
+    # Must not raise — the hasattr guard in _safe_integrity_signal handles this silently.
+    turn = await _drive(session, 3)
+    await asyncio.sleep(0)
+
+    assert turn is not None
     await session.aclose()

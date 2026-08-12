@@ -126,6 +126,28 @@ _DANGLING_TAIL = frozenset(
     }
 )
 
+# Stale-tail quarantine: after a long turn commit, AssemblyAI sometimes delivers a short trailing
+# fragment on the NEXT listening window. Without this guard the fragment is submitted as the answer
+# to the just-asked follow-up question, burning that gate on garbage.
+# See forensics 2026-08-12 interview c189caeb, timeline lines 34-56.
+_STALE_TAIL_WINDOW_S = 4.0      # max seconds after re-arm for a commit to be a stale-tail candidate
+_STALE_TAIL_MAX_WORDS = 10      # ≤ this word count makes a commit "short" (OR with audio length)
+_STALE_TAIL_MAX_AUDIO_S = 2.5   # ≤ this audio length (s) makes a commit "short"
+# Connectives that commonly begin a dependent clause — a commit starting with one is a strong sign
+# it is the tail end of a previous utterance rather than a new answer.
+_CONTINUATION_STARTERS: frozenset[str] = frozenset(
+    {
+        "and", "but", "or", "so", "because", "since", "if", "when", "while", "that", "which",
+        "with", "to", "for", "of", "as", "then", "than", "from", "also", "though", "yet", "nor",
+    }
+)
+# Minimum word count the PREVIOUS dispatched transcript must have before the stale-tail
+# continuation heuristics are applied. A very short previous answer (≤ 4 words — test
+# transcripts like "ans", "first answer", or the empty string after a fatal fallback) cannot
+# have been an AAI-split long answer; the heuristics would only produce false positives there.
+# Real prod answers that AAI splits are 10-s+ utterances — comfortably above this floor.
+_STALE_TAIL_MIN_PREV_WORDS = 5
+
 # Known STT silence-hallucinations. faster-whisper invents filler like "thank you" / "you" / "bye"
 # on near-silent or noise-only audio; the bare ``if not transcript`` check only catches the empty
 # string, so these would otherwise render as a candidate turn (the "I said nothing but 'thank you'
@@ -199,6 +221,34 @@ def _continues(held: str, nxt: str) -> bool:
     if not held_toks or len(nxt_toks) <= len(held_toks):
         return False
     return nxt_toks[: len(held_toks)] == held_toks or held_toks[0] == nxt_toks[0]
+
+def _prev_ended_mid_sentence(text: str) -> bool:
+    """True if ``text`` was cut before a sentence boundary (no terminal punctuation at end).
+
+    Used by the stale-tail guard to detect whether the PREVIOUS turn's transcript was split
+    mid-sentence by the STT provider, making any short follow-up commit suspicious.
+    """
+    stripped = text.rstrip()
+    return bool(stripped) and stripped[-1] not in ".!?;:…"
+
+
+def _tail_reads_as_continuation(text: str) -> bool:
+    """True if ``text`` reads as the tail of a previous sentence rather than a new thought.
+
+    Two signals, either sufficient:
+      * First alphabetic character is lowercase — AAI capitalises true sentence starts, so a
+        lowercase opener means the fragment was torn from the middle of an utterance.
+      * First word is a connective / conjunction (``_CONTINUATION_STARTERS``) that opens a
+        dependent clause rather than a standalone answer.
+    """
+    for ch in text:
+        if ch.isalpha():
+            if ch.islower():
+                return True
+            break  # uppercase first char — fall through to connective check
+    toks = re.findall(r"[a-z']+", text.lower())
+    return bool(toks) and toks[0] in _CONTINUATION_STARTERS
+
 
 # Backend FSM phases that mean the interview is over. The backend normalizes every terminal path to
 # 'done'; 'scoring' is accepted defensively in case a transitional state ever leaks through.
@@ -348,6 +398,11 @@ class VoiceSession:
         self._barge_in_enabled: bool = os.environ.get("BARGE_IN_ENABLED", "1") == "1"
         self._frame_q: asyncio.Queue[AudioArray] | None = None
         self._barge_in_occurred: bool = False
+        # Stale-tail quarantine. _last_rearm_at is set in _recover() so _is_stale_tail can measure
+        # elapsed time since the previous re-arm; _last_dispatched_transcript holds the previous
+        # real turn's transcript for the mid-sentence continuation check.
+        self._last_rearm_at: float = 0.0
+        self._last_dispatched_transcript: str = ""
 
     @property
     def state(self) -> str:
@@ -606,6 +661,41 @@ class VoiceSession:
     def _stream_mode(self) -> bool:
         """True while the remote streamer is the active STT/turn-detection path."""
         return self._streamer is not None and not self._streamer.failed and not self._fell_back
+
+    def _is_stale_tail(self, transcript: str, audio_s: float) -> bool:
+        """True when this commit looks like the trailing fragment of a previous AAI turn split.
+
+        AssemblyAI sometimes delivers a long answer as two events: the main commit (which
+        advances the FSM), then a short trailing fragment that arrives seconds later on the NEXT
+        listening window.  Without this guard the fragment is dispatched to the brain as the
+        candidate's answer to the just-asked follow-up question, burning that gate on garbage.
+
+        All three conditions must hold simultaneously:
+          1. Within ``_STALE_TAIL_WINDOW_S`` of the last re-arm (the fragment arrives soon after
+             the previous turn completed and the session was re-armed).
+          2. Short: ≤ ``_STALE_TAIL_MAX_WORDS`` words OR ≤ ``_STALE_TAIL_MAX_AUDIO_S``; genuine
+             new answers to a freshly-asked question are longer.
+          3. Reads as a continuation: the previous transcript ended mid-sentence (no terminal
+             punctuation) OR this fragment starts with a lowercase char / connective word.
+
+        A genuinely new short answer (``"No."``, ``"Yes, run it."``) after a properly-terminated
+        previous turn satisfies neither continuation heuristic and is never quarantined.
+        """
+        if self._last_rearm_at == 0.0:
+            return False  # no previous turn to be the tail of
+        elapsed = time.monotonic() - self._last_rearm_at
+        if elapsed > _STALE_TAIL_WINDOW_S:
+            return False  # outside the quarantine window
+        word_count = len(re.findall(r"[a-z0-9']+", transcript.lower()))
+        if word_count > _STALE_TAIL_MAX_WORDS and audio_s > _STALE_TAIL_MAX_AUDIO_S:
+            return False  # substantial commit — not a stale tail
+        prev_word_count = len(re.findall(r"[a-z0-9']+", self._last_dispatched_transcript.lower()))
+        if prev_word_count < _STALE_TAIL_MIN_PREV_WORDS:
+            return False  # previous answer too short to have been an AAI-split long utterance
+        return (
+            _prev_ended_mid_sentence(self._last_dispatched_transcript)
+            or _tail_reads_as_continuation(transcript)
+        )
 
     async def _ensure_streamer_started(self) -> None:
         """Start the streamer once; a failed start flips the session to the local path."""
@@ -928,6 +1018,32 @@ class VoiceSession:
             self._rearm_pending = True  # browser was disarmed by {thinking}; tell it to re-arm
             return None
 
+        # ── Stale-tail quarantine ──────────────────────────────────────────────────────────────
+        # AAI sometimes splits a long answer mid-sentence: the main commit advances the FSM and
+        # is re-armed, then a short trailing fragment arrives on the FRESH listening window and
+        # would otherwise be dispatched as the candidate's answer to the just-asked question,
+        # burning that gate on garbage. Drop it, re-arm, request a browser mic re-arm.
+        # See forensics 2026-08-12 interview c189caeb: "risks. So we had a full JSON schema for
+        # this." (audio_s=1.056) arrived 3 s after the 64 s oral-answer commit was re-armed.
+        if self._is_stale_tail(transcript, audio_s):
+            logger.info(
+                "voice.stale_tail rid=%s audio_s=%.2fs — quarantining trailing fragment %r",
+                rid,
+                audio_s,
+                transcript[:60],
+            )
+            self._log_turn(
+                rid, "stale_tail", audio_s, stt_ms, None, None, "stale_tail",
+                transcript=transcript, empty=True,
+            )
+            self._recover()
+            self._rearm_pending = True
+            return None
+
+        # Track the dispatched transcript so the NEXT turn's stale-tail guard can compare against
+        # it.  Updated here (after all drop checks pass) so only genuine answers are stored.
+        self._last_dispatched_transcript = transcript
+
         request_id = self._request_id
         t_stt = time.perf_counter()
         try:
@@ -1041,6 +1157,14 @@ class VoiceSession:
         # The FIRST shadow populates the legacy single-shadow columns (backward-compat for old
         # queries); all shadows appear in shadow_snapshots for the new voice_turn_shadows table.
         raw_snaps = self._collect_shadow_snapshots()
+        # Second-voice integrity signal: when any shadow diarization snapshot reports ≥ 2 distinct
+        # speaker labels in a real (non-empty) turn, notify the room once — fire-and-forget, same
+        # isolation discipline as telemetry.  At most ONE message per turn (any() short-circuits).
+        if not empty and any(
+            sn.speaker_count is not None and sn.speaker_count >= 2
+            for _, sn in raw_snaps
+        ):
+            self._safe_integrity_signal("second_voice")
         shadow_items = tuple(
             ShadowTelemetryItem(
                 engine=eng,
@@ -1228,6 +1352,27 @@ class VoiceSession:
         self._bg_tasks.add(task)
         task.add_done_callback(self._bg_tasks.discard)
 
+    def _safe_integrity_signal(self, kind: str) -> None:
+        """Fire an integrity WS message as a fire-and-forget background task.
+
+        ``WsTtsSink`` exposes an ``integrity(kind)`` method; ``NoopTtsSink`` does not — the
+        ``hasattr`` guard makes this a silent no-op in headless / test mode.  A failure inside
+        the sink must NEVER propagate: same isolation discipline as ``_safe_telemetry``.
+        """
+        sink = self._sink
+        if not hasattr(sink, "integrity"):
+            return
+
+        async def _run() -> None:
+            try:
+                await sink.integrity(kind)  # type: ignore[union-attr]
+            except Exception:
+                logger.exception("Integrity signal (%s) failed — continuing.", kind)
+
+        task = asyncio.create_task(_run(), name=f"integrity-{kind}-{self._request_id}")
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+
     def arm_next_turn(self) -> None:
         """Arm for the next candidate turn. Call AFTER TTS has finished voicing the utterance.
 
@@ -1330,6 +1475,8 @@ class VoiceSession:
         ``new_request_id=False`` preserves the current id so a transient retry can still hit the
         server's idempotent replay (don't double-submit an answer that may have been processed).
         """
+        # Record re-arm time so _is_stale_tail can measure the elapsed window on the next commit.
+        self._last_rearm_at = time.monotonic()
         self._accum.clear()
         self._committed_text = ""
         self._committed_frames = 0

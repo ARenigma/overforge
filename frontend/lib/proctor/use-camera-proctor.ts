@@ -24,6 +24,9 @@ interface WindowAccumulator {
 interface UseCameraProctorOptions {
   interviewId: string;
   token: string | null;
+  /** Called when a reporting window records maxFaces ≥ 2 or multiFaceMs ≥ 2000 ms.
+   *  Only fires when the interview has an active token. Use to surface a deterrent banner. */
+  onMultiFace?: () => void;
 }
 
 interface UseCameraProctorResult {
@@ -60,6 +63,7 @@ const WINDOW_MS = 15_000;
 export function useCameraProctor({
   interviewId,
   token,
+  onMultiFace,
 }: UseCameraProctorOptions): UseCameraProctorResult {
   const [cameraState, setCameraState] = useState<CameraState>('idle');
 
@@ -83,6 +87,10 @@ export function useCameraProctor({
   // token from a LIVE ref — otherwise the interval keeps the stale (null) token and the
   // `samples > 0 && token` guard never fires a POST (the bug that produced zero signals).
   const tokenRef = useRef<string | null>(token);
+  const onMultiFaceRef = useRef(onMultiFace);
+  useEffect(() => {
+    onMultiFaceRef.current = onMultiFace;
+  }, [onMultiFace]);
   useEffect(() => {
     const hadToken = tokenRef.current != null && tokenRef.current !== '';
     tokenRef.current = token;
@@ -125,6 +133,10 @@ export function useCameraProctor({
         maxFaces: acc.maxFaces,
       });
       emptyFlushesRef.current = 0;
+      // Notify the room when a second face is detected in this window.
+      if (acc.maxFaces >= 2 || acc.multiFaceMs >= 2000) {
+        onMultiFaceRef.current?.();
+      }
     } else if (acc.samples === 0) {
       // No frames reached the detector this window. Warn once after ~2 empty windows so a
       // persistent capture failure is visible in the console without per-window log spam.

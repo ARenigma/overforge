@@ -444,6 +444,23 @@ export function sendProctorSignal(
 }
 
 /**
+ * POST /api/interviews/:id/integrity
+ * Fire-and-forget integrity signal for blur, tab-switch, and audio-side events.
+ * All errors are swallowed — must never block or surface to the candidate.
+ */
+export function sendIntegritySignal(
+  id: string,
+  token: string,
+  signal: { kind: string; durationMs?: number; detail?: Record<string, unknown> }
+): void {
+  fetch(`${BASE_URL}/api/interviews/${id}/integrity`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, ...signal }),
+  }).catch(() => undefined);
+}
+
+/**
  * POST /api/interviews/:id/speak (P1 — "the interviewer speaks")
  * Returns WAV audio for one sentence-chunk of the latest interviewer utterance (`source:'turn'`)
  * or the latest run-triggered hint (`source:'run'`), plus the total chunk count (X-Chunk-Count) so

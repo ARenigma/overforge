@@ -66,6 +66,17 @@ export interface InterviewContext {
    *  if the approach is thin; else a brief acknowledgment. Never increments followUps so the
    *  mandatory SUBMIT counter-question invariant is untouched. */
   codeApproachDone?: boolean;
+  /** Unix ms when `ask_code` was last persisted — used by the approach-gate substance guard to
+   *  require ≥5 s elapsed before a verbal answer can close the gate (a stale STT tail arriving
+   *  <5 s after the problem is shown cannot be a genuine approach plan). Reset per problem. */
+  codeAskedAt?: number;
+  /** Cumulative verbal coding_ack turns given for the current coding problem — drives the
+   *  rotating ack pool so consecutive acks never use the same text. Reset on problem advance. */
+  codingAckCount?: number;
+  /** True once the one-time approach reminder has been appended to a coding_ack for this
+   *  problem ("I'd still love the one-line plan"). At most one reminder per problem. Reset
+   *  on problem advance. */
+  approachReminderFired?: boolean;
   config: InterviewConfig;
 }
 
