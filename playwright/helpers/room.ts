@@ -309,7 +309,11 @@ export class CandidateRoom {
    * Needles target content/counts, not the phrase "hidden tests" itself.
    */
   async assertNoHiddenTestLeak(): Promise<void> {
-    const body = (await this.page.locator('body').innerText()).toLowerCase();
+    const raw = (await this.page.locator('body').innerText()).toLowerCase();
+    // SAMPLE-test outcomes are the problem's own public examples — legitimately shown to the
+    // candidate ("0/2 sample tests passed", "all 2 sample tests passed") since the run-truth
+    // fix. Strip those phrasings before scanning so the needles only catch HIDDEN-test leaks.
+    const body = raw.replace(/(?:all\s+)?\d*\s*\/?\s*\d*\s*sample tests? (?:passed|failed)/g, '');
     for (const needle of [
       '[hidden tests:', // internal scorer/run summary format
       'referencepython', // lowercased reference solution body
