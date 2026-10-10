@@ -88,3 +88,11 @@ eval/test_sample.*
 eval/*.wav
 eval/*.m4a
 eval/interview_results.json
+
+# secrets / data removed in history cleanup
+repomix-output.xml
+specstory.md
+.specstory/
+api_keys.rtf
+.env
+*.pem
